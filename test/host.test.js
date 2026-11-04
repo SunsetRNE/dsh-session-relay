@@ -160,8 +160,9 @@ test('拒绝：发给自己、发给子代理、子代理调用、坏目录', as
   const h = await setup()
   try {
     assert.match((await h.run(`${h.caller.id} hi`)).text, /不能发给自己/)
-    assert.match((await h.run(`${h.child.id} hi`)).text, /找不到会话/)
-    await assert.rejects(h.call('peer_list', {}, h.child), /子代理不能联系/)
+    // 自己的子代理：插件打不开子代理，让本会话用原生 send_message
+    assert.match((await h.run(`${h.child.id} hi`)).text, /你自己的子代理 cccccccc.*send_message/)
+    await assert.rejects(h.call('peer_line', { text: 'x' }, h.child), /只给根会话用/)
     assert.match((await h.run('new --cwd /definitely/missing x')).text, /工作目录不存在/)
   } finally { await h.cleanup() }
 })
@@ -1222,7 +1223,8 @@ test('peer_inspect：本工作区可看、工作区外拒绝（用户命令可�
     assert.match(await h.call('peer_inspect', { view: 'event', seq: 21 }), /EMPTY_RESPONSE/)
     await assert.rejects(h.call('peer_inspect', { view: 'event' }), /需要 seq/)
     await assert.rejects(h.call('peer_inspect', { session: outsider.id }), /不在本工作区.*\/relay inspect/)
-    await assert.rejects(h.call('peer_inspect', { session: 'bbbbbbbb' }, h.child), /子代理/)
+    // 子代理按根会话的工作区视角查看
+    assert.ok(typeof await h.call('peer_inspect', { session: 'bbbbbbbb' }, h.child) === 'string')
     const ws = await h.call('peer_inspect', { query: '协作', scope: 'workspace' })
     assert.match(ws, /扫描 2 个会话，2 个命中/)
     // 用户命令可以看工作区外的会话
@@ -1455,5 +1457,76 @@ test('peer_task：认领 / 拒抢 / 接手失效者 / 完成 / 登记 / 转交 /
     assert.deepEqual(events.map((event) => event.action), ['claim', 'done', 'takeover', 'new', 'handoff', 'release', 'claim', 'abandon', 'update'])
     assert.ok((await readdir(join(h.dir, '.agents/backups/ops'))).length >= 8)
     await assert.rejects(readFile(join(h.dir, '.agents/.tasks.lock')), /ENOENT/)
+  } finally { await h.cleanup() }
+})
+
+test('子代理通讯：树内经根会话转交；对外署名根会话、回复落根；别人的子代理经其根转交；特权不继承、认领记在根会话；树内限流', async () => {
+  const h = await setup()
+  try {
+    const sibling = h.makeAgent('ffffffff-0000-0000-0000-000000000006', { cwd: h.dir, depth: 1, status: 'running' })
+    h.agents.set(sibling.id, sibling)
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    const texts = (agent) => agent.inbox.map(([mode, message]) => ({ mode, text: message.content[0].text, source: message.source }))
+
+    const tree = await h.call('peer_list', {}, h.child)
+    assert.match(tree, /<session-tree root="aaaaaaaa-/)
+    assert.match(tree, /- cccccccc.*你自己/)
+    assert.match(tree, /- ffffffff.*运行中/)
+    assert.match(tree, /交给根会话.*send_message/)
+
+    // 树内：DSH 不让插件打开子代理，交给根会话转（根会话空闲就唤醒它来转）
+    assert.match(await h.call('peer_send', { target: 'ffffffff', message: '我这边接口改名了' }, h.child), /根会话 aaaaaaaa.*转交子代理 ffffffff/)
+    const got = texts(h.caller).at(-1)
+    assert.equal(got.mode, 'followup')
+    assert.match(got.text, /【请转给你的子代理 ffffffff[^】]*】.*子代理 cccccccc.*agent_id ffffffff-0000/s)
+    assert.match(got.text, /我这边接口改名了/)
+    assert.match(got.text, /要回它就用 send_message（agent_id cccccccc-/)
+    assert.match(got.text, /^\[来自本会话树里的 .*子代理 cccccccc/)
+    assert.equal(got.source.senderSessionId, h.child.id)
+    assert.equal(texts(sibling).length, 0)
+    await assert.rejects(h.call('peer_send', { target: 'cccccccc', message: 'x' }, h.child), /不能发给自己/)
+    await assert.rejects(h.call('peer_send', { target: 'ffffffff', message: 'x' }), /你自己的子代理 ffffffff.*send_message/)
+
+    // 对外：署名「根会话的子代理」，来源记根会话，回复提示指向根
+    await h.call('peer_send', { target: 'bbbbbbbb', message: '请看下 T3' }, h.child)
+    const out = texts(h.peer).at(-1)
+    assert.match(out.text, /来自平级会话 aaaaaaaa.* 的子代理 cccccccc/)
+    assert.match(out.text, /peer_send 发给 aaaaaaaa.*回复落在它的根会话/)
+    assert.equal(out.source.senderSessionId, h.caller.id)
+    await assert.rejects(h.call('peer_send', { target: h.caller.id, message: 'x' }, h.child), /直接作为最终回复/)
+
+    // 别人的子代理：交给它的根会话转交
+    const via = await h.call('peer_send', { target: 'cccccccc', message: '给你的子代理' }, h.peer)
+    assert.match(via, /转交子代理 cccccccc/)
+    assert.match(texts(h.caller).at(-1).text, /【转交给你的子代理 cccccccc/)
+    assert.equal(texts(h.child).length, 0)
+
+    // 汇报：根是主会话时拒绝；否则记在根会话条目上
+    await h.run('main here')
+    await assert.rejects(h.call('peer_report', { status: 'working', summary: 'x' }, h.child), /根会话就是主会话/)
+    await h.run('main here', h.peer)
+    await h.call('peer_report', { status: 'working', summary: '跑完一半' }, h.child)
+    assert.match(h.relay.coord.snapshot().board[h.caller.id].summary, /^［子代理 cccccccc］跑完一半/)
+
+    // 认领记在根会话；子代理不继承主会话特权
+    await h.run('main here')
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 任务 | 状态 |\n|---|---|---|\n| T1 | 一 | 待认领 |\n| T2 | 二 | 待认领 |\n')
+    assert.match(await h.call('peer_task', { action: 'claim', id: 'T1' }, h.child), /已认领 T1/)
+    assert.match(await readFile(join(h.dir, '.agents/claims/T1/owner'), 'utf8'), new RegExp(`^${h.caller.id}\\n`))
+    await h.call('peer_task', { action: 'claim', id: 'T2' }, h.peer)
+    await assert.rejects(h.call('peer_task', { action: 'update', id: 'T2', priority: 'P0' }, h.child), /持有者是/)
+    assert.match(await h.call('peer_task', { action: 'update', id: 'T2', priority: 'P0' }), /已更新 T2/) // 根会话（主会话）本身可以
+    const preview = await h.call('peer_tasks', { archive: 'preview' }, h.child)
+    assert.equal(typeof preview, 'string')
+    await assert.rejects(h.call('peer_tasks', { archive: 'apply', plan_id: 'aaaaaaaaaaaa' }, h.child), /子代理不能执行归档/)
+    await assert.rejects(h.call('peer_spawn', { task: 'x' }, h.child), /只给根会话用/)
+
+    // 树内限流按整棵树记
+    h.relay.guard.limits.tree = [2, 600_000, '在会话树内互发']
+    h.relay.guard.books.tree.clear()
+    await h.call('peer_send', { target: 'ffffffff', message: '1' }, h.child)
+    await h.call('peer_send', { target: 'cccccccc', message: '2' }, sibling)
+    await assert.rejects(h.call('peer_send', { target: 'ffffffff', message: '3' }, h.child), /本会话树 10 分钟内已在会话树内互发 2 次/)
   } finally { await h.cleanup() }
 })
