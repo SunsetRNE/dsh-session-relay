@@ -1397,6 +1397,43 @@ test('交接快照：看板报可合并但提交已在 origin/main 的，按已�
   } finally { await h.cleanup() }
 })
 
+test('声明写了「已合入 buildNNN」且提交确在 origin/main：插件把看板 ready 条目标成 done；不在 main 的不动', async () => {
+  const h = await setup()
+  try {
+    const { execFileSync } = await import('node:child_process')
+    const g = (...args) => execFileSync('git', args, { cwd: h.dir, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }).toString().trim()
+    g('init', '-q'); g('commit', '-q', '--allow-empty', '-m', 'base')
+    g('commit', '-q', '--allow-empty', '-m', 'feat: 主会话代为合并的修复')
+    const merged = g('rev-parse', 'HEAD')
+    g('update-ref', 'refs/remotes/origin/main', merged)
+    g('checkout', '-q', '-b', 'side'); g('commit', '-q', '--allow-empty', '-m', 'fix: 声明写了已合入其实没进 main')
+    const notIn = g('rev-parse', 'HEAD')
+    const third = { id: 'cccccccc-0000-0000-0000-000000000003', header: {} }
+    h.sessions?.set?.(third.id, third)
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id, third.id] })
+    await h.run('main here')
+    const wt1 = join(h.dir, '.agents/worktrees/fix/landed')
+    await mkdir(wt1, { recursive: true })
+    await writeFile(join(wt1, '.git'), 'gitdir: x\n')
+    await writeFile(join(wt1, '.SESSION-DONE'), `状态：已结束\n分支：fix/landed\n会话：session-${h.peer.id}\n合并：可合并\n已合入 build301（${merged.slice(0, 8)}）\n`)
+    await h.call('peer_report', { status: 'ready', summary: '可合并了', branch: 'fix/landed' }, h.peer)
+    const wt2 = join(h.dir, '.agents/worktrees/fix/claimed')
+    await mkdir(wt2, { recursive: true })
+    await writeFile(join(wt2, '.git'), 'gitdir: x\n')
+    await writeFile(join(wt2, '.SESSION-DONE'), `状态：已结束\n分支：fix/claimed\n会话：session-${third.id}\n合并：可合并\n已合入 build302（${notIn.slice(0, 8)}）\n`)
+    await h.relay.coord.join(third.id)
+    await h.relay.coord.upsert(third.id, { status: 'ready', summary: '也可合并', branch: 'fix/claimed' })
+    const group = { key: 'ws-a', ...h.relay.coord.group('ws-a'), workspace: h.relay.workspaceById('ws-a') }
+    const view = await h.relay.declarationViewFresh(group, { maxAgeMs: 0 })
+    assert.deepEqual(view.readyMerged.map((item) => item.sessionId).sort(), [h.peer.id, third.id].sort(), '两条都是「看板可合并、声明已合入」')
+    await h.relay.mainMergedFor('ws-a')
+    const board = h.relay.coord.snapshot().board
+    assert.equal(board[h.peer.id].status, 'done')
+    assert.match(board[h.peer.id].summary, /插件核对.*已合入 build301.*已在 origin\/main/)
+    assert.equal(board[third.id].status, 'ready', '提交不在 origin/main：不自动完成')
+  } finally { await h.cleanup() }
+})
+
 test('核验：只有主会话 / 用户能登记与取消；工作会话能看；主会话上下文提示不用自己轮询', async () => {
   const h = await setup()
   try {
