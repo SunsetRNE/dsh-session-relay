@@ -1380,6 +1380,27 @@ test('核验：只有主会话 / 用户能登记与取消；工作会话能看�
   } finally { await h.cleanup() }
 })
 
+test('核验 tag：登记后换了主会话，tag 推上来时通知现任主会话（不是登记者），并发手机通知', async () => {
+  const h = await setup()
+  try {
+    let remote = null
+    h.relay.watches.checkers = { repoOf: async () => 'o/r', ci: async () => ({ done: false }), ref: async () => ({ sha: remote }) }
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    const added = await h.call('peer_watch', { action: 'add', kind: 'ref', ref: 'v0.15.0', sha: '56bbde8f', label: '0.15.0 tag' })
+    assert.match(added, /已登记核验/)
+    // 主会话交给 peer，之后 tag 才出现
+    await h.run('main here', h.peer)
+    remote = '56bbde8f00000000000000000000000000000000'
+    for (const item of h.relay.watches.store.items()) item.nextAt = 0
+    await h.relay.watches.tick()
+    const toPeer = h.peer.inbox.map(([, message]) => message.content[0].text).join('\n')
+    assert.match(toPeer, /0\.15\.0 tag/)
+    assert.doesNotMatch(h.caller.inbox.map(([, message]) => message.content[0].text).join('\n'), /0\.15\.0 tag/)
+    assert.ok(h.notified.some(([title, text]) => /0\.15\.0 tag/.test(`${title} ${text}`)))
+  } finally { await h.cleanup() }
+})
+
 test('peer_task：认领 / 拒抢 / 接手失效者 / 完成 / 登记 / 转交 / 退回 / 用户放弃 / 主会话改字段，带通知、备份与日志', async () => {
   const h = await setup()
   try {
