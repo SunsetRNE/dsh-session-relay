@@ -21,7 +21,7 @@ ln -s /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules node_modules
 npm test
 ```
 
-加载方式：`lib/index.js` 是外壳，逻辑在 `lib/impl.js` 及其依赖里。改实现文件后 `/relay reload` 即可生效；改 `lib/index.js`、`lib/client.js`、`package.json` 的 `dsh` 字段或 `cordis.patch.yml` 需要重启 DSH。
+加载方式：`lib/index.js` 是外壳，逻辑在 `lib/impl.js` 及其依赖里。改实现文件后 `/relay reload` 即可生效；`lib/client.js`（面板）改动由宿主热更新，刷新即见；改 `lib/index.js`、`package.json` 的 `dsh` 字段或 `cordis.patch.yml` 需要重启 DSH。
 
 ## 打包
 

@@ -166,6 +166,10 @@ test('分类：插件按事实判定，归档 / 需要处理 / 可合并 / 进�
   assert.equal(c({ status: 'working', reportedAt: now - 7 * hour }).category, 'idle')
   assert.equal(c({ status: 'working', reportedAt: now - 7 * hour }, { running: true }).category, 'active')
   assert.equal(c({ status: 'working', reportedAt: now - hour }).category, 'active')
+  // DSH 的空白会话标记优先：有过对话但没汇报的不算空白（用户 2026-11-04 截图里 5fef3774、e4f60b18 被误判）
+  assert.equal(c({ status: 'working', summary: '由用户加入协作', updatedAt: now - 30 * hour }, { blank: false, lastActiveAt: now - hour }).category, 'active')
+  assert.equal(c({ status: 'working', summary: '由用户加入协作', updatedAt: now - 30 * hour }, { blank: false, lastActiveAt: now - 20 * hour }).category, 'idle')
+  assert.equal(c({ status: 'working', summary: '空白', updatedAt: now - hour }, { blank: true }).category, 'blank')
 })
 
 test('主会话上下文（分类后）：归档只给一行计数，久未活动 / 空白只列标签', async () => {

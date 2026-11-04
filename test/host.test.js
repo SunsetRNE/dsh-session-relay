@@ -416,6 +416,30 @@ test('/relay open：只建空白会话，不投递任何消息；--join 登记�
   } finally { await h.cleanup() }
 })
 
+test('面板新建主会话：没有主会话时直接设为主会话；替换已有主会话时原主会话收到卸任通知（只进收件箱）', async () => {
+  const h = await setup()
+  try {
+    const { perform } = await import('../lib/settings-route.js')
+    // 新会话还没出现在侧栏登记的 sessionIds 里：分组以建会话时的工作区为准
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    const first = await perform(h.relay, { action: 'open', role: 'main', cwd: h.dir })
+    const m1 = first.result.sessionId
+    assert.equal(first.result.main, true)
+    assert.equal(first.result.previousMain, undefined)
+    assert.equal(h.relay.coordinatorFor(h.peer.id), m1, '同工作区的会话看到新主会话')
+    assert.equal(h.agents.get(m1).inbox.length, 0, '不触发模型轮次')
+    // 替换：原主会话收到卸任通知，不唤醒
+    const second = await perform(h.relay, { action: 'open', role: 'main', cwd: h.dir })
+    const m2 = second.result.sessionId
+    assert.equal(second.result.previousMain, m1)
+    assert.equal(h.relay.coordinatorFor(h.peer.id), m2)
+    const [mode, notice] = h.agents.get(m1).inbox.at(-1)
+    assert.equal(mode, 'queue')
+    assert.match(notice.content[0].text, /不再是主会话/)
+    assert.equal(h.agents.get(m2).inbox.length, 0)
+  } finally { await h.cleanup() }
+})
+
 test('会话身份：/relay id 给出完整 id、前 8 位和别名；上下文带身份行', async () => {
   const h = await setup()
   try {
@@ -606,8 +630,8 @@ test('交接：主会话模型只能起草；用户确认后新建会话接手�
     assert.equal(h.notified.at(-1)[0], '主会话交接草稿已就绪')
     assert.match(h.contextFor(h.caller), /交接草稿已保存/)
     const preview = (await h.run('handoff')).text
-    // 新建后还没跑过一轮：插件判为空白，只列标签
-    assert.match(preview, /从 281 推到 290[\s\S]*- 空白：@w1[^\n]* dddddddd/)
+    // /relay new 建的会话已经收到任务（DSH 不算空白会话）：进行中
+    assert.match(preview, /从 281 推到 290[\s\S]*- @w1[^\n]* dddddddd · 进行中/)
     // 版本线、工作区计数、声明每一步都在新主会话的协作上下文里，快照不再重复
     assert.doesNotMatch(preview, /main=build280|侧栏登记/)
     // 用户确认：新建接手会话
