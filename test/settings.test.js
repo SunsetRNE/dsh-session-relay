@@ -263,6 +263,7 @@ test('Client：协作标签带本会话身份卡片与范围切换', async () =>
   const board = {
     self: { sessionId: id, short: '2b3fef60', label: '2b3fef60', aliases: [], isMain: false, entry: null, participant: false },
     scope: 'workspace', workspace: { id: 'w', title: 'DSH-A-mod', path: '/root/DSH-A-mod', count: 5 }, hiddenByScope: 2,
+    hiddenAttention: [{ sessionId: 'session-000bc230', label: '@t43b', status: 'blocked', workspace: 'DSH-A-mod', summary: '认领被拒' }],
     coordinator: null, line: null, entries: [], restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/root/DSH-A-mod'
   }
   const original = React.useState
@@ -275,6 +276,8 @@ test('Client：协作标签带本会话身份卡片与范围切换', async () =>
   assert.match(text, /joinSelf/)
   assert.match(text, /scopeWorkspace/)
   assert.match(text, /scopeHidden/)
+  assert.match(text, /hiddenAttention[\s\S]*@t43b[\s\S]*认领被拒/)
+  assert.match(text, /hiddenAttentionShow/)
   assert.doesNotMatch(text, /panel/, '嵌入时不重复标题')
 })
 
