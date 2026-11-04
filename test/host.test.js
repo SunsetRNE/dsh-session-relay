@@ -227,7 +227,8 @@ test('主会话 + /relay new：工作会话汇报合并后只唤醒主会话一�
     // 主会话上下文里有看板，待答复排在最前
     const ctxText = h.contextFor(h.caller)
     assert.match(ctxText, /role="main"/)
-    assert.ok(ctxText.indexOf('待答复') < ctxText.indexOf('可合并'))
+    // 插件分类：需要处理（待答复）在可合并之前
+    assert.match(ctxText, /【需要处理】\n- @w2[^\n]*待答复[\s\S]*【可合并】\n- @w1/)
     // 主会话正在运行时，汇报插进本轮而不是另开一轮
     h.caller.status = 'running'
     await h.call('peer_report', { status: 'done', summary: '完成' }, w2)
@@ -605,7 +606,8 @@ test('交接：主会话模型只能起草；用户确认后新建会话接手�
     assert.equal(h.notified.at(-1)[0], '主会话交接草稿已就绪')
     assert.match(h.contextFor(h.caller), /交接草稿已保存/)
     const preview = (await h.run('handoff')).text
-    assert.match(preview, /从 281 推到 290[\s\S]*@w1 dddddddd · 进行中/)
+    // 新建后还没跑过一轮：插件判为空白，只列标签
+    assert.match(preview, /从 281 推到 290[\s\S]*- 空白：@w1[^\n]* dddddddd/)
     // 版本线、工作区计数、声明每一步都在新主会话的协作上下文里，快照不再重复
     assert.doesNotMatch(preview, /main=build280|侧栏登记/)
     // 用户确认：新建接手会话
@@ -1201,14 +1203,14 @@ test('交接快照：看板报可合并但提交已在 origin/main 的，按已�
     const before = await h.relay.mainMergedFor('ws-a')
     assert.equal(before.size, 1)
     let snap = h.relay.handoffSnapshotFor('ws-a', before)
-    assert.match(snap, /看板：0 个没结束，另有 1 个已完成 \/ 已合入不列出/)
+    assert.match(snap, /没有进行中的会话[\s\S]*归档 1 个（已合入 main 1）/)
     await h.call('peer_report', { status: 'ready', summary: '真的可合并', commit: pending.slice(0, 8) }, h.peer)
     snap = h.relay.handoffSnapshotFor('ws-a', await h.relay.mainMergedFor('ws-a'))
-    assert.match(snap, /看板：1 个没结束[\s\S]*真的可合并/)
+    assert.match(snap, /可合并 1[\s\S]*真的可合并/)
     // 提交本机已不存在：并成一行，不展开
     await h.call('peer_report', { status: 'ready', summary: '提交已被改写', commit: 'deadbeef' }, h.peer)
     snap = h.relay.handoffSnapshotFor('ws-a', await h.relay.mainMergedFor('ws-a'))
-    assert.match(snap, /提交本机已不存在.*1 个：bbbbbbbb/)
+    assert.match(snap, /归档 1 个（提交本机已不存在 1）.*其中提交本机已不存在的 bbbbbbbb 请核对/)
     assert.doesNotMatch(snap, /提交已被改写/)
   } finally { await h.cleanup() }
 })

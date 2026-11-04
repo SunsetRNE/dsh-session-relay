@@ -443,3 +443,54 @@ test('Client：卡片「唤醒」表单显示预判，主会话新建时禁用�
   assert.match(page, /wakeChecking/)
   assert.equal(confirm().props.disabled, true)
 })
+
+test('Client：看板按插件分类分组，归档条目进右栏「归档」分区，原因标签显示', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => key
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const board = {
+    scope: 'workspace', workspace: null, hiddenByScope: 0, coordinator: null, line: null, others: [], othersTotal: 0,
+    entries: [
+      { sessionId: 'session-a', label: '@a', status: 'working', category: 'attention', categoryReason: 'failed', categoryDetail: 'EMPTY_RESPONSE', state: 'idle', summary: 's', updatedAt: 1 },
+      { sessionId: 'session-b', label: '@b', status: 'ready', category: 'ready', queue: 1, state: 'idle', summary: 'r', updatedAt: 1 },
+      { sessionId: 'session-c', label: '@c', status: 'ready', category: 'archived', categoryReason: 'merged', mainMerged: 'main abc', state: 'idle', summary: 'old', updatedAt: 1 }
+    ],
+    restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a'
+  }
+  const original = React.useState
+  let calls = 0
+  React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store }))
+  React.useState = original
+  for (const key of ['catAttention', 'catReady', 'why_failed', 'archiveTitle', 'foldArchiveSum', 'catHint']) assert.match(page, new RegExp(key))
+  assert.doesNotMatch(page, /catActive|boardEmpty/)
+})
+
+test('Client：卡片默认折叠（只留摘要与展开按钮），需要处理的自动展开；久未活动 / 空白分组默认收起', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  // 把参数也带出来，才能看出占用 / 最近一轮有没有渲染
+  const t = (key) => `${key}:{v}`
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const board = {
+    scope: 'workspace', workspace: null, hiddenByScope: 0, coordinator: null, line: null, others: [], othersTotal: 0,
+    entries: [
+      { sessionId: 'session-a', label: '@a', status: 'working', category: 'active', state: 'idle', summary: 's', files: 'SECRET_FILES', lastTurn: 'SECRET_TURN', lastTurnAt: 9, reportedAt: 1, updatedAt: 1, conflicts: [{ with: 'session-b', label: '@b', paths: ['x'] }] },
+      { sessionId: 'session-b', label: '@b', status: 'blocked', category: 'attention', categoryReason: 'blocked', state: 'idle', summary: 'b', files: 'OPEN_FILES', updatedAt: 1 },
+      { sessionId: 'session-c', label: '@c', status: 'working', category: 'blank', state: 'cold', summary: 'BLANK_SUMMARY', updatedAt: 1 }
+    ],
+    restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a'
+  }
+  const original = React.useState
+  let calls = 0
+  React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store }))
+  React.useState = original
+  assert.match(page, /cardMore/)
+  assert.match(page, /conflictCount/)
+  assert.doesNotMatch(page, /SECRET_FILES|SECRET_TURN/, '折叠时不显示占用与最近一轮')
+  assert.match(page, /OPEN_FILES/, '需要处理的卡片展开')
+  assert.match(page, /catBlank/)
+  assert.doesNotMatch(page, /BLANK_SUMMARY/, '空白分组默认收起')
+})

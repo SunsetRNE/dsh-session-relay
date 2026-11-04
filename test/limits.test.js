@@ -144,3 +144,50 @@ test('主会话上下文：已完成的条目不放占用清单与最近一轮',
   assert.match(text, /eeeeeeee · 已完成/)
   assert.doesNotMatch(text, /占用：|最近一轮/)
 })
+
+test('分类：插件按事实判定，归档 / 需要处理 / 可合并 / 进行中 / 久未活动 / 空白', async () => {
+  const { classifyEntry } = await import('../lib/core.js')
+  const now = Date.UTC(2026, 10, 4, 12)
+  const hour = 3600_000
+  const c = (entry, facts = {}) => classifyEntry(entry, facts, { now })
+  assert.deepEqual(c({ status: 'ready', mainMerged: 'main x' }), { category: 'archived', categoryReason: 'merged' })
+  assert.deepEqual(c({ status: 'ready', commitMissing: true }), { category: 'archived', categoryReason: 'missing' })
+  assert.deepEqual(c({ status: 'question', formerMain: true }), { category: 'archived', categoryReason: 'former-main' })
+  assert.deepEqual(c({ status: 'done', reportedAt: now }), { category: 'archived', categoryReason: 'done' })
+  assert.deepEqual(c({ status: 'working', reportedAt: now }, { gone: true }), { category: 'archived', categoryReason: 'gone' })
+  assert.equal(c({ status: 'question', question: 'q', reportedAt: now }).category, 'attention')
+  assert.equal(c({ status: 'question', question: 'q', reportedAt: now, answeredAt: now + 1 }).category, 'active', '已答复的不再要处理')
+  assert.deepEqual(c({ status: 'working', reportedAt: now }, { failure: { code: 'EMPTY_RESPONSE' } }), { category: 'attention', categoryReason: 'failed', categoryDetail: 'EMPTY_RESPONSE' })
+  assert.equal(c({ status: 'working', reportedAt: now }, { failure: { code: 'X' }, running: true }).category, 'active', '出错后又在跑')
+  assert.equal(c({ status: 'ready', reportedAt: now }, { heavy: true }).category, 'ready', '可合并优先于上下文过大')
+  assert.equal(c({ status: 'working', reportedAt: now }, { heavy: true }).categoryReason, 'heavy')
+  assert.equal(c({ status: 'working', summary: '由用户加入协作', updatedAt: now - 30 * hour }).category, 'blank')
+  assert.equal(c({ status: 'working', updatedAt: now - 30 * hour }, { lastActiveAt: now - hour }).category, 'active', '加入后会话有活动就不是空白')
+  assert.equal(c({ status: 'working', reportedAt: now - 7 * hour }).category, 'idle')
+  assert.equal(c({ status: 'working', reportedAt: now - 7 * hour }, { running: true }).category, 'active')
+  assert.equal(c({ status: 'working', reportedAt: now - hour }).category, 'active')
+})
+
+test('主会话上下文（分类后）：归档只给一行计数，久未活动 / 空白只列标签', async () => {
+  const { coordinatorContext } = await import('../lib/core.js')
+  const id = (n) => `session-${String(n).repeat(8)}-0000-0000-0000-000000000000`
+  const board = {
+    [id(1)]: { status: 'question', question: '发不发？', summary: 'q', category: 'attention', categoryReason: 'question', updatedAt: 3 },
+    [id(2)]: { status: 'working', summary: '跑着跑着空响应', category: 'attention', categoryReason: 'failed', categoryDetail: 'EMPTY_RESPONSE', updatedAt: 2 },
+    [id(3)]: { status: 'ready', summary: '真的可合并', commit: 'abc1234', category: 'ready', files: 'a', updatedAt: 1 },
+    [id(4)]: { status: 'working', summary: '很久没动', category: 'idle', updatedAt: 1 },
+    [id(5)]: { status: 'working', summary: '由用户加入协作', category: 'blank', updatedAt: 1 },
+    [id(6)]: { status: 'ready', summary: '早进 main 了', mainMerged: 'main x', category: 'archived', categoryReason: 'merged', files: 'a', updatedAt: 1 },
+    [id(7)]: { status: 'ready', summary: '提交没了', commitMissing: true, category: 'archived', categoryReason: 'missing', updatedAt: 1 },
+    [id(8)]: { status: 'done', summary: '做完了', category: 'archived', categoryReason: 'done', updatedAt: 1 }
+  }
+  const text = coordinatorContext({ board, labelFor: (sid) => sid.slice(8, 16), selfId: 'm' })
+  assert.match(text, /插件按事实分类：需要处理 2 · 可合并 1 · 久未活动 1 · 空白 1/)
+  assert.match(text, /【需要处理】\n- 11111111 · 待答复[\s\S]*- 22222222 · 进行中[^\n]*插件判定：最后一轮出错（EMPTY_RESPONSE）/)
+  assert.match(text, /【可合并】\n- 33333333 · 可合并 #1/)
+  assert.match(text, /【久未活动】44444444/)
+  assert.match(text, /【空白】55555555/)
+  assert.match(text, /归档 3 个（[^）]*已合入 main 1[^）]*），已从上下文收起.*其中提交本机已不存在的 77777777 请核对/)
+  const part = text.slice(text.indexOf('看板（'))
+  for (const gone of ['早进 main 了', '提交没了', '做完了', '很久没动,', '由用户加入协作', '⚠']) assert.ok(!part.includes(gone), gone)
+})
