@@ -350,6 +350,50 @@ test('Client 发出的看板请求能被路由正确解析（会话参数不被�
   assert.equal(url.searchParams.get('scope'), 'workspace')
 })
 
+test('Client：侧栏面板（无会话视角）按本机记住的工作区取看板，多个工作区时显示切换下拉', async () => {
+  const { React } = fakeReact()
+  const urls = []
+  globalThis.fetch = async (url) => { urls.push(String(url)); return { ok: true, status: 200, json: async () => ({ ok: true, entries: [] }) } }
+  globalThis.document = { visibilityState: 'visible', querySelector: () => null }
+  const stored = {}
+  const original = React.useEffect
+  const realInterval = globalThis.setInterval
+  let mod
+  try {
+    mod = await loadClient(React)
+    globalThis.window = { localStorage: { getItem: (key) => (key === 'dshaSr.workspace.v1' ? 'ws-b' : stored[key] ?? null), setItem: (key, value) => { stored[key] = value }, removeItem: (key) => { delete stored[key] } } }
+    React.useEffect = (fn) => { fn() }
+    globalThis.setInterval = () => 0
+    const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+    React.createElement(mod.BoardPage, { t: (k) => k, openSession() {}, marksStore: store })
+  } finally {
+    React.useEffect = original
+    globalThis.setInterval = realInterval
+    delete globalThis.fetch
+    delete globalThis.document
+    delete globalThis.window
+  }
+  const url = new URL(urls[0], 'http://local')
+  assert.equal(url.searchParams.get('view'), 'board')
+  assert.equal(url.searchParams.get('workspace'), 'ws-b')
+  assert.equal(url.searchParams.get('session'), null)
+  // 渲染：两个工作区时有下拉，当前选中看板所在的工作区
+  const board = {
+    entries: [], others: [], groupKey: 'ws-b', workspace: { id: 'ws-b', title: 'B', path: '/b' },
+    workspaces: [{ id: 'ws-a', title: 'A', path: '/a', hasMain: true }, { id: 'ws-b', title: 'B', path: '/b', hasMain: false }]
+  }
+  const realState = React.useState
+  let calls = 0
+  React.useState = (initial) => (++calls === 2 ? [board, () => {}] : realState(initial))
+  globalThis.window = { localStorage: { getItem: () => null, setItem() {}, removeItem() {} } }
+  let text
+  try {
+    text = textOf(React.createElement(mod.BoardPage, { t: (k) => k, openSession() {}, marksStore: { subscribe: () => () => {}, getSnapshot: () => ({}), refresh: async () => {} } }))
+  } finally { React.useState = realState; delete globalThis.window }
+  assert.match(text, /wsPick/)
+  assert.match(text, /wsPickAwsPickMainBpageOverview/, '两个选项：A（有主会话）、B')
+})
+
 test('Client：设置页每个工作区一条版本线；协作标签列出未加入的会话', async () => {
   const { React } = fakeReact()
   const mod = await loadClient(React)
