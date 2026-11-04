@@ -5,6 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { apply } from '../lib/index.js'
+import { parseRelayCommand } from '../lib/core.js'
 import { fileURLToPath } from 'node:url'
 import { after } from 'node:test'
 import { sampleEvents } from './fixtures/inspect-events.js'
@@ -91,7 +92,7 @@ async function setup() {
     stageRoot: STAGE, identityForAll: false,
     notify: async (title, text) => { notified.push([title, text]) },
     restart: { intervalMs: 1_000_000, stableMs: 0 },
-    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), pinPath: join(dir, 'pins.json'), watchPath: join(dir, 'watches.json'), watch: false, autoPinIntervalMs: 0, chainWatchIntervalMs: 0, remoteReleaseTags: false, maxHops: 2,
+    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), pinPath: join(dir, 'pins.json'), watchPath: join(dir, 'watches.json'), watch: false, autoPinIntervalMs: 0, titlePath: join(dir, 'titles.json'), autoTitleIntervalMs: 0, chainWatchIntervalMs: 0, remoteReleaseTags: false, maxHops: 2,
     setTimer: (fn) => { timers.push(fn); return timers.length }, clearTimer: () => {}
   })
   assert.match(await shell.ready, /已加载/)
@@ -384,6 +385,42 @@ test('热重载：换一份新实现，命令/工具换成新定义，跳数、�
   } finally { await h.cleanup() }
 })
 
+test('热重载：等旧实例正在跑的核验结束再接管（不重复投递）；定时器 ready 之后才启动', async () => {
+  const h = await setup()
+  try {
+    const oldRelay = h.shell.relay
+    let release
+    oldRelay.watches.current = new Promise((resolve) => { release = resolve })
+    let done = false
+    const reloading = h.run('reload').then((out) => { done = true; return out })
+    // reload 要先复制、导入实现：等到旧调度器被停掉（接管开始），再确认它在等这一轮
+    for (let i = 0; i < 200 && oldRelay.watches.disposed !== true; i += 1) await new Promise((r) => setTimeout(r, 10))
+    assert.equal(oldRelay.watches.disposed, true, '旧调度器已停，不会再开新一轮')
+    await new Promise((r) => setTimeout(r, 30))
+    assert.equal(done, false, '旧实例这一轮没跑完，新实例不接管')
+    release()
+    assert.match((await reloading).text, /已重新加载/)
+    const relay = h.shell.relay
+    assert.equal(relay.watchStore, oldRelay.watchStore, '共用一份清单')
+    assert.equal(oldRelay.timers.stopped, true)
+    assert.equal(relay.timers.armed, true)
+  } finally { await h.cleanup() }
+  // DeferredTimers：arm 之前不跑；stop 后不再跑
+  const { DeferredTimers } = await import('../lib/impl.js')
+  const timers = new DeferredTimers()
+  let ticks = 0
+  timers.set(() => { ticks += 1 }, 5)
+  await new Promise((r) => setTimeout(r, 20))
+  assert.equal(ticks, 0, '没 arm 不启动（reload 失败时不会泄漏）')
+  timers.arm()
+  await new Promise((r) => setTimeout(r, 25))
+  assert.ok(ticks > 0)
+  timers.stop()
+  const after = ticks
+  await new Promise((r) => setTimeout(r, 20))
+  assert.equal(ticks, after)
+})
+
 test('重启时机：有会话在忙就等，全部空闲后通知一次', async () => {
   const h = await setup()
   try {
@@ -437,6 +474,86 @@ test('面板新建主会话：没有主会话时直接设为主会话；替换�
     assert.equal(mode, 'queue')
     assert.match(notice.content[0].text, /不再是主会话/)
     assert.equal(h.agents.get(m2).inbox.length, 0)
+  } finally { await h.cleanup() }
+})
+
+test('认领任务自动命名：持有者会话标题改成任务号；结束的认领不算；用户改过的不动', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    const titles = new Map()
+    h.services.sessionTitle = {
+      get: (session) => titles.get(session.id),
+      rename: (session, title) => { const value = { title, source: { kind: 'user' } }; titles.set(session.id, value); return value }
+    }
+    await mkdir(join(h.dir, '.agents/claims/T46'), { recursive: true })
+    await mkdir(join(h.dir, '.agents/claims/T45'), { recursive: true })
+    await mkdir(join(h.dir, '.agents/claims/T40'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 任务 | 状态 |\n|---|---|---|\n| T40 | 旧 | 已完成 |\n| T45 | 甲 | 进行中 |\n| T46 | 乙 | 进行中 |\n')
+    await writeFile(join(h.dir, '.agents/claims/T46/owner'), `session-${h.peer.id}\n2026-11-04 UTC\n`)
+    await writeFile(join(h.dir, '.agents/claims/T45/owner'), `session-${h.peer.id}\n2026-11-04 UTC\n`)
+    await writeFile(join(h.dir, '.agents/claims/T40/owner'), `session-${h.caller.id}\n`)
+    await writeFile(join(h.dir, '.agents/claims/T40/done'), 'abc1234 已合入\n')
+    const result = await h.relay.autoTitle.sync()
+    assert.deepEqual(result.renamed, [[h.peer.id, 'T45 T46']])
+    assert.equal(titles.get(h.caller.id), undefined, '认领已结束的不改')
+    // 用户手动改名后不再动
+    titles.set(h.peer.id, { title: '我的', source: { kind: 'user' } })
+    await mkdir(join(h.dir, '.agents/claims/T47'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/claims/T47/owner'), `session-${h.peer.id}\n`)
+    h.relay.taskBoards.cache.clear?.()
+    assert.deepEqual((await h.relay.autoTitle.sync()).renamed, [])
+    assert.equal(titles.get(h.peer.id).title, '我的')
+  } finally { await h.cleanup() }
+})
+
+test('/relay drop --archived：先列（--dry）再清；只清归档，主会话与进行中不动；面板同一动作', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await h.run('new --as w1 任务一')
+    await h.run('new --as w2 任务二')
+    const [w1, w2] = [...h.agents.values()].filter((agent) => agent.id.startsWith('dddddddd'))
+    h.workspaces[0].sessionIds.push(w1.id, w2.id)
+    await h.call('peer_report', { status: 'done', summary: '做完了' }, w1)
+    await h.call('peer_report', { status: 'working', summary: '还在做' }, w2)
+    assert.equal(parseRelayCommand('drop --archived --merged --dry').kind, 'drop-archived')
+    assert.deepEqual(parseRelayCommand('drop --merged').reasons, ['merged'])
+    assert.equal(parseRelayCommand('drop --archived extra').kind, 'invalid')
+    const dry = await h.run('drop --archived --dry')
+    assert.match(dry.text, /将清理 1 个归档条目：@w1[^\n]*已完成/)
+    assert.ok(h.relay.coord.snapshot().board[w1.id], 'dry 不改')
+    const done = await h.run('drop --archived')
+    assert.match(done.text, /已清理 1 个/)
+    const board = h.relay.coord.snapshot().board
+    assert.equal(board[w1.id], undefined)
+    assert.ok(board[w2.id], '进行中的不动')
+    assert.equal(h.relay.coordinatorFor(w2.id), h.caller.id, '主会话不动')
+    assert.match((await h.run('drop --archived')).text, /没有符合条件/)
+    // 面板：只按原因清
+    await h.call('peer_report', { status: 'abandoned', summary: '不做了' }, w2)
+    const { perform } = await import('../lib/settings-route.js')
+    const kept = await perform(h.relay, { action: 'prune-archived', reasons: ['done'], fromSession: h.caller.id })
+    assert.deepEqual(kept.result.dropped, [])
+    const panel = await perform(h.relay, { action: 'prune-archived', reasons: ['abandoned', 'bogus'], fromSession: h.caller.id })
+    assert.deepEqual(panel.result.dropped, [{ sessionId: w2.id, reason: 'abandoned' }])
+  } finally { await h.cleanup() }
+})
+
+test('/relay open --main：新建即设为主会话；与 --join 互斥；命令名不能作别名', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    assert.equal(parseRelayCommand('open --main --join').kind, 'invalid')
+    const out = await h.run('open --main --as boss2')
+    assert.equal(out.kind, 'success', out.text)
+    const created = [...h.agents.values()].find((agent) => agent.id.startsWith('dddddddd'))
+    assert.equal(h.relay.coordinatorFor(h.peer.id), created.id)
+    assert.match(out.text, /已设为主会话，原主会话 .* 已收到卸任通知/)
+    assert.equal(h.caller.inbox.at(-1)[0], 'queue')
+    for (const word of ['wake', 'watch', 'declarations']) assert.equal((await h.run(`alias ${word}`)).kind, 'error', word)
   } finally { await h.cleanup() }
 })
 
