@@ -53,7 +53,7 @@ gh release create v<版本> dist/dsh-session-relay-<版本>.tgz --title v<版本
 
 每个 Release 只挂一个 `.tgz`：插件管理器按 Release 安装时只认唯一一个压缩包附件。
 
-DSHA 容器里的 `gh` 是 Go 程序，看到的是 Android 根目录：要加 `-R SunsetRNE/dsh-session-relay`（它找不到 git），文件参数写宿主机路径 `/data/data/io.github.sunsetrne.dsha/files/linux/ubuntu/root/...`，不要放 `/tmp`。
+DSHA 容器里的 `gh` 是 Go 程序，看不到 Ubuntu 的文件、也起不了 git。容器里的包装脚本 `/usr/local/bin/gh`（2026-11-04 起）会自动补 `-R`（从 `git remote` 读）并把文件参数改成宿主机路径，上面几条直接能用。需要 gh 自己调 git 的命令（`gh pr checkout`、`gh repo clone`）仍不可用。旧包装脚本没有这两项时：手动加 `-R SunsetRNE/dsh-session-relay`，文件写 `/data/data/io.github.sunsetrne.dsha/files/linux/ubuntu/root/...`。
 
 ## 许可
 
