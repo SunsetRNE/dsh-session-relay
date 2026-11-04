@@ -12,7 +12,7 @@ import { COMMAND_REFERENCE, HELP_TEXT } from '../lib/core.js'
 async function makeRelay() {
   const dir = await mkdtemp(join(tmpdir(), 'relay-settings-'))
   const relay = new SessionRelay({ logger: { warn() {} }, get: () => undefined, sessions: { get: () => undefined } }, {
-    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json')
+    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), watchPath: join(dir, 'watches.json'), watch: false
   })
   await relay.ready()
   return { dir, relay, cleanup: () => rm(dir, { recursive: true, force: true }) }
@@ -261,7 +261,7 @@ test('根上下文严格注入：不能直接读 connection 等未注入服务�
     const allowed = { logger: { warn() {} }, get: () => undefined, sessions: { get: () => undefined, list: () => [] }, sessionController: { list: async () => ({ items: [] }) }, workspaceRegistry: { list: () => [] }, waterfall: async (_n, _p, next) => next() }
     const strict = new Proxy(allowed, { get(target, key) { if (typeof key === 'string' && !(key in target)) throw new Error(`cannot get property "${key}" without inject`); return target[key] } })
     let live
-    const relay = createRelay(strict, { aliasPath: join(dir, 'a.json'), statePath: join(dir, 'c.json'), templatePath: join(dir, 't.json'), connection: () => live })
+    const relay = createRelay(strict, { aliasPath: join(dir, 'a.json'), statePath: join(dir, 'c.json'), templatePath: join(dir, 't.json'), watchPath: join(dir, 'w.json'), watch: false, connection: () => live })
     await relay.ready()
     // 外壳的 web 子上下文还没就绪：503，不抛错
     let res = fakeRes(); await relay.routeHandler(fakeReq('GET'), res)

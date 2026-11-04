@@ -91,7 +91,7 @@ async function setup() {
     stageRoot: STAGE, identityForAll: false,
     notify: async (title, text) => { notified.push([title, text]) },
     restart: { intervalMs: 1_000_000, stableMs: 0 },
-    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), pinPath: join(dir, 'pins.json'), autoPinIntervalMs: 0, chainWatchIntervalMs: 0, remoteReleaseTags: false, maxHops: 2,
+    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), pinPath: join(dir, 'pins.json'), watchPath: join(dir, 'watches.json'), watch: false, autoPinIntervalMs: 0, chainWatchIntervalMs: 0, remoteReleaseTags: false, maxHops: 2,
     setTimer: (fn) => { timers.push(fn); return timers.length }, clearTimer: () => {}
   })
   assert.match(await shell.ready, /已加载/)
@@ -107,7 +107,7 @@ test('注册了 /relay 与四个 peer 工具', async () => {
   try {
     assert.ok(h.commands.has('relay'))
     assert.equal(h.routes[0].path, '/api/dsha-session-relay')
-    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_line', 'peer_list', 'peer_report', 'peer_send', 'peer_spawn', 'peer_tasks', 'peer_workspace'])
+    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_line', 'peer_list', 'peer_report', 'peer_send', 'peer_spawn', 'peer_tasks', 'peer_watch', 'peer_workspace'])
   } finally { await h.cleanup() }
 })
 
@@ -1212,5 +1212,26 @@ test('交接快照：看板报可合并但提交已在 origin/main 的，按已�
     snap = h.relay.handoffSnapshotFor('ws-a', await h.relay.mainMergedFor('ws-a'))
     assert.match(snap, /归档 1 个（提交本机已不存在 1）.*其中提交本机已不存在的 bbbbbbbb 请核对/)
     assert.doesNotMatch(snap, /提交已被改写/)
+  } finally { await h.cleanup() }
+})
+
+test('核验：只有主会话 / 用户能登记与取消；工作会话能看；主会话上下文提示不用自己轮询', async () => {
+  const h = await setup()
+  try {
+    h.relay.watches.checkers = { repoOf: async () => 'o/r', ci: async () => ({ done: false, status: 'queued' }), ref: async () => ({ sha: null }) }
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await h.call('peer_report', { status: 'working', summary: 'x' }, h.peer)
+    await assert.rejects(h.call('peer_watch', { action: 'add', kind: 'ci', run_id: '1' }, h.peer), /只有本工作区的主会话/)
+    const added = await h.call('peer_watch', { action: 'add', kind: 'ci', run_id: '41815663194', label: 'build308' })
+    assert.match(added, /已登记核验 [0-9a-f]{8}：build308 · CI 41815663194 @o\/r/)
+    assert.match(await h.call('peer_watch', { action: 'add', kind: 'ci', run_id: '41815663194' }), /没有重复登记/)
+    assert.match(await h.call('peer_watch', { action: 'list' }, h.peer), /核验中 · build308/)
+    assert.match(h.contextFor(h.caller), /插件在核验 1 项[\s\S]*不用自己轮询/)
+    const ref = (await h.run('watch ref main abcdef12 --hours 2 推送 309')).text
+    assert.match(ref, /已登记核验 [0-9a-f]{8}：推送 309 · origin\/main = abcdef12/)
+    const id = /核验 ([0-9a-f]{8})/.exec(ref)[1]
+    assert.match((await h.run(`watch cancel ${id}`)).text, /已取消核验/)
+    assert.match((await h.run('watch ci 12;rm')).text, /数字 run id|用法/)
   } finally { await h.cleanup() }
 })
