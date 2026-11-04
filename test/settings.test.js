@@ -98,6 +98,30 @@ test('路由：鉴权失败、跨源、坏请求体、正常读写', async () =>
   } finally { await h.cleanup() }
 })
 
+test('面板搜索路由：转发结构化参数并拒绝空查询、非法范围和数值', async () => {
+  const calls = []
+  const relay = {
+    panelSearch: async (options) => { calls.push(options); return { scope: options.scope, scanned: 1, skipped: 0, total: 1, groups: [] } }
+  }
+  const handler = createHandler({ requestRejection: () => undefined }, relay)
+  let res = fakeRes()
+  await handler(Object.assign(fakeReq('GET'), { url: '/api/dsha-session-relay?view=search&q=needle&scope=all&fromSession=s1&regex=1&caseSensitive=1&kinds=all&tool=bash&turn=2&maxSessions=3&maxHits=4' }), res)
+  assert.equal(res.status, 200)
+  assert.deepEqual(calls[0], { query: 'needle', scope: 'all', workspaceId: undefined, fromSession: 's1', regex: true, caseSensitive: true, kinds: 'all', tool: 'bash', turn: 2, maxSessions: 3, maxHits: 4 })
+  res = fakeRes()
+  await handler(Object.assign(fakeReq('GET'), { url: '/api/dsha-session-relay?view=search&q=' }), res)
+  assert.equal(res.status, 400)
+  assert.equal(res.body.error, 'empty_query')
+  res = fakeRes()
+  await handler(Object.assign(fakeReq('GET'), { url: '/api/dsha-session-relay?view=search&q=x&scope=all&workspace=ws-a' }), res)
+  assert.equal(res.status, 400)
+  assert.equal(res.body.error, 'bad_search_scope')
+  res = fakeRes()
+  await handler(Object.assign(fakeReq('GET'), { url: '/api/dsha-session-relay?view=search&q=x&turn=1.5' }), res)
+  assert.equal(res.status, 400)
+  assert.equal(res.body.error, 'bad_search_option')
+})
+
 test('命令速查：每条例子都能被解析成有效命令，/relay help 来自同一份', async () => {
   const { parseRelayCommand } = await import('../lib/core.js')
   for (const group of COMMAND_REFERENCE) {

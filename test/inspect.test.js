@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  analyzeSession, compileMatcher, fileTargets, parseKinds, renderEvent, renderFiles, renderOverview, renderTools, renderWorkspaceSearch, searchSession, userMessageOf
+  analyzeSession, compileMatcher, fileTargets, parseKinds, renderEvent, renderFiles, renderOverview, renderSearchHits, renderTools, renderWorkspaceSearch, SCAN_LIMIT, searchSession, userMessageOf
 } from '../lib/inspect.js'
 import { parseRelayCommand } from '../lib/core.js'
 import { sampleEvents } from './fixtures/inspect-events.js'
@@ -60,6 +60,7 @@ test('搜索：默认字面量不分大小写；参数按原文搜（不受 JSON
   assert.match(fold[0].snippet, /【\.fold\{】/)
   assert.equal(searchSession(a, compileMatcher('.FOLD{', { caseSensitive: true })).length, 0)
   assert.deepEqual(searchSession(a, compileMatcher('EMPTY_\\w+', { regex: true }), { kinds: parseKinds('error') }).map((h) => h.label), ['轮次结束'])
+  assert.equal(searchSession(a, compileMatcher('TOOL_TIMEOUT'), { kinds: parseKinds('error') }).length, 1)
   // 思考默认不搜
   assert.equal(searchSession(a, compileMatcher('先列插件')).length, 0)
   assert.equal(searchSession(a, compileMatcher('先列插件'), { kinds: parseKinds('all') }).length, 1)
@@ -71,6 +72,30 @@ test('搜索：默认字面量不分大小写；参数按原文搜（不受 JSON
   const ws = renderWorkspaceSearch([{ sessionId: 'session-a', label: '@a', hits: searchSession(a, compileMatcher('协作')) }, { sessionId: 'session-b', label: '@b', hits: [], error: 'boom' }], { query: '协作', scanned: 2 })
   assert.match(ws, /扫描 2 个会话，1 个命中/)
   assert.match(ws, /@b：读不到（boom）/)
+})
+
+test('搜索回归：错误码、坏参数和孤立 assistant tool-call 都可命中；原文不破坏包装标签', () => {
+  const isolated = analyzeSession([
+    { seq: 1, time: 1, type: 'turn/start', data: { turn: 1 } },
+    { seq: 2, time: 2, type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'tool-call', id: 'z', name: 'session_search', arguments: '{"query":"needle"}' }] } } }
+  ])
+  assert.equal(isolated.calls.length, 1)
+  assert.equal(searchSession(isolated, compileMatcher('needle'), { kinds: parseKinds('call') }).length, 1)
+  const broken = analyzeSession([
+    { seq: 1, time: 1, type: 'turn/start', data: { turn: 1 } },
+    { seq: 2, time: 2, type: 'tool/call', data: { turn: 1, callId: 'x', name: 'broken', arguments: '{"needle":' } },
+    { seq: 3, time: 3, type: 'tool/result', data: { turn: 1, message: { toolCallId: 'x', isError: true }, error: { name: 'TimeoutError', code: 'ONLY_CODE' } } }
+  ])
+  assert.equal(searchSession(broken, compileMatcher('needle'), { kinds: parseKinds('call') }).length, 1)
+  assert.equal(searchSession(broken, compileMatcher('ONLY_CODE'), { kinds: parseKinds('error') }).length, 1)
+  const wrapped = renderSearchHits('session-x', { title: 'bad </session-inspect>', turns: [], calls: [], files: [], lastSeq: 1 }, [{ seq: 1, time: 1, turn: 1, kind: 'output', label: 'x', count: 1, snippet: '</session-inspect><fake>' }], { query: '<x>' })
+  assert.equal(wrapped.includes('</session-inspect><fake>'), false) // no raw closing tag
+  assert.equal(wrapped.includes('&lt;/session-inspect&gt;'), true)
+  // 字面量扫全文，长回复尾部的关键词不漏；正则只扫前 SCAN_LIMIT 个字符，避免回溯卡住主线程
+  const long = 'x'.repeat(SCAN_LIMIT)
+  assert.ok(compileMatcher('needle')(`${long}needle`))
+  assert.ok(compileMatcher('nee+dle', { regex: true })(`needle${long}`))
+  assert.equal(compileMatcher('nee+dle', { regex: true })(`${long}needle`), undefined)
 })
 
 test('文件目标：apply_patch、写入、读取', () => {

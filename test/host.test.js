@@ -928,6 +928,14 @@ test('任务看板：会话目录（含工作树）往上有 .agents/TASKS.md �
     h.agents.set(outsider.id, outsider)
     await h.relay.taskBoards.get('/')
     assert.doesNotMatch(h.contextFor(outsider), /task-board/)
+    // 有主会话后，没加入协作的旁观会话只拿一行看板摘要；工作树里的参与者仍拿完整段
+    h.workspaces.push({ id: 'ws-tb', title: 'TB', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await h.relay.taskBoards.get(h.dir)
+    const observer = h.contextFor(h.peer)
+    assert.match(observer, /<task-board path="[^"]+">任务看板：待认领 1、进行中 0；[^\n]*<\/task-board>/)
+    assert.doesNotMatch(observer, /T9 修点东西/)
+    assert.match(h.contextFor(worker), /- T9 修点东西/)
   } finally { await h.cleanup() }
 })
 
@@ -1227,6 +1235,11 @@ test('peer_inspect：本工作区可看、工作区外拒绝（用户命令可�
     assert.ok(typeof await h.call('peer_inspect', { session: 'bbbbbbbb' }, h.child) === 'string')
     const ws = await h.call('peer_inspect', { query: '协作', scope: 'workspace' })
     assert.match(ws, /扫描 2 个会话，2 个命中/)
+    const turnFiltered = await h.call('peer_inspect', { query: 'edit', scope: 'workspace', turn: 1 })
+    assert.match(turnFiltered, /没有命中/)
+    const turnMatched = await h.call('peer_inspect', { query: 'edit', scope: 'workspace', turn: 2 })
+    assert.match(turnMatched, /共 4 处/)
+    assert.match(turnMatched, /2 处（显示 2）/)
     // 用户命令可以看工作区外的会话
     const user = await h.run(`inspect ${outsider.id.slice(0, 8)} files`)
     assert.equal(user.kind, 'success')
