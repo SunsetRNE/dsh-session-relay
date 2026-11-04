@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url'
 import { after } from 'node:test'
 import { sampleEvents } from './fixtures/inspect-events.js'
 import { fixture as taskFixture } from './fixtures/task-board.js'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { parseTaskDoc } from '../lib/tasks.js'
 
 // 代次目录必须在包目录内（裸模块名从包的 node_modules 解析），测试用单独的目录并在结束时清理
 const STAGE = join(fileURLToPath(new URL('..', import.meta.url)), '.gen-test')
@@ -108,7 +109,7 @@ test('注册了 /relay 与四个 peer 工具', async () => {
   try {
     assert.ok(h.commands.has('relay'))
     assert.equal(h.routes[0].path, '/api/dsha-session-relay')
-    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_line', 'peer_list', 'peer_report', 'peer_send', 'peer_spawn', 'peer_tasks', 'peer_watch', 'peer_workspace'])
+    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_line', 'peer_list', 'peer_report', 'peer_send', 'peer_spawn', 'peer_task', 'peer_tasks', 'peer_watch', 'peer_workspace'])
   } finally { await h.cleanup() }
 })
 
@@ -947,9 +948,9 @@ test('拉起认领会话：首条消息写明身份、看板与认领方式；�
     const text = message.content[0].text
     assert.match(text, /新拉起的工作会话 @t3（id dddddddd/)
     assert.match(text, /主会话是/)
-    assert.match(text, new RegExp(`读 ${join(h.dir, '.agents/TASKS.md').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
+    assert.match(text, new RegExp(`看板 ${join(h.dir, '.agents/TASKS.md').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
     assert.match(text, /只认领 T3/)
-    assert.match(text, /mkdir .*\.agents\/claims\/<任务号>/)
+    assert.match(text, /peer_task action=claim .*\.agents\/claims\/<任务号>/)
     assert.match(text, /peer_report/)
     assert.match(text, /先停下问我/)
     assert.doesNotMatch(text, /低优先|修 MCP/) // 不复制看板内容
@@ -1374,5 +1375,85 @@ test('核验：只有主会话 / 用户能登记与取消；工作会话能看�
     const id = /核验 ([0-9a-f]{8})/.exec(ref)[1]
     assert.match((await h.run(`watch cancel ${id}`)).text, /已取消核验/)
     assert.match((await h.run('watch ci 12;rm')).text, /数字 run id|用法/)
+  } finally { await h.cleanup() }
+})
+
+test('peer_task：认领 / 拒抢 / 接手失效者 / 完成 / 登记 / 转交 / 退回 / 用户放弃 / 主会话改字段，带通知、备份与日志', async () => {
+  const h = await setup()
+  try {
+    const main = h.makeAgent('eeeeeeee-0000-0000-0000-000000000005', { cwd: h.dir })
+    h.agents.set(main.id, main)
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id, main.id] })
+    await mkdir(join(h.dir, '.agents/claims/T9'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/claims/T9/owner'), 'session-99999999-0000-0000-0000-000000000009\n2026-11-01 00:00:00 UTC\n')
+    const board = join(h.dir, '.agents/TASKS.md')
+    await writeFile(board, ['# 看板', '', '## 任务', '', '| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |', '|---|---|---|---|---|---|',
+      '| T1 | P2 | 一 | a | 否 | 待认领 |', '| T3 | P1 | 三 | c | 是 | 待认领 |', '| T9 | P1 | 九 | d | 是 | 进行中 |', '', '### T3 三', '', '- 原有', ''].join('\n'))
+    await h.run('main here', main)
+    const row = async (id) => parseTaskDoc(await readFile(board, 'utf8')).rows.find((item) => item.id === id)
+    const owner = (id) => readFile(join(h.dir, '.agents/claims', id, 'owner'), 'utf8')
+
+    assert.match(await h.call('peer_task', { action: 'claim', id: 't3' }), /已认领 T3/)
+    assert.match(await owner('T3'), new RegExp(`^${h.caller.id}\\n`))
+    assert.match((await row('T3')).status, /^进行中（aaaaaaaa 认领/)
+    assert.match(await h.call('peer_task', { action: 'claim', id: 'T3' }), /已经由你持有/)
+    await assert.rejects(h.call('peer_task', { action: 'claim', id: 'T3' }, h.peer), /已被 .*认领/)
+    await assert.rejects(h.call('peer_task', { action: 'takeover', id: 'T3' }, h.peer), /没有失效/)
+    await assert.rejects(h.call('peer_task', { action: 'takeover', id: 'T3', force: true }, h.peer), /没有失效/) // 工作会话不能强制
+    await assert.rejects(h.call('peer_task', { action: 'done', id: 'T3', text: 'x' }, h.peer), /持有者是/)
+    await assert.rejects(h.call('peer_task', { action: 'claim', id: 'T77' }), /都没有 T77/)
+
+    const done = await h.call('peer_task', { action: 'done', id: 'T3', text: 'abc12345 可合并（基于 build9）' })
+    assert.match(done, /已完成 T3/)
+    assert.match(await readFile(join(h.dir, '.agents/claims/T3/done'), 'utf8'), /^abc12345 可合并/)
+    assert.match((await row('T3')).status, /^已完成（aaaaaaaa，.*）：abc12345 可合并/)
+    const toMain = main.inbox.map(([mode, message]) => [mode, message.content[0].text])
+    assert.ok(toMain.some(([mode, text]) => mode === 'queue' && /relay-task-event.*T3 已完成：abc12345/.test(text)))
+    await assert.rejects(h.call('peer_task', { action: 'claim', id: 'T3' }, h.peer), /已写完成/)
+
+    // 持有者会话已不存在：可以接手
+    assert.match(await h.call('peer_task', { action: 'takeover', id: 'T9' }, h.peer), /已接手 T9/)
+    assert.match(await owner('T9'), new RegExp(`\\n接手 ${h.peer.id} \\d{4}-`))
+
+    // 登记：工作会话要写来源；号由插件分配
+    await assert.rejects(h.call('peer_task', { action: 'new', title: '拆出的子任务' }, h.peer), /写明来源/)
+    const created = await h.call('peer_task', { action: 'new', title: '拆出的子任务', priority: 'P2', detail: '从 T9 拆出，用户要求', claim: true }, h.peer)
+    const newId = /已登记 (T\d+)/.exec(created)[1]
+    assert.equal(newId, 'T10')
+    assert.match((await row(newId)).status, /^进行中（bbbbbbbb 认领/)
+    assert.ok(parseTaskDoc(await readFile(board, 'utf8')).sections.has(newId))
+    await assert.rejects(h.call('peer_task', { action: 'new', id: 'T3', title: '撞号' }, main), /已经用过/)
+
+    // 转交：目标收到收件箱通知（未唤醒），owner 记下
+    await assert.rejects(h.call('peer_task', { action: 'handoff', id: newId, to: 'aaaaaaaa' }), /持有者是/)
+    assert.match(await h.call('peer_task', { action: 'handoff', id: newId, to: 'aaaaaaaa', text: '你熟这块' }, h.peer), /已转交 T10 → [\s\S]*已通知/)
+    assert.match(await owner(newId), new RegExp(`接手 ${h.caller.id} .* 由 bbbbbbbb 转交：你熟这块`))
+    assert.ok(h.caller.inbox.some(([mode, message]) => mode === 'queue' && /把任务 T10 转交给你/.test(message.content[0].text)))
+
+    // 退回：认领目录留档，表格回到待认领，之后别人能再认领
+    assert.match(await h.call('peer_task', { action: 'release', id: newId, text: '先不做' }), /已退回 T10/)
+    assert.equal((await readdir(join(h.dir, '.agents/claims/.released'))).filter((name) => name.startsWith('T10-')).length, 1)
+    assert.match((await row(newId)).status, /^待认领（aaaaaaaa 退回.*先不做/)
+    assert.match(await h.call('peer_task', { action: 'claim', id: newId }, h.peer), /已认领 T10/)
+
+    // 用户命令：没人认领的任务直接标放弃
+    const abandoned = await h.run('task abandon T1 需求取消')
+    assert.equal(abandoned.kind, 'success', abandoned.text)
+    assert.match(await readFile(join(h.dir, '.agents/claims/T1/abandoned'), 'utf8'), /需求取消/)
+    assert.match((await row('T1')).status, /^已放弃/)
+
+    // 改字段：持有者之外只有主会话 / 用户
+    await assert.rejects(h.call('peer_task', { action: 'update', id: 'T3', priority: 'P0' }, h.peer), /持有者是/)
+    await assert.rejects(h.call('peer_task', { action: 'update', id: 'T3' }, main), /要给出要改的字段/)
+    assert.match(await h.call('peer_task', { action: 'update', id: 'T3', priority: 'P0', note: '主会话复核' }, main), /已更新 T3/)
+    assert.equal((await row('T3')).priority, 'P0')
+    assert.match(await readFile(board, 'utf8'), /- 原有\n- \d{4}-\d\d-\d\d \d\d:\d\dZ eeeeeeee：主会话复核/)
+
+    // 状态查询读到的是新结果
+    assert.match(await h.call('peer_tasks', { id: 'T9' }), /接手 1 次|→/)
+    const events = (await readFile(join(h.dir, '.agents/task-events.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    assert.deepEqual(events.map((event) => event.action), ['claim', 'done', 'takeover', 'new', 'handoff', 'release', 'claim', 'abandon', 'update'])
+    assert.ok((await readdir(join(h.dir, '.agents/backups/ops'))).length >= 8)
+    await assert.rejects(readFile(join(h.dir, '.agents/.tasks.lock')), /ENOENT/)
   } finally { await h.cleanup() }
 })

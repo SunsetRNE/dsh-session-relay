@@ -5,7 +5,8 @@ DeepSeek Harness（DSHA）平级会话互通插件：一个主会话协调多个
 ## 功能
 
 - `/relay` 命令：新建 / 打开会话、指派编号、群发指令、版本线、模板、接手与唤醒、主会话交接、任务看板（`/relay tasks`）、会话检查与搜索（`/relay inspect`、`/relay search`）。完整用法见 `/relay help`。
-- 模型工具：`peer_list`、`peer_report`、`peer_send`、`peer_spawn`、`peer_alias`、`peer_inspect`、`peer_tasks`，主会话另有 `peer_line`、`peer_assign`、`peer_workspace`、`peer_handoff`。
+- 任务看板写操作：`/relay task new|claim|takeover|handoff|release|done|abandon|update`（模型用 `peer_task`），加锁写 `.agents/TASKS.md` 与 claims，格式同看板认领规则。
+- 模型工具：`peer_list`、`peer_report`、`peer_send`、`peer_spawn`、`peer_alias`、`peer_inspect`、`peer_tasks`、`peer_task`，主会话另有 `peer_line`、`peer_assign`、`peer_workspace`、`peer_handoff`。
 - 协作面板（Web 客户端）：看板、交接预览、会话唤醒。
 
 ## 运行环境
