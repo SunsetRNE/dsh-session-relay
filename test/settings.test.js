@@ -237,17 +237,30 @@ test('Client：面板、状态点、悬停卡片、页头 ID 在有数据时渲�
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
   const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store }))
   React.useState = original
+  // 默认概览：主会话、版本线、计数、新建；不铺开看板和次要分区；分页标签带“需要处理”角标
   assert.match(page, /mainIs/)
-  assert.match(page, /要不要改/)
   assert.match(page, /openTitle/)
+  assert.match(page, /overviewCounts/)
+  assert.match(page, /pageOverview[\s\S]*pageBoard1[\s\S]*pageSearch[\s\S]*pageOps/)
+  assert.doesNotMatch(page, /要不要改|restartTitle/)
+  calls = 0
+  React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+  const boardPage = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
+  React.useState = original
+  assert.match(boardPage, /要不要改/)
+  assert.doesNotMatch(boardPage, /mainIs|restartTitle/)
+  calls = 0
+  React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+  const ops = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' }))
+  React.useState = original
   // 次要分区默认收起：只有标题和一行摘要
-  assert.match(page, /restartTitlefoldRestartIdle/)
-  assert.doesNotMatch(page, /restartStart/)
+  assert.match(ops, /restartTitlefoldRestartIdle/)
+  assert.doesNotMatch(ops, /restartStart/)
   // 本机记住展开后：内容出现
   globalThis.window = { localStorage: { getItem: () => JSON.stringify({ restart: true, open: true }), setItem: () => {} } }
   calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const opened = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store }))
+  const opened = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' }))
   React.useState = original
   delete globalThis.window
   assert.match(opened, /restartStart/)
@@ -274,10 +287,18 @@ test('Client：协作标签带本会话身份卡片与范围切换', async () =>
   assert.match(text, new RegExp(id))
   assert.match(text, /selfNotJoined/)
   assert.match(text, /joinSelf/)
-  assert.match(text, /scopeWorkspace/)
-  assert.match(text, /scopeHidden/)
   assert.match(text, /hiddenAttention[\s\S]*@t43b[\s\S]*认领被拒/)
   assert.match(text, /hiddenAttentionShow/)
+  // 窄屏只显示短 id（CSS 切换），完整 id 仍在
+  assert.match(text, /2b3fef60-00f7[\s\S]*2b3fef60/)
+  calls = 0
+  React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+  const tab = textOf(React.createElement(mod.ConversationRelayView, { sessionId: id, t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
+  React.useState = original
+  assert.match(tab, /scopeWorkspace/)
+  assert.match(tab, /scopeHidden/)
+  assert.match(tab, /hiddenAttention/)
+  assert.doesNotMatch(tab, /joinSelf/)
   assert.doesNotMatch(text, /panel/, '嵌入时不重复标题')
 })
 
@@ -364,12 +385,16 @@ test('Client：设置页每个工作区一条版本线；协作标签列出未�
   const view = textOf(React.createElement(mod.ConversationRelayView, { sessionId: id, t, openSession: () => {}, marksStore: store }))
   React.useState = original
   assert.match(view, /selfObserver/)
-  assert.match(view, /othersTitlefoldOthersSum/)
-  assert.doesNotMatch(view, /扫一遍仓库/)
+  calls = 0
+  React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+  const othersView = textOf(React.createElement(mod.ConversationRelayView, { sessionId: id, t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
+  React.useState = original
+  assert.match(othersView, /othersTitlefoldOthersSum/)
+  assert.doesNotMatch(othersView, /扫一遍仓库/)
   globalThis.window = { localStorage: { getItem: () => JSON.stringify({ others: true }), setItem: () => {} } }
   calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const expanded = textOf(React.createElement(mod.ConversationRelayView, { sessionId: id, t, openSession: () => {}, marksStore: store }))
+  const expanded = textOf(React.createElement(mod.ConversationRelayView, { sessionId: id, t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
   React.useState = original
   delete globalThis.window
   assert.match(expanded, /扫一遍仓库/)
@@ -391,18 +416,22 @@ test('Client：交接面板与侧栏标记（实心星、加入即空心圈）',
   const board = {
     scope: 'workspace', workspace: { id: 'ws-a', title: 'A', path: '/a', count: 3 }, hiddenByScope: 0,
     coordinator: { sessionId: main, label: '@rel', exists: true }, line: null, entries: [], others: [{ sessionId: 'session-o', label: 'o', title: '另一个', state: 'idle', updatedAt: 1 }], othersTotal: 1,
-    handoff: { group: 'ws-a', coordinator: main, draft: { id: 'd', notes: '下一步：推 281', by: 'model', updatedAt: 1 }, snapshot: '版本线：未公告', history: [{ at: 1, from: 'session-old', to: main, fromLabel: '@old', toLabel: '@rel' }] },
+    handoff: { group: 'ws-a', coordinator: main, draft: { id: 'd', notes: '下一步：推 281', by: 'model', updatedAt: 1 }, snapshot: '版本线：未公告', history: [{ at: 2, from: 'session-old', to: main, fromLabel: '@old', toLabel: '@rel' }, { at: 1, from: 'session-older', to: 'session-old', fromLabel: '@older', toLabel: '@old' }] },
     restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a'
   }
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store }))
+  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' }))
   React.useState = original
   assert.match(page, /hoTitle/)
   assert.match(page, /hoDraftBy/)
   assert.match(page, /hoConfirm/)
   assert.match(page, /hoRevert/)
+  // 最近交接只列最近一条，其余收在「全部 n 条」里
+  assert.match(page, /@old → @rel/)
+  assert.doesNotMatch(page, /@older → @old/)
+  assert.match(page, /hoHistoryMore/)
 })
 
 test('Client：看板卡片显示已答复、队列号、已分配、占用重叠与分配按钮', async () => {
@@ -422,7 +451,7 @@ test('Client：看板卡片显示已答复、队列号、已分配、占用重�
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store }))
+  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
   React.useState = original
   for (const key of ['answered', 'queueNo', 'assignedTo', 'conflict', 'assign']) assert.match(page, new RegExp(key))
 })
@@ -453,7 +482,7 @@ test('Client：卡片「唤醒」表单显示预判，主会话新建时禁用�
       }
       return original(initial)
     }
-    try { return textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store })) } finally { React.useState = original }
+    try { return textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' })) } finally { React.useState = original }
   }
   const confirm = () => rendered.find((node) => node.type === 'button' && node.children.includes('wakeConfirm'))
   const plans = (auto) => ({ auto, resume: { action: 'resume', reason: 'r' }, new: { action: 'new', reason: 'n' } })
@@ -488,7 +517,7 @@ test('Client：看板按插件分类分组，归档条目进右栏「归档」�
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store }))
+  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
   React.useState = original
   for (const key of ['catAttention', 'catReady', 'why_failed', 'archiveTitle', 'foldArchiveSum', 'catHint']) assert.match(page, new RegExp(key))
   assert.doesNotMatch(page, /catActive|boardEmpty/)
@@ -512,7 +541,7 @@ test('Client：卡片默认折叠（只留摘要与展开按钮），需要处�
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store }))
+  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
   React.useState = original
   assert.match(page, /cardMore/)
   assert.match(page, /conflictCount/)
@@ -520,4 +549,31 @@ test('Client：卡片默认折叠（只留摘要与展开按钮），需要处�
   assert.match(page, /OPEN_FILES/, '需要处理的卡片展开')
   assert.match(page, /catBlank/)
   assert.doesNotMatch(page, /BLANK_SUMMARY/, '空白分组默认收起')
+})
+
+test('Client：找会话结果——看板条目用完整卡片，其它会话带打开 / 加入；路由空查询拒绝', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const found = { scope: 'all', total: 3, results: [
+    { kind: 'board', entry: { sessionId: 'session-000bc230-1', label: '@t43b', status: 'blocked', state: 'idle', summary: '认领被拒', updatedAt: 1, category: 'attention' } },
+    { kind: 'other', session: { sessionId: 'session-000bc231-2', label: 'x', title: '别的会话', aliases: ['foo'], state: 'cold', updatedAt: 1, isMain: false, optOut: false, workspace: 'A' } }
+  ], candidates: [] }
+  const original = React.useState
+  let calls = 0
+  React.useState = (initial) => (++calls === 2 ? [found, () => {}] : original(initial))
+  const text = textOf(React.createElement(mod.SessionFind, { t: (k) => k, scope: 'all', onScopeChange() {}, openSession() {}, busy: false, act: async () => ({}), copy() {}, flash() {}, sessionId: 'session-me' }))
+  React.useState = original
+  for (const key of ['findTitle', 'findMainOnly', 'findCount', '认领被拒', '别的会话', '@foo', 'joinThis', 'openSession', 'inWorkspace']) assert.match(text, new RegExp(key))
+  const handler = createHandler({ requestRejection: () => undefined }, { findSessions: async () => { throw new Error('不该调用') } })
+  const res = fakeRes()
+  await handler(Object.assign(fakeReq('GET'), { url: '/api/dsha-session-relay?view=find&q=%20' }), res)
+  assert.equal(res.status, 400)
+  assert.equal(res.body.error, 'empty_query')
+  const seen = []
+  const ok = createHandler({ requestRejection: () => undefined }, { findSessions: async (options) => { seen.push(options); return { results: [] } } })
+  const res2 = fakeRes()
+  await ok(Object.assign(fakeReq('GET'), { url: '/api/dsha-session-relay?view=find&q=&main=1&scope=all' }), res2)
+  assert.equal(res2.status, 200)
+  assert.equal(seen[0].mainOnly, true)
+  assert.equal(seen[0].scope, 'all')
 })
