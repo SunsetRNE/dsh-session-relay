@@ -604,7 +604,10 @@ test('交接：主会话模型只能起草；用户确认后新建会话接手�
     assert.match(drafted, /不要自己/)
     assert.equal(h.notified.at(-1)[0], '主会话交接草稿已就绪')
     assert.match(h.contextFor(h.caller), /交接草稿已保存/)
-    assert.match((await h.run('handoff')).text, /从 281 推到 290[\s\S]*版本线[\s\S]*main=build280[\s\S]*@w1/)
+    const preview = (await h.run('handoff')).text
+    assert.match(preview, /从 281 推到 290[\s\S]*@w1 dddddddd · 进行中/)
+    // 版本线、工作区计数、声明每一步都在新主会话的协作上下文里，快照不再重复
+    assert.doesNotMatch(preview, /main=build280|侧栏登记/)
     // 用户确认：新建接手会话
     h.caller.inbox.length = 0
     const done = await h.run('handoff confirm --as main2')
@@ -615,7 +618,8 @@ test('交接：主会话模型只能起草；用户确认后新建会话接手�
     const [mode, message] = successor.inbox.at(-1)
     assert.equal(mode, 'followup')
     assert.deepEqual(message.source, { kind: 'user' })
-    assert.match(message.content[0].text, /主会话交接 · 用户已确认[\s\S]*从 281 推到 290[\s\S]*交接时快照[\s\S]*main=build280/)
+    assert.match(message.content[0].text, /主会话交接 · 用户已确认[\s\S]*从 281 推到 290[\s\S]*交接时快照[\s\S]*@w1/)
+    assert.match(h.contextFor(successor), /main=build280/, '版本线在接手方的协作上下文里')
     const [oldMode, notice] = h.caller.inbox.at(-1)
     assert.equal(oldMode, 'queue', '旧主会话只放收件箱，不唤醒')
     assert.match(notice.content[0].text, /不再是主会话/)

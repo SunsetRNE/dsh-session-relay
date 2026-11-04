@@ -101,12 +101,46 @@ test('交接快照只列没结束的会话，每条一两行；交接说明超�
     'session-cccccccc-0000-0000-0000-000000000003': { status: 'done', summary: '做完了', updatedAt: t },
     'session-dddddddd-0000-0000-0000-000000000004': { status: 'blocked', summary: '卡住', question: '要不要改 ADR？', updatedAt: t }
   }
-  const text = handoffSnapshot({ workspace: { title: 'W' }, line: { setAt: t, text: 'main=build307 (f5ec2520)\n第二行很长的规则' }, board, labelFor: (id) => id.slice(8, 16) })
+  const text = handoffSnapshot({ board, labelFor: (id) => id.slice(8, 16) })
   assert.match(text, /看板：2 个没结束，另有 2 个已完成 \/ 已合入不列出/)
-  assert.match(text, /aaaaaaaa .*分支 fix\/a · 提交 abc12345/)
+  assert.match(text, /- aaaaaaaa · 可合并 · 分支 fix\/a · 提交 abc12345/, '标签就是短 id 时不重复')
   assert.match(text, /问题：要不要改 ADR？/)
-  assert.match(text, /main=build307 \(f5ec2520\)/)
-  for (const gone of ['bbbbbbbb', 'cccccccc', '占用', '最近一轮', '第二行很长的规则']) assert.ok(!text.includes(gone), gone)
+  for (const gone of ['bbbbbbbb', 'cccccccc', '占用', '最近一轮', '版本线（', '工作区：']) assert.ok(!text.includes(gone), gone)
   const store = new HandoffStore(join(await mkdtemp(join(tmpdir(), 'ho-')), 'h.json'))
   assert.throws(() => store.saveDraft('g', { notes: '字'.repeat(NOTES_LIMIT + 1), by: 'model' }), /超过 2000 字/)
+})
+
+test('主会话上下文：已合入 / 提交不存在 / 前任主会话并成一行，不排队、不算占用重叠；重叠一个会话一行', async () => {
+  const { coordinatorContext } = await import('../lib/core.js')
+  const t = Date.UTC(2026, 10, 4)
+  const id = (n) => `session-${String(n).repeat(8)}-0000-0000-0000-000000000000`
+  const board = {
+    [id(1)]: { status: 'ready', summary: '真的可合并', commit: 'abc12345', files: 'docs/a.md', reportedAt: t, updatedAt: t },
+    [id(2)]: { status: 'ready', summary: '早已进 main', mainMerged: 'main f5ec2520', files: 'docs', lastTurn: '很长的最近一轮', lastTurnAt: t + 9, updatedAt: t },
+    [id(3)]: { status: 'ready', summary: '提交被改写', commitMissing: true, files: 'docs', updatedAt: t },
+    [id(4)]: { status: 'question', summary: '旧主会话的问题', question: '要不要发 304？', formerMain: true, files: 'docs', updatedAt: t },
+    [id(5)]: { status: 'working', summary: '在改文档', files: 'docs/a.md, docs/b.md', updatedAt: t },
+    [id(6)]: { status: 'working', summary: '也在改文档', files: 'docs', updatedAt: t },
+    [id(7)]: { status: 'working', summary: '还在改文档', files: 'docs/a.md', updatedAt: t }
+  }
+  const text = coordinatorContext({ board, labelFor: (sid) => sid.slice(8, 16), selfId: 'm' })
+  assert.match(text, /11111111 · 可合并 #1/)
+  for (const gone of ['早已进 main', '提交被改写', '要不要发 304', '很长的最近一轮', '可合并 #2']) assert.ok(!text.includes(gone), gone)
+  assert.match(text, /已合入 main（声明或 git 核对）1 个：22222222/)
+  assert.match(text, /提交本机已不存在.*1 个：33333333/)
+  assert.match(text, /已卸任的前任主会话 1 个：44444444/)
+  // 1 与 5、6、7 都重叠：只一行，点名 3 个
+  const one = text.split('\n').filter((line) => line.includes('⚠')).filter((line, i, all) => all.indexOf(line) === i)
+  assert.ok(!text.includes('22222222 都在改') && !text.includes('与 33333333'), '过时条目不算重叠')
+  assert.equal(text.split('- 11111111')[1].split('\n- ')[0].match(/⚠/g).length, 1)
+  assert.ok(one.length > 0)
+})
+
+test('主会话上下文：已完成的条目不放占用清单与最近一轮', async () => {
+  const { coordinatorContext } = await import('../lib/core.js')
+  const t = Date.UTC(2026, 10, 4)
+  const board = { 'session-eeeeeeee-0000-0000-0000-000000000000': { status: 'done', summary: '做完了', files: 'X.java', lastTurn: '收尾', lastTurnAt: t + 5, reportedAt: t, updatedAt: t } }
+  const text = coordinatorContext({ board, labelFor: (id) => id.slice(8, 16), selfId: 'm' })
+  assert.match(text, /eeeeeeee · 已完成/)
+  assert.doesNotMatch(text, /占用：|最近一轮/)
 })
