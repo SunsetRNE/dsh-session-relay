@@ -1380,6 +1380,29 @@ test('核验：只有主会话 / 用户能登记与取消；工作会话能看�
   } finally { await h.cleanup() }
 })
 
+test('核验：新工作区没有主会话时，本会话可以自己登记 / 取消，通知发给登记人；有了主会话后别人不能再登记', async () => {
+  const h = await setup()
+  try {
+    let remote = null
+    h.relay.watches.checkers = { repoOf: async () => 'o/r', ci: async () => ({ done: false }), ref: async () => ({ sha: remote }) }
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    assert.match(await h.call('peer_watch', { action: 'list' }), /还没有主会话：本会话可以直接用 peer_watch 登记/)
+    const added = await h.call('peer_watch', { action: 'add', kind: 'ref', ref: 'v1', sha: 'abcdef12', label: '新区 tag' })
+    const id = /核验 ([0-9a-f]{8})/.exec(added)[1]
+    await assert.rejects(h.call('peer_watch', { action: 'cancel', id }, h.peer), /只能取消自己登记的/)
+    remote = 'abcdef1200000000000000000000000000000000'
+    await h.relay.watches.tick() // 等登记时触发的那一轮结束
+    for (const item of h.relay.watches.store.items()) item.nextAt = 0
+    await h.relay.watches.tick()
+    assert.match(h.caller.inbox.map(([, message]) => message.content[0].text).join('\n'), /新区 tag/)
+    await h.call('peer_watch', { action: 'add', kind: 'ref', ref: 'v2', sha: 'abcdef12' })
+    const second = /核验 ([0-9a-f]{8})/.exec(await h.call('peer_watch', { action: 'add', kind: 'ref', ref: 'v3', sha: 'abcdef13' }))[1]
+    assert.match(await h.call('peer_watch', { action: 'cancel', id: second }), /已取消/)
+    await h.run('main here', h.peer)
+    await assert.rejects(h.call('peer_watch', { action: 'add', kind: 'ref', ref: 'v4', sha: 'abcdef14' }), /只有本工作区的主会话能登记/)
+  } finally { await h.cleanup() }
+})
+
 test('核验 tag：登记后换了主会话，tag 推上来时通知现任主会话（不是登记者），并发手机通知', async () => {
   const h = await setup()
   try {
@@ -1392,6 +1415,7 @@ test('核验 tag：登记后换了主会话，tag 推上来时通知现任主会
     // 主会话交给 peer，之后 tag 才出现
     await h.run('main here', h.peer)
     remote = '56bbde8f00000000000000000000000000000000'
+    await h.relay.watches.tick() // 等登记时触发的那一轮结束
     for (const item of h.relay.watches.store.items()) item.nextAt = 0
     await h.relay.watches.tick()
     const toPeer = h.peer.inbox.map(([, message]) => message.content[0].text).join('\n')
