@@ -15,7 +15,7 @@ async function makeRelay() {
     aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), watchPath: join(dir, 'watches.json'), watch: false
   })
   await relay.ready()
-  return { dir, relay, cleanup: () => rm(dir, { recursive: true, force: true }) }
+  return { dir, relay, cleanup: async () => { await relay.away.chain; await rm(dir, { recursive: true, force: true }) } }
 }
 
 function fakeReq(method, body, headers = {}) {
@@ -576,4 +576,73 @@ test('Client：找会话结果——看板条目用完整卡片，其它会话�
   assert.equal(res2.status, 200)
   assert.equal(seen[0].mainOnly, true)
   assert.equal(seen[0].scope, 'all')
+})
+
+test('Client：概览页的「等你决定」、唤醒暂停横幅 / 计数行、「初始化」卡片与常设授权', async () => {
+  const { React, rendered } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => key
+  const id = 'session-2b3fef60-00f7-4698-b7de-6111c3fdabd0'
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const base = {
+    self: null, scope: 'workspace', workspace: { id: 'w', title: 'W', path: '/p', count: 1 }, groupKey: 'w',
+    coordinator: null, line: null, entries: [], restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/p',
+    delegation: null, delegationDefault: '建议的授权文字', delegationLimit: 600
+  }
+  const render = (board, props = {}) => {
+    const original = React.useState
+    let calls = 0
+    React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+    try { return textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'overview', ...props })) } finally { React.useState = original }
+  }
+  // 缺东西：初始化卡片逐项列出；没有会话视角时不给「设本会话为主会话」，改给提示
+  let text = render({ ...base, setup: { hasMain: false, hasLine: false, hasTaskBoard: false, isGitRepo: false, root: '/p' } })
+  assert.match(text, /setupTitle/)
+  assert.match(text, /setupNoMain[\s\S]*setupMainHint/)
+  assert.doesNotMatch(text, /setupSetMain/)
+  assert.match(text, /setupNoLine[\s\S]*setupLineSave/)
+  assert.match(text, /setupNoBoard[\s\S]*setupInitBoard/)
+  assert.match(text, /setupNotGit/)
+  assert.ok(rendered.some((node) => node.type === 'textarea' && node.props.value === 'setupLineTemplate'), '版本线编辑框预填模板')
+  // 有会话视角：按钮出现
+  text = render({ ...base, setup: { hasMain: false, hasLine: true, hasTaskBoard: true, isGitRepo: true, root: '/p' } }, { sessionId: id, embedded: true })
+  assert.match(text, /setupSetMain/)
+  assert.doesNotMatch(text, /setupNoBoard|setupNotGit|setupNoLine/)
+  // 什么都不缺：卡片不出现
+  text = render({ ...base, setup: { hasMain: true, hasLine: true, hasTaskBoard: true, isGitRepo: true, root: '/p' } })
+  assert.doesNotMatch(text, /setupTitle/)
+  // 没有目录：只给提示
+  text = render({ ...base, setup: { hasMain: true, hasLine: true, hasTaskBoard: false, isGitRepo: false, root: null } })
+  assert.match(text, /setupNoRoot/)
+  assert.doesNotMatch(text, /setupInitBoard/)
+  // 等你决定：每个选项一个按钮 + 忽略，排在最上面；计数行
+  const asks = [{ id: 'a1', question: 'build281 给谁', options: ['lint', 'adb'], about: 'session-x', aboutLabel: '@lint', by: 'session-m', byLabel: '@main', at: 1 }]
+  text = render({ ...base, asks, unattended: { wakesThisHour: 3, limit: 16, approxTokensThisHour: 1_250_000, paused: false, pausedAt: null } })
+  assert.match(text, /^[\s\S]*?askTitle（1）build281 给谁[\s\S]*lintadbaskDismiss/)
+  assert.match(text, /askAbout/)
+  assert.match(text, /wakeLine/)
+  assert.doesNotMatch(text, /wakePaused/)
+  assert.match(text, /delegTitle/)
+  // 暂停：横幅 + 继续
+  text = render({ ...base, unattended: { wakesThisHour: 16, limit: 16, approxTokensThisHour: 0, paused: true, pausedAt: 1 } })
+  assert.match(text, /wakePaused[\s\S]*wakeResume/)
+  // 计数文字（真实词典格式）
+  const zhLine = (() => {
+    const original = React.useState
+    let calls = 0
+    React.useState = (initial) => (++calls === 2 ? [{ ...base, unattended: { wakesThisHour: 3, limit: 16, approxTokensThisHour: 1_250_000, paused: false, pausedAt: null } }, () => {}] : original(initial))
+    try { return textOf(React.createElement(mod.BoardPage, { t: (key) => ({ wakeLine: '本小时自动唤醒 {n}/{limit} 次，约 {tokens} token' })[key] ?? key, openSession: () => {}, marksStore: store, initialPage: 'overview' })) } finally { React.useState = original }
+  })()
+  assert.match(zhLine, /本小时自动唤醒 3\/16 次，约 1\.3M token/)
+  // 常设授权展开后：未设定时预填建议文字
+  globalThis.window = { localStorage: { getItem: () => JSON.stringify({ deleg: true }), setItem: () => {} } }
+  try {
+    rendered.length = 0
+    text = render(base)
+    assert.match(text, /delegHint/)
+    assert.ok(rendered.some((node) => node.type === 'textarea' && node.props.value === '建议的授权文字'))
+  } finally { delete globalThis.window }
+  // 旧服务端（没有这些字段）不出错
+  text = render({ ...base, delegationDefault: undefined, asks: undefined, unattended: undefined, setup: undefined })
+  assert.doesNotMatch(text, /setupTitle|askTitle|wakeLine|delegTitle/)
 })

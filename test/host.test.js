@@ -101,7 +101,7 @@ async function setup() {
   const contextFor = (agent) => contexts[0].text({ agent })
   const run = (raw, agent = caller) => commands.get('relay').handler({ rawInput: raw, agent, signal: AbortSignal.timeout(5000) })
   const call = (name, args, agent = caller) => tools.get(name).execute(args, { agent, signal: AbortSignal.timeout(5000) })
-  return { dir, caller, peer, child, agents, listeners, commands, tools, run, call, relay, routes, shell, busy, notified, workspaces, services, timers, contextFor, makeAgent, cleanup: () => rm(dir, { recursive: true, force: true }) }
+  return { dir, caller, peer, child, agents, listeners, commands, tools, run, call, relay, routes, shell, busy, notified, workspaces, services, timers, contextFor, makeAgent, cleanup: async () => { await shell.relay?.away?.chain; await rm(dir, { recursive: true, force: true }) } }
 }
 
 test('注册了 /relay 与四个 peer 工具', async () => {
@@ -109,7 +109,7 @@ test('注册了 /relay 与四个 peer 工具', async () => {
   try {
     assert.ok(h.commands.has('relay'))
     assert.equal(h.routes[0].path, '/api/dsha-session-relay')
-    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_line', 'peer_list', 'peer_report', 'peer_send', 'peer_spawn', 'peer_task', 'peer_tasks', 'peer_watch', 'peer_workspace'])
+    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_ask_user', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_line', 'peer_list', 'peer_report', 'peer_send', 'peer_spawn', 'peer_task', 'peer_tasks', 'peer_watch', 'peer_workspace'])
   } finally { await h.cleanup() }
 })
 
@@ -1611,5 +1611,239 @@ test('子代理通讯：树内经根会话转交；对外署名根会话、回�
     await h.call('peer_send', { target: 'ffffffff', message: '1' }, h.child)
     await h.call('peer_send', { target: 'cccccccc', message: '2' }, sibling)
     await assert.rejects(h.call('peer_send', { target: 'ffffffff', message: '3' }, h.child), /本会话树 10 分钟内已在会话树内互发 2 次/)
+  } finally { await h.cleanup() }
+})
+
+// ------------------------------------------------------------ 0.18：初始化、常设授权、向用户提问、无人值守唤醒预算
+
+test('初始化：面板 setup 标出缺的项；/relay task init 建出可解析的看板，已有时拒绝；模型不能建；没有看板的报错指向建法', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    let board = await h.relay.board(undefined, { session: h.caller.id })
+    assert.deepEqual(board.setup, { hasMain: false, hasLine: false, hasTaskBoard: false, isGitRepo: false, root: h.dir })
+    // 没有看板：模型与用户的报错都说明可以从面板或 /relay task init 建
+    await assert.rejects(h.call('peer_tasks', {}), /初始化.*建任务看板.*\/relay task init/)
+    await assert.rejects(h.call('peer_task', { action: 'claim', id: 'T1' }), (error) => error.code === 'no_task_board' && /\/relay task init/.test(error.message))
+    // 模型没有建看板的动作
+    await assert.rejects(h.call('peer_task', { action: 'init' }), /must be one of/)
+    assert.ok(![...h.tools.keys()].some((name) => /init|deleg/.test(name)))
+    const done = await h.run('task init')
+    assert.equal(done.kind, 'success', done.text)
+    const text = await readFile(join(h.dir, '.agents/TASKS.md'), 'utf8')
+    assert.match(text, /^## 认领规则$/m)
+    assert.deepEqual(parseTaskDoc(text).rows, [])
+    assert.ok((await readdir(join(h.dir, '.agents'))).includes('claims'))
+    // 缓存已失效：面板和上下文马上看到
+    board = await h.relay.board(undefined, { session: h.caller.id })
+    assert.equal(board.setup.hasTaskBoard, true)
+    assert.equal(board.taskBoard.open.length, 0)
+    assert.match(h.contextFor(h.caller), /<task-board path="[^"]*TASKS\.md">/)
+    // 已有：拒绝（命令与面板）
+    assert.match((await h.run('task init')).text, /已经有任务看板/)
+    const { perform } = await import('../lib/settings-route.js')
+    await assert.rejects(perform(h.relay, { action: 'task-init', fromSession: h.caller.id }), (error) => error.code === 'board_exists')
+    // 建好的看板能直接登记任务
+    assert.match(await h.call('peer_task', { action: 'new', title: '第一个任务', detail: '用户要求' }), /已登记 T1/)
+    // 其余几项：git、主会话、版本线
+    await mkdir(join(h.dir, '.git'))
+    await h.run('main here')
+    await h.run('line main=abc1234')
+    board = await h.relay.board(undefined, { session: h.caller.id })
+    assert.deepEqual(board.setup, { hasMain: true, hasLine: true, hasTaskBoard: true, isGitRepo: true, root: h.dir })
+  } finally { await h.cleanup() }
+})
+
+test('常设授权：只由用户设 / 看 / 清；只进主会话上下文，正文原样；没设时只有一句固定提示', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    assert.match((await h.run('delegate')).text, /还没有常设授权[\s\S]*重跑不稳定的测试/)
+    const unset = h.contextFor(h.caller)
+    assert.match(unset, /peer_ask_user/)
+    assert.doesNotMatch(unset, /Standing delegation/)
+    assert.equal(h.contextFor(h.caller), unset, '没变化时上下文稳定')
+    assert.equal((await h.run('delegate 重跑不稳定的 CI、排合并队列可以自己定')).kind, 'success')
+    const set = h.contextFor(h.caller)
+    assert.match(set, /Standing delegation \(set by the user\): "重跑不稳定的 CI、排合并队列可以自己定"\. Decide these yourself without waiting; anything else that needs the user: peer_ask_user\./)
+    assert.match(set, /Push, merge, release, delete, install or phone actions still need explicit user approval/)
+    assert.equal(h.relay.coord.group('ws-1').delegation.text, '重跑不稳定的 CI、排合并队列可以自己定')
+    // 工作会话、旁观会话看不到
+    await h.call('peer_report', { status: 'working', summary: 'x' }, h.peer)
+    assert.doesNotMatch(h.contextFor(h.peer), /Standing delegation|排合并队列/)
+    assert.match((await h.run('delegate')).text, /由你设定[\s\S]*排合并队列/)
+    // 面板：数据与设置 / 清除
+    const { perform } = await import('../lib/settings-route.js')
+    let out = await perform(h.relay, { action: 'delegate', fromSession: h.caller.id, text: '只许排号' })
+    assert.equal(out.board.delegation.text, '只许排号')
+    assert.match(out.board.delegationDefault, /推送、合并到 main/)
+    await assert.rejects(perform(h.relay, { action: 'delegate', fromSession: h.caller.id, text: 'x'.repeat(601) }), /600/)
+    out = await perform(h.relay, { action: 'delegate-clear', fromSession: h.caller.id })
+    assert.equal(out.board.delegation, null)
+    assert.equal((await h.run('delegate clear')).kind, 'error')
+    // 持久：重新加载后仍在
+    await h.run('delegate 能自己定的事')
+    await h.relay.coord.load()
+    assert.equal(h.relay.coord.group('ws-1').delegation.text, '能自己定的事')
+  } finally { await h.cleanup() }
+})
+
+test('peer_ask_user：只给主会话根会话；去重、上限校验；面板选择以用户身份（hop 0）送到主会话并清掉；忽略', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await assert.rejects(h.call('peer_ask_user', { question: '选哪个', options: ['A', 'B'] }), (error) => error.code === 'not_coordinator')
+    await h.run('main here')
+    await assert.rejects(h.call('peer_ask_user', { question: '选哪个', options: ['A', 'B'] }, h.peer), (error) => error.code === 'not_coordinator')
+    await assert.rejects(h.call('peer_ask_user', { question: '选哪个', options: ['A', 'B'] }, h.child), /只给根会话用/)
+    await assert.rejects(h.call('peer_ask_user', { question: '选哪个', options: ['A'] }), /2–3/)
+    await assert.rejects(h.call('peer_ask_user', { question: '选哪个', options: ['A', 'x'.repeat(41)] }), /40/)
+    await assert.rejects(h.call('peer_ask_user', { question: 'q'.repeat(301), options: ['A', 'B'] }), /300/)
+    const first = await h.call('peer_ask_user', { question: 'build281 给谁', options: ['lint', 'adb'], about: h.peer.id.slice(0, 8) })
+    assert.match(first, /并发了手机通知/)
+    assert.match(first, /不要轮询/)
+    assert.equal(h.notified.filter(([title]) => title === '主会话等你决定').length, 1)
+    assert.match(h.notified.at(-1)[1], /build281 给谁（lint \/ adb）/)
+    assert.match(await h.call('peer_ask_user', { question: 'build281 给谁', options: ['lint', 'adb'] }), /已经在等/)
+    assert.equal(h.notified.filter(([title]) => title === '主会话等你决定').length, 1, '同一问题不重复通知')
+    assert.match(h.contextFor(h.caller), /Waiting for the user on 1 peer_ask_user question/)
+    assert.ok(h.relay.marks().attention >= 1, '侧栏角标算上待决定的问题')
+    let board = await h.relay.board(undefined, { session: h.caller.id })
+    assert.equal(board.asks.length, 1)
+    const ask = board.asks[0]
+    assert.equal(ask.about, h.peer.id)
+    // 面板选择：用户来源、hop 0、发给主会话（不直接发给 about 的工作会话）
+    const peerInbox = h.peer.inbox.length
+    const { perform } = await import('../lib/settings-route.js')
+    await assert.rejects(perform(h.relay, { action: 'ask-answer', fromSession: h.caller.id, id: ask.id, option: 'nope' }), (error) => error.code === 'bad_option')
+    const out = await perform(h.relay, { action: 'ask-answer', fromSession: h.caller.id, id: ask.id, option: 'adb' })
+    assert.equal(out.result.sessionId, h.caller.id)
+    const [mode, message] = h.caller.inbox.at(-1)
+    assert.equal(mode, 'followup')
+    assert.deepEqual(message.source, { kind: 'user' })
+    assert.equal(message.content[0].text, '[用户在面板选择] build281 给谁 → adb')
+    const { hopOfMessage } = await import('../lib/core.js')
+    assert.equal(hopOfMessage(message), 0)
+    assert.equal(h.peer.inbox.length, peerInbox)
+    assert.equal(out.board.asks.length, 0)
+    assert.doesNotMatch(h.contextFor(h.caller), /Waiting for the user/)
+    await assert.rejects(perform(h.relay, { action: 'ask-answer', fromSession: h.caller.id, id: ask.id, option: 'adb' }), (error) => error.code === 'ask_ended')
+    // 用户回答不占唤醒名额
+    assert.equal(h.relay.wakeView('ws-1').wakesThisHour, 0)
+    // 忽略
+    await h.call('peer_ask_user', { question: '要不要发版', options: ['发', '不发', '再等等'] })
+    const second = (await h.relay.board(undefined, { session: h.caller.id })).asks[0]
+    const dismissed = await perform(h.relay, { action: 'ask-dismiss', fromSession: h.caller.id, id: second.id })
+    assert.equal(dismissed.board.asks.length, 0)
+    // 通知失败不抛给模型
+    h.relay.notify = async () => { throw new Error('bridge down') }
+    assert.match(await h.call('peer_ask_user', { question: '第三个', options: ['是', '否'] }), /通知未送达/)
+  } finally { await h.cleanup() }
+})
+
+test('无人值守唤醒预算：只算模型唤醒空闲会话；到上限改放收件箱并只通知一次；用户投递不受影响；继续后重新计数', async () => {
+  const h = await setup()
+  try {
+    const w = h.makeAgent('99999999-0000-0000-0000-000000000009', { cwd: h.dir })
+    h.agents.set(w.id, w)
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id, w.id] })
+    await h.run('main here')
+    h.relay.wakeLimit = 2
+    h.listeners['session/event'](w.session, { type: 'assistant/message', data: { message: { content: [] }, usage: { totalTokens: 5000 } } })
+    // 正在运行的会话：不算唤醒
+    await h.call('peer_send', { target: h.peer.id.slice(0, 8), message: '插一句' })
+    // 用户 /relay 不算
+    await h.run(`${w.id.slice(0, 8)} 用户说的`)
+    assert.equal(h.relay.wakeView('ws-1').wakesThisHour, 0)
+    await h.call('peer_send', { target: w.id.slice(0, 8), message: '一' })
+    await h.call('peer_send', { target: w.id.slice(0, 8), message: '二', mode: 'queue' })
+    await h.call('peer_send', { target: w.id.slice(0, 8), message: '三' })
+    let view = h.relay.wakeView('ws-1')
+    assert.equal(view.wakesThisHour, 2, 'queue 不算唤醒')
+    assert.equal(view.approxTokensThisHour, 10000)
+    assert.equal(view.paused, false)
+    // 第三次唤醒：改放收件箱，告诉模型别重试，发一次通知
+    const out = await h.call('peer_send', { target: w.id.slice(0, 8), message: '四' })
+    assert.match(out, /收件箱.*没有唤醒.*不要重试/)
+    assert.equal(w.inbox.at(-1)[0], 'queue')
+    assert.equal(h.relay.wakeView('ws-1').paused, true)
+    await h.call('peer_send', { target: w.id.slice(0, 8), message: '五' })
+    assert.equal(w.inbox.at(-1)[0], 'queue')
+    const pauses = h.notified.filter(([title]) => title === '自动唤醒已暂停')
+    assert.equal(pauses.length, 1)
+    assert.match(pauses[0][1], /本小时自动唤醒已达 2 次，已暂停；面板可继续/)
+    assert.match(h.contextFor(h.caller), /Unattended wake budget for this hour is used up/)
+    // 用户投递照常唤醒
+    await h.run(`${w.id.slice(0, 8)} 用户继续`)
+    assert.equal(w.inbox.at(-1)[0], 'followup')
+    // 新建会话：直接拒绝，不建
+    const before = h.agents.size
+    await assert.rejects(h.call('peer_spawn', { task: '新活' }), (error) => error.code === 'wake_budget' && /不要重试/.test(error.message))
+    // 插件核验 / 推送链通知（origin 'plugin'）暂停时也照常唤醒，不计数
+    assert.equal(h.relay.away.isPaused(h.relay.groupKeyOf(h.peer.id)), true)
+    const sent = await h.relay.deliver(h.peer.id, { content: [{ type: 'text', text: 'CI 完成' }], source: { kind: 'agent' } }, 'auto', { origin: 'plugin' })
+    assert.equal(sent.budgetQueued, undefined, '插件通知暂停时也照常投递')
+    assert.equal(h.agents.size, before)
+    // 面板数据与继续
+    const { perform } = await import('../lib/settings-route.js')
+    const board = await h.relay.board(undefined, { session: h.caller.id })
+    assert.deepEqual(Object.keys(board.unattended).sort(), ['approxTokensThisHour', 'limit', 'paused', 'pausedAt', 'wakesThisHour'])
+    assert.equal(board.unattended.limit, 2)
+    const resumed = await perform(h.relay, { action: 'unattended-resume', fromSession: h.caller.id })
+    assert.equal(resumed.board.unattended.paused, false)
+    assert.equal(resumed.board.unattended.wakesThisHour, 0)
+    assert.doesNotMatch(h.contextFor(h.caller), /Unattended wake budget/)
+    await h.call('peer_send', { target: w.id.slice(0, 8), message: '六' })
+    assert.equal(w.inbox.at(-1)[0], 'followup')
+    assert.match((await h.run('wakes')).text, /1\/2 次/)
+    // 持久：重新读文件计数还在
+    await h.relay.away.chain
+    await h.relay.away.load()
+    assert.equal(h.relay.wakeView('ws-1').wakesThisHour, 1)
+    // 0 = 不限
+    h.relay.wakeLimit = 0
+    for (let i = 0; i < 4; i += 1) await h.call('peer_send', { target: w.id.slice(0, 8), message: `x${i}` })
+    assert.equal(w.inbox.at(-1)[0], 'followup')
+    assert.equal(h.relay.wakeView('ws-1').paused, false)
+  } finally { await h.cleanup() }
+})
+
+test('主会话跳数上限默认 24，普通上限仍是 3', async () => {
+  const { RelayGuard } = await import('../lib/core.js')
+  const guard = new RelayGuard()
+  assert.equal(guard.coordinatorMaxHops, 24)
+  assert.equal(guard.maxHops, 3)
+})
+
+test('自动置顶按面板分类：已合入的可合并、久未活动的进行中被撤；还在做的、待答复的保留', async () => {
+  const h = await setup()
+  try {
+    const ids = ['a1', 'a2', 'a3', 'a4'].map((tag, index) => h.makeAgent(`${tag}a1a1a1-0000-0000-0000-00000000001${index}`, { cwd: h.dir }))
+    const [merged, idle, active, asking] = ids
+    for (const agent of ids) h.agents.set(agent.id, agent)
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, ...ids.map((agent) => agent.id)] })
+    const registry = h.relay.ctx.workspaceRegistry
+    registry.pinnedSessionIds = []
+    registry.pinSession = async (id) => { if (!registry.pinnedSessionIds.includes(id)) registry.pinnedSessionIds = [id, ...registry.pinnedSessionIds] }
+    registry.unpinSession = async (id) => { registry.pinnedSessionIds = registry.pinnedSessionIds.filter((item) => item !== id) }
+    await h.run('main here')
+    await h.call('peer_report', { status: 'ready', summary: '可合并', commit: 'abc1234' }, merged)
+    await h.call('peer_report', { status: 'working', summary: '做着' }, idle)
+    await h.call('peer_report', { status: 'working', summary: '做着' }, active)
+    await h.call('peer_report', { status: 'question', summary: '问一下', question: 'A 还是 B' }, asking)
+    // 不让后台 git 核对覆盖测试设的事实
+    h.relay.mainMergedAt.set('ws-a', Date.now())
+    h.relay.mainMergedCache.set('ws-a', new Map())
+    assert.equal((await h.run('pin on')).kind, 'success')
+    for (const agent of ids) assert.ok(registry.pinnedSessionIds.includes(agent.id), agent.id)
+    // 提交已在 main；另一个 7 小时没动静
+    h.relay.mainMergedCache.set('ws-a', new Map([[merged.id, { kind: 'merged', where: 'main abc1234' }]]))
+    await h.relay.coord.upsert(idle.id, { reportedAt: Date.now() - 7 * 3600_000 })
+    await h.relay.autoPin.sync()
+    assert.ok(!registry.pinnedSessionIds.includes(merged.id), '已合入的撤掉')
+    assert.ok(!registry.pinnedSessionIds.includes(idle.id), '久未活动的撤掉')
+    assert.ok(registry.pinnedSessionIds.includes(active.id))
+    assert.ok(registry.pinnedSessionIds.includes(asking.id))
   } finally { await h.cleanup() }
 })

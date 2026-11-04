@@ -57,6 +57,15 @@
   - 注入段的固定说明用英文短句（`coordinatorContext`、`workerContext`、`observerContext`、`renderLine`、`mainRefLine` 上下文版、`boardContext`/`boardBrief`、上下文预算、核验、交接草稿提示）；数据保持原文（版本线正文、汇报、看板条目与状态词、声明计数），因为 `/relay board`、面板和交接快照共用它们。工具用法写在工具说明里，不在每步注入里重复。
   - 旁观会话的版本线被截断；全文用 `peer_line` 不带参数读取（任何根会话可读，只有主会话能写）。
 
+### 3.1 用户不在时（0.18）
+
+- **存储**：常设授权存在协调状态的工作区分组里（`coordination.json` 的 `groups.<id>.delegation`，与版本线同级）；主会话提问和唤醒预算在 `away.json`（`lib/away.js`，没给 `awayPath` 时与 `statePath` 同目录，测试只给 `statePath` 也不会写到家目录）。提问每个工作区最多 20 个待答、同一问题去重，已结束的只留 10 个。
+- **只由用户做的动作**：建任务看板（面板 `task-init`、`/relay task init`）、常设授权（面板 `delegate` / `delegate-clear`、`/relay delegate`）、回答 / 忽略提问（`ask-answer` / `ask-dismiss`）、解除唤醒暂停（`unattended-resume`、`/relay wakes resume`）。没有对应的模型工具；`peer_task` 的动作枚举里没有 init。建看板的目录由插件按工作区推出（主会话目录 → 侧栏登记路径），不收面板传来的路径；`/`、`/root`、家目录拒绝，上层已有看板也拒绝；从不执行 `git init`。
+- **`peer_ask_user`**：只给本工作区主会话（根会话）。发一条手机通知，失败不抛给模型；不阻塞、不等答案。用户点选后以用户来源（hop 0）发 `[用户在面板选择] <问题> → <选项>` 给现任主会话（已交接就给新主会话）；`about` 指向的工作会话不直接通知。
+- **唤醒预算语义**：`deliver()` 统一判定。来源不是用户（`source.kind !== 'user'`，或显式 `origin`）、目标不在运行、模式不是 `queue` 的投递算一次唤醒，按目标所在工作区记，滑动一小时，默认 16（`unattendedWakesPerHour`，0 不限）。到上限：改成 `queue`、返回 `budgetQueued`、工作区进入暂停（暂停期间不放行；满一小时自动解除，或用户「继续」），每次暂停只发一次手机通知。`peer_spawn` / 认领拉起在建会话前就拒绝（`wake_budget`）。插件自己的提醒（核验结果、推送链）传 `origin: 'plugin'`，不计数也不被拦：它们频率有界，暂停时也要能叫醒主会话。判定在内存里同步完成再写盘，投递时序不变（汇报合并器的测试依赖这一点）。
+- **跳数**：主会话档 `coordinatorMaxHops` 默认 8 → 24（成本由每小时唤醒上限兜底），普通 3 不变；工作会话发给本工作区主会话也用这一档。
+- 主会话上下文新增的行都只随用户修改 / 提问增减 / 暂停变化，不带时间与计数抖动；没设常设授权时只有一句固定的 `peer_ask_user` 提示。
+
 ## 4. 这类改动该找谁看
 
 本仓库没有 `CODEOWNERS`，历史提交也都是同一发布身份提交；因此这里按职责分工，而不是把个人名字硬编码进文档。发起审阅时应明确标注需要哪一类 reviewer。
