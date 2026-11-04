@@ -54,6 +54,8 @@
   - 版本线的来源声明由 `renderLine` 统一加一次；模型照抄进正文的那一行由 `lineBody` 去掉，不要再在别处追加同一句。
   - 版本线是手写快照会过期；`mainRefLine` 注明“以插件核验为准”，版本线 `main=<sha>` 与 origin/main 不一致时 `lineDriftNote` 提示（主会话被要求 `peer_line` 更新）。
   - 上下文里不放每轮会变的时间（fetch / tag 查询时间）；需要时间的给人看的输出（`/relay decl`）传 `stamp: true`。新增上下文行时同样避免时间戳和计数抖动。
+  - 注入段的固定说明用英文短句（`coordinatorContext`、`workerContext`、`observerContext`、`renderLine`、`mainRefLine` 上下文版、`boardContext`/`boardBrief`、上下文预算、核验、交接草稿提示）；数据保持原文（版本线正文、汇报、看板条目与状态词、声明计数），因为 `/relay board`、面板和交接快照共用它们。工具用法写在工具说明里，不在每步注入里重复。
+  - 旁观会话的版本线被截断；全文用 `peer_line` 不带参数读取（任何根会话可读，只有主会话能写）。
 
 ## 4. 这类改动该找谁看
 

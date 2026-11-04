@@ -134,10 +134,10 @@ test('持有者事实：最后一轮出错后用户又发消息不算死；取�
 
 test('看板上下文：变大时提示用 peer_tasks 与归档；始终提醒只写一行结论', () => {
   const base = { file: '/w/.agents/TASKS.md', root: '/w', claimsRoot: '/w/.agents/claims', open: [], claimed: [], ended: 30, hasClaimRules: true }
-  assert.doesNotMatch(boardContext({ ...base, size: 10_000 }), /看板约/)
-  assert.match(boardContext({ ...base, size: 10_000 }), /都用 peer_task（/)
+  assert.doesNotMatch(boardContext({ ...base, size: 10_000 }), /Board ~/)
+  assert.match(boardContext({ ...base, size: 10_000 }), /Write only via peer_task \(/)
   const big = boardContext({ ...base, size: 54_096 })
-  assert.match(big, /看板约 48KB.*已结束 30 个.*peer_tasks/)
+  assert.match(big, /Board ~48KB, 30 ended.*peer_tasks/)
   assert.match(big, /peer_task action=done/)
   // 大小按 16KB 取整：小幅变化不改上下文
   assert.equal(boardContext({ ...base, size: 54_000 }), boardContext({ ...base, size: 55_000 }))

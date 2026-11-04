@@ -212,7 +212,7 @@ test('主会话 + /relay new：工作会话汇报合并后只唤醒主会话一�
     const [w1, w2] = [...h.agents.values()].filter((agent) => agent.id.startsWith('dddddddd'))
     assert.match(w1.inbox[0][1].content[0].text, /peer_report/)
     // 工作会话上下文告诉它主会话是谁
-    assert.match(h.contextFor(w1), /role="worker"[\s\S]*主会话是/)
+    assert.match(h.contextFor(w1), /role="worker"[\s\S]*Main session:/)
     // working 只记看板，不排投递
     assert.match(await h.call('peer_report', { status: 'working', summary: '跑测试中' }, w1), /未唤醒/)
     assert.equal(h.timers.length, 0)
@@ -334,8 +334,10 @@ test('版本线：用户设定后主会话与工作会话上下文都可见；�
     assert.match(h.contextFor(h.caller), /<version-line[\s\S]*build280/)
     await assert.rejects(h.call('peer_line', { text: 'main=build999' }, w1), /只有本工作区的主会话/)
     assert.match(await h.call('peer_line', { text: 'main=build281（abc）' }), /已更新/)
+    // 不带 text：任何根会话（含工作会话）读全文
+    assert.match(await h.call('peer_line', {}, w1), /main=build281（abc）/)
     const worker = h.contextFor(w1)
-    assert.match(worker, /set-by="main-agent"[\s\S]*build281[\s\S]*不是用户指令/)
+    assert.match(worker, /set-by="main-agent"[\s\S]*build281[\s\S]*not a user instruction/)
     assert.match((await h.run('board')).text, /版本线（.*build281/)
     assert.match((await h.run('line clear')).text, /已清除/)
     assert.doesNotMatch(h.contextFor(w1), /version-line/)
@@ -674,7 +676,7 @@ test('按工作区分组：每个工作区各有主会话和版本线；未加�
     assert.match(h.contextFor(loner), /B 的基线 build900/)
     // 主会话上下文：本工作区计数 + 检索提示
     const mainContext = h.contextFor(h.caller)
-    assert.match(mainContext, /工作区：A.*侧栏登记 1 个会话，其中 1 个未加入协作/)
+    assert.match(mainContext, /Workspace A.*1 sidebar sessions, 1 not joined/)
     assert.match(mainContext, /peer_workspace/)
     assert.doesNotMatch(mainContext, /build900/)
     // main 指本工作区的主会话
@@ -770,7 +772,7 @@ test('交接：主会话模型只能起草；用户确认后新建会话接手�
     const drafted = await h.call('peer_handoff', { notes: '下一步：从 281 推到 290' })
     assert.match(drafted, /不要自己/)
     assert.equal(h.notified.at(-1)[0], '主会话交接草稿已就绪')
-    assert.match(h.contextFor(h.caller), /交接草稿已保存/)
+    assert.match(h.contextFor(h.caller), /Handoff draft saved/)
     const preview = (await h.run('handoff')).text
     // /relay new 建的会话已经收到任务（DSH 不算空白会话）：进行中
     assert.match(preview, /从 281 推到 290[\s\S]*- @w1[^\n]* dddddddd · 进行中/)
@@ -897,7 +899,7 @@ test('工作树声明：主会话上下文摘要、/relay decl、worker 提醒�
     assert.match(mainCtx, /工作树声明：活跃 1 · 可合并待排号 1/)
     assert.match(mainCtx, /⚠ .*看板报可合并，但声明仍是活跃/)
     const workerCtx = h.contextFor(h.peer)
-    assert.match(workerCtx, /你持有的工作树声明：\.agents\/worktrees\/fix\/peer-task\/\.ACTIVE-SESSION/)
+    assert.match(workerCtx, /Your worktree declaration: \.agents\/worktrees\/fix\/peer-task\/\.ACTIVE-SESSION/)
     const board = await h.relay.board(undefined, { session: h.caller.id })
     const entry = board.entries.find((item) => item.sessionId === h.peer.id)
     assert.equal(entry.declaration.rel, '.agents/worktrees/fix/peer-task')
@@ -956,7 +958,7 @@ test('任务看板：会话目录（含工作树）往上有 .agents/TASKS.md �
     await h.run('main here')
     await h.relay.taskBoards.get(h.dir)
     const observer = h.contextFor(h.peer)
-    assert.match(observer, /<task-board path="[^"]+">任务看板：待认领 1、进行中 0；[^\n]*<\/task-board>/)
+    assert.match(observer, /<task-board path="[^"]+">Task board: 1 open, 0 claimed;[^\n]*<\/task-board>/)
     assert.doesNotMatch(observer, /T9 修点东西/)
     assert.match(h.contextFor(worker), /- T9 修点东西/)
   } finally { await h.cleanup() }
@@ -1407,7 +1409,7 @@ test('核验：只有主会话 / 用户能登记与取消；工作会话能看�
     assert.match(added, /已登记核验 [0-9a-f]{8}：build308 · CI 41815663194 @o\/r/)
     assert.match(await h.call('peer_watch', { action: 'add', kind: 'ci', run_id: '41815663194' }), /没有重复登记/)
     assert.match(await h.call('peer_watch', { action: 'list' }, h.peer), /核验中 · build308/)
-    assert.match(h.contextFor(h.caller), /插件在核验 1 项[\s\S]*不用自己轮询/)
+    assert.match(h.contextFor(h.caller), /Plugin is watching 1[\s\S]*do not poll/)
     const ref = (await h.run('watch ref main abcdef12 --hours 2 推送 309')).text
     assert.match(ref, /已登记核验 [0-9a-f]{8}：推送 309 · origin\/main = abcdef12/)
     const id = /核验 ([0-9a-f]{8})/.exec(ref)[1]

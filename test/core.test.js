@@ -211,7 +211,7 @@ test('上下文文本：主会话看看板，工作会话看汇报方式；时�
   assert.match(main, /问题：build273/)
   assert.doesNotMatch(main, /分钟前/)
   const worker = workerContext({ coordinatorLabel: '@m', entry: board.w1 })
-  assert.match(worker, /主会话是 @m/)
+  assert.match(worker, /Main session: @m/)
   assert.match(worker, /peer_report/)
 })
 

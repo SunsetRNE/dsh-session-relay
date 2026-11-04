@@ -54,9 +54,9 @@ test('scanBoard：从工作树目录往上找到；待认领以认领目录为�
     assert.deepEqual(board.open.map((row) => row.id), ['T2'])
     assert.deepEqual(board.claimed.map((row) => row.id), ['T3', 'T4'])
     const text = boardContext(board)
-    assert.match(text, new RegExp(`任务看板就在 ${join(root, '.agents/TASKS.md').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
-    assert.match(text, /待认领 1.*\n- T2 P1 待认领的/)
-    assert.match(text, /只有用户让你认领/)
+    assert.match(text, new RegExp(`Task board: ${join(root, '.agents/TASKS.md').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
+    assert.match(text, /Open 1.*\n- T2 P1 待认领的/)
+    assert.match(text, /Claim or take over only when the user asks/)
     assert.equal(await scanBoard(tmpdir()), undefined)
   } finally { await rm(root, { recursive: true, force: true }) }
 })

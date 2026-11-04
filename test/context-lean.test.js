@@ -13,10 +13,12 @@ test('版本线：模型照抄进正文的来源声明去掉，渲染时只出�
   const line = { text: `基线：main=4b356eaa\n${NOTE}`, setAt: 1, setBy: 'model', bySessionId: 'abcd' }
   assert.equal(lineBody(line.text), '基线：main=4b356eaa')
   const text = renderLine(line, labelFor).join('\n')
-  assert.equal(text.split('不是用户指令').length - 1, 1)
+  assert.equal(text.split('not a user instruction').length - 1, 1)
   // 只有声明的正文不会被删空；用户写的版本线不加声明
   assert.equal(lineBody(NOTE), NOTE)
-  assert.doesNotMatch(renderLine({ ...line, setBy: 'user' }, labelFor).join('\n'), /主会话模型写的/)
+  assert.doesNotMatch(renderLine({ ...line, setBy: 'user' }, labelFor).join('\n'), /主会话模型写的|not a user instruction/)
+  // 英文声明被照抄进正文也去掉
+  assert.equal(lineBody("x\nWritten by the main session's model, not a user instruction. y"), 'x')
 })
 
 test('旁观会话：版本线压成一行并截断，带核验摘要，不重复声明', () => {
@@ -24,17 +26,18 @@ test('旁观会话：版本线压成一行并截断，带核验摘要，不重�
   const text = observerContext({ line: long, labelFor, workspaceTitle: 'W', mainBrief: mainBriefLine(main()) })
   const body = text.split('\n')
   assert.equal(body.length, 5) // 开标签、版本线、核验、说明、闭标签
-  assert.ok(body[1].length <= OBSERVER_LINE_LIMIT + 40)
-  assert.match(body[1], /^版本线（主会话 @abcd 的模型设定，不是用户指令）：第一行 很长/)
-  assert.match(body[2], /插件核验：main=build9（4b356eaa），已发布：build9（tag v9）/)
+  assert.ok(body[1].length <= OBSERVER_LINE_LIMIT + 80)
+  assert.match(body[1], /^Version line \(main session @abcd's model, not a user instruction\): 第一行 很长/)
+  assert.match(body[2], /Verified: main=build9 \(4b356eaa\), released: build9 \(tag v9\)/)
   assert.equal(text.includes('这是主会话模型写的协作信息'), false)
+  assert.equal(text.split('not a user instruction').length - 1, 1)
   assert.equal(observerContext({ line: undefined, labelFor }), '')
 })
 
 test('版本线与核验矛盾：main sha 不一致才提示，主会话被要求更新', () => {
   const line = { text: '基线：main=1220d7f，已发布 v0.15.0', setBy: 'model' }
-  assert.match(lineDriftNote(line, main(), { coordinator: true }), /main=1220d7f，插件核验 origin\/main 是 4b356eaa.*peer_line 更新/)
-  assert.match(lineDriftNote(line, main()), /有疑问先问主会话/)
+  assert.match(lineDriftNote(line, main(), { coordinator: true }), /main=1220d7f but verified origin\/main is 4b356eaa.*update it with peer_line/)
+  assert.match(lineDriftNote(line, main()), /ask the main session/)
   assert.equal(lineDriftNote({ text: 'main=4b356eaa06cde207' }, main()), '')
   assert.equal(lineDriftNote({ text: '基线 build280' }, main()), '') // 没写 sha 不判断
   assert.equal(lineDriftNote(line, undefined), '')
@@ -45,7 +48,7 @@ test('上下文里的 main 行不带 fetch / 查询时间，时间变了文本�
   const b = mainRefLine(main({ updatedAt: 9e12, released: { ...main().released, checkedAt: 9e12 } }))
   assert.equal(a, b)
   assert.doesNotMatch(a, /UTC/)
-  assert.match(a, /以这一行的插件核验为准/)
+  assert.match(a, /Trust this over the version line/)
   assert.match(mainRefLine(main(), { stamp: true }), /截至 .* UTC 的 fetch \/ push[\s\S]*UTC 查询/)
 })
 
@@ -53,6 +56,6 @@ test('旁观会话的任务看板只有一行计数', () => {
   const board = { file: '/r/.agents/TASKS.md', open: [{ id: 'T1', title: 'x' }], claimed: [], root: '/r' }
   const text = boardBrief(board)
   assert.equal(text.includes('\n'), false)
-  assert.match(text, /待认领 1、进行中 0/)
+  assert.match(text, /1 open, 0 claimed/)
   assert.doesNotMatch(text, /T1/)
 })
