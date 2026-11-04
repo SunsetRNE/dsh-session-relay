@@ -1,0 +1,1 @@
+{"meta": {"title": "Session Relay", "description": "A main session publishes the version line to every worker; reusable instruction templates; workers report via peer_report, batched before waking main. Provides /relay and peer_* tools."}}

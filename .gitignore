@@ -1,0 +1,7 @@
+.gen/
+.gen-test/
+.ACTIVE-SESSION
+.SESSION-DONE
+node_modules
+*.tgz
+dist/

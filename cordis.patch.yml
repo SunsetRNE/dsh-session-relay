@@ -1,0 +1,4 @@
+# DSHA session relay bundle patch: host-level /relay command and peer_* tools
+- insert:
+    - id: session-relay
+      name: 'dsh-session-relay'
