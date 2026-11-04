@@ -515,14 +515,14 @@ test('Client：卡片「唤醒」表单显示预判，主会话新建时禁用�
     const original = React.useState
     let calls = 0
     let inCard = 0
-    // EntryCard 里第 1 个 useState 是 mode，第 11 个是 wakeInfo
+    // EntryCard 里第 1 个 useState 是 mode，第 12 个是 wakeInfo（第 6 个是新建会话的模型）
     React.useState = (initial) => {
       calls += 1
       if (calls === 2) return [board, () => {}]
       if (/at EntryCard/.test(new Error().stack)) {
         inCard += 1
         if (inCard === 1) return ['wake', () => {}]
-        if (inCard === 11) return [wakeInfo, () => {}]
+        if (inCard === 12) return [wakeInfo, () => {}]
       }
       return original(initial)
     }
@@ -689,4 +689,61 @@ test('Client：概览页的「等你决定」、唤醒暂停横幅 / 计数行�
   // 旧服务端（没有这些字段）不出错
   text = render({ ...base, delegationDefault: undefined, asks: undefined, unattended: undefined, setup: undefined })
   assert.doesNotMatch(text, /setupTitle|askTitle|wakeLine|delegTitle/)
+})
+
+test('Client：模型下拉（跟随 / 全局默认 / 按服务商分组 / 推理强度）与概览页角色模型；只读模型列表时说明不支持', async () => {
+  const { React, rendered } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => key
+  const models = {
+    supported: true,
+    catalog: { default: { provider: 'p1', model: 'base' }, groups: [{ id: 'p1', name: 'P1', models: [{ id: 'base', name: 'base' }, { id: 'big', name: 'Big', efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }], defaultEffort: 'low' }] }], failures: [] },
+    roles: { main: null, worker: { provider: 'p1', model: 'big', reasoningEffort: 'high' } },
+    labels: { main: null, worker: 'p1/big@high', default: 'p1/base' }
+  }
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const board = {
+    scope: 'workspace', workspace: { id: 'ws-a', title: 'A', path: '/a' }, groupKey: 'ws-a', coordinator: { sessionId: 's-main', label: '@main', exists: true, model: 'p1/base' }, line: null,
+    others: [], entries: [], restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a', roleModels: { main: null, worker: 'p1/big@high' }
+  }
+  const original = React.useState
+  let calls = 0
+  // BoardPage 第 2 个 useState 是看板；模型数据由 useModels 的 useState 给出
+  React.useState = (initial) => {
+    calls += 1
+    if (calls === 2) return [board, () => {}]
+    if (/at useModels/.test(new Error().stack)) return [models, () => {}]
+    return original(initial)
+  }
+  globalThis.window = { localStorage: { getItem: () => JSON.stringify({ models: true, open: true }), setItem() {}, removeItem() {} } }
+  let text
+  try { text = textOf(React.createElement(mod.BoardPage, { t, openSession() {}, marksStore: store, initialPage: 'overview' })) } finally { React.useState = original; delete globalThis.window }
+  assert.match(text, /modelRolesTitle/)
+  assert.match(text, /modelRoleMain[\s\S]*modelRoleWorker/)
+  assert.match(text, /modelIs/, '主会话卡片显示模型')
+  const options = rendered.filter((node) => node.type === 'option').map((node) => node.props.value)
+  assert.ok(options.includes('follow'), '新建表单有「跟随默认」')
+  assert.ok(options.includes('default'), '有「DSH 全局默认」')
+  assert.ok(options.includes('p1\u0001big'), '目录里的模型')
+  assert.ok(rendered.some((node) => node.type === 'optgroup' && node.props.label === 'P1'), '按服务商分组')
+  // 角色模型 worker 选的是 p1/big：推理强度下拉出现，当前 high
+  assert.ok(rendered.some((node) => node.type === 'select' && node.props.value === 'high'), '推理强度下拉')
+  // 推理强度下拉有显式的「默认」项（值为空），只有一个强度（如只有 max）时也不会看着选中了却没发
+  const effortSelect = rendered.find((node) => node.type === 'select' && node.props['aria-label'] === 'modelEffort')
+  assert.ok(effortSelect, '有推理强度下拉')
+  const effortValues = rendered.filter((node) => node.type === 'option' && (node.children.includes('modelEffortDefault') || node.children.includes('modelEffortDefaultIs') || ['low', 'high'].includes(node.props.value))).map((node) => node.props.value)
+  assert.ok(effortValues.includes(''), '有值为空的「默认」项')
+  // 不支持时只给一行说明
+  rendered.length = 0
+  calls = 0
+  React.useState = (initial) => {
+    calls += 1
+    if (calls === 2) return [board, () => {}]
+    if (/at useModels/.test(new Error().stack)) return [null, () => {}]
+    return original(initial)
+  }
+  globalThis.window = { localStorage: { getItem: () => JSON.stringify({ models: true, open: true }), setItem() {}, removeItem() {} } }
+  try { text = textOf(React.createElement(mod.BoardPage, { t, openSession() {}, marksStore: store, initialPage: 'overview' })) } finally { React.useState = original; delete globalThis.window }
+  assert.match(text, /modelUnsupported/)
+  assert.ok(!rendered.some((node) => node.type === 'option' && node.props.value === 'follow'))
 })

@@ -1884,3 +1884,156 @@ test('自动置顶按面板分类：已合入的可合并、久未活动的进�
     assert.ok(registry.pinnedSessionIds.includes(asking.id))
   } finally { await h.cleanup() }
 })
+
+/** 仿 DSH：selectModel 记会话选择并在后台把它存成全局默认；默认模型保存按提交顺序串行。 */
+function fakeModels(h, { initial = { provider: 'p1', model: 'base' } } = {}) {
+  let current = { ...initial }
+  let saves = Promise.resolve()
+  const defaults = {
+    currentSelection: () => ({ ...current }),
+    saveSelection: (next) => {
+      const done = saves.then(() => new Promise((resolve) => setTimeout(() => { current = { ...next }; resolve() }, 5)))
+      saves = done.catch(() => {})
+      return done
+    }
+  }
+  h.services.agentDefaultModel = defaults
+  const selected = []
+  const controller = h.relay.ctx.sessionController
+  controller.modelCatalog = async () => ({
+    default: defaults.currentSelection(),
+    groups: [
+      { id: 'p1', name: 'P1', models: [{ id: 'base', name: 'Base' }, { id: 'big', name: 'Big', reasoning: { efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }], defaultEffort: 'low' } }] },
+      { id: 'p2', name: 'P2', models: [{ id: 'fast', name: 'Fast' }] }
+    ],
+    failures: []
+  })
+  controller.selectModel = async ({ sessionId, provider, model, reasoningEffort }) => {
+    const pick = { provider, model, ...(reasoningEffort ? { reasoningEffort } : {}) }
+    selected.push([sessionId, pick])
+    h.agents.get(sessionId)?.session.snapshotEvents().push({ type: 'model/selection', data: pick })
+    void defaults.saveSelection(pick)
+    return { selected: pick }
+  }
+  return { defaults, selected, flush: () => saves }
+}
+
+test('新建会话指定模型：角色模型、--model、全局默认保持不变；模型调 peer_spawn 固定用工作会话模型', async () => {
+  const h = await setup()
+  try {
+    const m = fakeModels(h)
+    h.workspaces.push({ id: 'ws-1', title: 'W', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    // 只有命令（用户）能设角色模型
+    let res = await h.run('models worker p1/big@high')
+    assert.equal(res.kind, 'success', res.text)
+    assert.match(res.text, /工作会话模型已设为 p1\/big@high/)
+    assert.deepEqual(h.relay.coord.group('ws-1').models.worker, { provider: 'p1', model: 'big', reasoningEffort: 'high' })
+    res = await h.run('models')
+    assert.match(res.text, /工作会话：p1\/big@high/)
+    assert.match(res.text, /主会话：跟随默认/)
+    // 写错的模型 / 强度：拒绝，不建会话
+    const before = h.agents.size
+    res = await h.run('new --model p1/nope 干活')
+    assert.equal(res.kind, 'error')
+    assert.match(res.text, /没有模型 nope/)
+    res = await h.run('new --model big@ultra 干活')
+    assert.match(res.text, /推理强度只能是 low \/ high/)
+    assert.equal(h.agents.size, before, '没有建出会话')
+    // /relay new 不写 --model：用工作会话模型；写了：用指定的（只写模型名，目录里唯一时自动补服务商）
+    res = await h.run('new 干活甲')
+    assert.equal(res.kind, 'success', res.text)
+    assert.match(res.text, /模型：p1\/big@high（工作区角色模型）/)
+    res = await h.run('new --model fast 干活乙')
+    assert.match(res.text, /模型：p2\/fast（本次指定）/)
+    await m.flush()
+    assert.deepEqual(m.defaults.currentSelection(), { provider: 'p1', model: 'base' }, '全局默认模型没被改')
+    assert.deepEqual(m.selected.map(([, pick]) => pick.model), ['big', 'fast'])
+    // --model default：不调 selectModel
+    res = await h.run('new --model default 干活丙')
+    assert.doesNotMatch(res.text, /模型：/)
+    assert.equal(m.selected.length, 2)
+    // 模型调 peer_spawn：没有模型参数，固定用工作会话模型
+    const spawnParams = h.tools.get('peer_spawn').parameters
+    assert.ok(spawnParams !== undefined && JSON.stringify(spawnParams).includes('task'))
+    assert.doesNotMatch(JSON.stringify(spawnParams), /"model"/)
+    await h.call('peer_spawn', { task: '模型拉起的活' })
+    assert.deepEqual(m.selected.at(-1)[1], { provider: 'p1', model: 'big', reasoningEffort: 'high' })
+    // 看板卡片显示会话当前模型
+    const board = await h.relay.board(undefined, { session: h.caller.id })
+    const spawned = board.entries.find((entry) => entry.sessionId === m.selected[0][0])
+    assert.equal(spawned.model, 'p1/big@high')
+    assert.equal(board.roleModels.worker, 'p1/big@high')
+    // 改回跟随默认
+    res = await h.run('models worker default')
+    assert.match(res.text, /改回跟随默认/)
+    assert.equal(h.relay.coord.group('ws-1').models, undefined)
+    await m.flush()
+    assert.deepEqual(m.defaults.currentSelection(), { provider: 'p1', model: 'base' })
+  } finally { await h.cleanup() }
+})
+
+test('新建会话指定模型：选的模型和全局默认是同一个、没写强度时，带上全局默认的推理强度（命令、面板、角色模型）', async () => {
+  const h = await setup()
+  try {
+    const m = fakeModels(h, { initial: { provider: 'p1', model: 'big', reasoningEffort: 'high' } })
+    h.workspaces.push({ id: 'ws-1', title: 'W', path: h.dir, sessionIds: [h.caller.id] })
+    let res = await h.run('new --model p1/big 干活')
+    assert.match(res.text, /模型：p1\/big@high/)
+    res = await h.run('new --model p1/big@low 干活')
+    assert.match(res.text, /模型：p1\/big@low/, '写了强度就照写的')
+    res = await h.run('new --model p1/base 干活')
+    assert.match(res.text, /模型：p1\/base（/, '不同模型不加强度')
+    const opened = await h.relay.openBlank({ fromId: h.caller.id, cwd: h.dir, model: { provider: 'p1', model: 'big' } })
+    assert.equal(opened.modelLabel, 'p1/big@high')
+    await h.run('models worker p1/big')
+    res = await h.run('new 角色模型')
+    assert.match(res.text, /模型：p1\/big@high（工作区角色模型）/)
+    await m.flush()
+    assert.deepEqual(m.defaults.currentSelection(), { provider: 'p1', model: 'big', reasoningEffort: 'high' })
+  } finally { await h.cleanup() }
+})
+
+test('新建会话指定模型：读不到默认模型服务时不调 selectModel（宁可不设，也不改全局默认）', async () => {
+  const h = await setup()
+  try {
+    const m = fakeModels(h)
+    delete h.services.agentDefaultModel
+    h.workspaces.push({ id: 'ws-1', title: 'W', path: h.dir, sessionIds: [h.caller.id] })
+    const res = await h.run('new --model p2/fast 干活')
+    assert.equal(res.kind, 'success', res.text)
+    assert.match(res.text, /没有设上指定模型：读不到 DSH 的默认模型服务/)
+    assert.equal(m.selected.length, 0)
+  } finally { await h.cleanup() }
+})
+
+test('接手新建：沿用原会话模型；交接新建主会话：用主会话模型；面板表单可当场改', async () => {
+  const h = await setup()
+  try {
+    const m = fakeModels(h)
+    h.workspaces.push({ id: 'ws-1', title: 'W', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await h.run('models main p1/big@low')
+    await h.run('models worker p2/fast')
+    // 原会话最近一次请求用的是 p1/base
+    h.peer.status = 'idle'
+    h.peer.session.snapshotEvents().push({ type: 'request/header', data: { header: { config: { provider: 'p1', model: 'base' } } } })
+    await h.call('peer_report', { status: 'working', summary: '在做' }, h.peer)
+    let done = await h.relay.takeover({ source: h.peer.id, to: 'new', fromId: h.caller.id })
+    assert.equal(done.modelSource, 'inherit')
+    assert.equal(done.modelLabel, 'p1/base')
+    // 面板当场指定
+    const third = h.agents.get(done.to)
+    third.status = 'idle'
+    done = await h.relay.takeover({ source: done.to, to: 'new', fromId: h.caller.id, model: { provider: 'p1', model: 'big', reasoningEffort: 'high' } })
+    assert.equal(done.modelSource, 'explicit')
+    assert.equal(done.modelLabel, 'p1/big@high')
+    // 交接新建主会话：主会话模型
+    await h.relay.saveHandoffDraft({ key: 'ws-1', notes: '交接', by: 'user', from: h.caller.id })
+    const handed = await h.relay.confirmHandoff({ key: 'ws-1', to: 'new' })
+    assert.equal(handed.modelSource, 'role')
+    assert.equal(handed.modelLabel, 'p1/big@low')
+    await m.flush()
+    assert.deepEqual(m.defaults.currentSelection(), { provider: 'p1', model: 'base' })
+  } finally { await h.cleanup() }
+})
