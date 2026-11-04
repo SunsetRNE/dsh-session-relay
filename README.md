@@ -14,6 +14,14 @@ DeepSeek Harness（DSHA）平级会话互通插件：一个主会话协调多个
 - DeepSeek Harness，插件依赖的 `@deepseek-ai/dsh-*` 包由宿主提供，不单独安装。
 - 部分功能（设备桥）读取 DSHA 容器内的 `/root/.dsh/.bridge_headers` 与 `/root/.dsh/.bridge_port`，非 DSHA 环境下这些功能不可用。
 
+## 安装
+
+不需要 npm 账号。在 DSHA 的插件管理器里任选一种来源：
+
+- **GitHub Release（推荐，固定版本）**：仓库 `SunsetRNE/dsh-session-relay` 的 Release，每个版本附一个 `dsh-session-relay-<版本>.tgz`。最新版本见 [Releases](https://github.com/SunsetRNE/dsh-session-relay/releases)。
+- **仓库链接**：`https://github.com/SunsetRNE/dsh-session-relay` 装 main 最新提交；指定版本用 `https://github.com/SunsetRNE/dsh-session-relay/tree/v<版本>`。
+- **本地压缩包**：下载 Release 附件后导入。
+
 ## 开发
 
 ```sh
@@ -31,6 +39,19 @@ npm pack
 ```
 
 生成 `dsh-session-relay-<版本>.tgz`，内容由 `package.json` 的 `files` 字段决定。
+
+## 发版
+
+不发布到 npm，发到 GitHub Release（`gh` 已登录即可，手机容器里也能做）：
+
+```sh
+npm test
+npm pack --pack-destination dist
+git tag v<版本> && git push origin v<版本>
+gh release create v<版本> dist/dsh-session-relay-<版本>.tgz --title v<版本> --notes-file <说明文件>
+```
+
+每个 Release 只挂一个 `.tgz`：插件管理器按 Release 安装时只认唯一一个压缩包附件。
 
 ## 许可
 
