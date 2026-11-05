@@ -290,3 +290,47 @@ test('正文 chunk：等你决定直接点选项（以用户身份回答）；�
   const calm = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(!/askTitle|sideAlert|sideWatching/.test(calm))
 })
+
+test('正文 chunk：读取中给同高占位；数据旧了顶栏变色；已结束收在底部；复制失败也提示', async () => {
+  const React0 = fakeReact()
+  const { mod: mod0 } = await load('client.sidebar.js', React0)
+  const loading = React0.createElement(mod0.RelaySidebar, { kit: kitFor(), sessionId: 'session-none' })
+  assert.ok(JSON.stringify(loading).includes('dshaSv_skel'))
+
+  const board = { ...sampleBoard(), entries: [...sampleBoard().entries, { sessionId: 'session-d1dddddd', label: '@d1', status: 'done', category: 'archived', state: 'idle' }] }
+  const old = [{ board, error: undefined, at: Date.now() - 40 * 60000 }, 0, 'all', undefined, false, undefined, false, false, false, undefined]
+  const React = fakeReact(old)
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const json = JSON.stringify(tree)
+  assert.ok(json.includes('"data-tone":"error"') && textOf(tree).includes('sideMinAgo'), '超过 30 分钟标红')
+  assert.ok(textOf(tree).includes('sideDoneN') && !textOf(tree).includes('@d1'), '已结束默认收起')
+  const React2 = fakeReact([...old.slice(0, 10), true])
+  const { mod: mod2 } = await load('client.sidebar.js', React2)
+  assert.ok(textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })).includes('@d1'), '展开后列出')
+
+  const failing = [{ board: sampleBoard(), error: undefined, at: Date.now() }, 0, 'all', undefined, false, 'fail:session-main1234', false, false, false, undefined]
+  const React3 = fakeReact(failing)
+  const { mod: mod3 } = await load('client.sidebar.js', React3)
+  const failed = React3.createElement(mod3.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  assert.ok(textOf(failed).includes('!') && JSON.stringify(failed).includes('copyFailed'), '复制失败显示「!」并提示')
+})
+
+test('正文 chunk：折叠与筛选记在本机，换会话 / 重开标签后保持', async () => {
+  const stored = {}
+  const React = fakeReact()
+  let tree
+  const saved = globalThis.window
+  try {
+    const { mod } = await load('client.sidebar.js', React)
+    globalThis.window = { localStorage: { getItem: (key) => stored[key] ?? null, setItem: (key, value) => { stored[key] = value } } }
+    stored['dshaSv.ui.v1'] = JSON.stringify({ quiet: true })
+    // 第一个 useState 是看板状态：用缓存里没有的会话 id，手动给看板
+    let call = 0
+    const original = React.useState
+    React.useState = (initial) => (call++ === 0 ? [{ board: sampleBoard(), error: undefined, at: Date.now() }, () => {}] : original(initial))
+    tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-other' })
+    React.useState = original
+  } finally { globalThis.window = saved }
+  assert.ok(textOf(tree).includes('@w3'), '空白会话按记住的「展开」列出')
+})
