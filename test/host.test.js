@@ -1870,6 +1870,67 @@ test('任务库：首次导入后工作区文件只读；终态任务自动归�
   } finally { await h.cleanup() }
 })
 
+test('任务库：/relay task import --force 覆盖并备份、/relay task export 重导出快照', async () => {
+  const h = await setup()
+  try {
+    await h.run('main here')
+    const board = join(h.dir, '.agents/TASKS.md')
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(board, '| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |\n|---|---|---|---|---|---|\n| T1 | P1 | 原始任务 | a | 否 | 待认领 |\n')
+    assert.match(await h.call('peer_tasks', {}), /T1/)
+    // 手改导出快照不会自动回读
+    await writeFile(board, '| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |\n|---|---|---|---|---|---|\n| T2 | P1 | 手改的任务 | b | 否 | 待认领 |\n')
+    const plain = (await h.run('task import')).text
+    assert.match(plain, /--force/)
+    assert.doesNotMatch(await h.call('peer_tasks', {}), /T2/)
+
+    // --force 明确覆盖，覆盖前备份旧任务库
+    const forced = (await h.run('task import --force')).text
+    assert.match(forced, /已从 .*TASKS\.md 重新导入任务库/)
+    assert.match(forced, /现有任务 1 个/)
+    assert.match(await h.call('peer_tasks', {}), /T2/)
+    const storeAgents = join(h.dir, 'tasks', h.relay.groupKeyOf(h.caller.id), '.agents')
+    const stamps = await readdir(join(storeAgents, 'backups/import'))
+    assert.equal(stamps.length, 1)
+    assert.match(await readFile(join(storeAgents, 'backups/import', stamps[0], 'TASKS.md'), 'utf8'), /T1/)
+
+    // 导出：把任务库重新写回工作区快照（手写坏也能恢复）
+    await writeFile(board, 'not a board')
+    const exported = (await h.run('task export')).text
+    assert.match(exported, /已导出任务库快照/)
+    const restored = await readFile(board, 'utf8')
+    assert.match(restored, /T2/)
+    assert.doesNotMatch(restored, /not a board/)
+  } finally { await h.cleanup() }
+})
+
+test('任务库：超过 taskStoreMaxActive 时先把最老的终态任务归档，未到 7 天也归档', async () => {
+  const h = await setup()
+  try {
+    await h.run('main here')
+    const board = join(h.dir, '.agents/TASKS.md')
+    for (const id of ['T1', 'T2']) await mkdir(join(h.dir, '.agents/claims', id), { recursive: true })
+    await writeFile(board, ['| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |', '|---|---|---|---|---|---|',
+      '| T1 | P1 | 一 | a | 否 | 已合入（build1） |', '| T2 | P2 | 二 | b | 否 | 已合入（build2） |', '| T3 | P1 | 三 | c | 否 | 待认领 |', ''].join('\n'))
+    const old = new Date(Date.now() - 3600_000)
+    const older = new Date(Date.now() - 7200_000)
+    for (const [id, sha, at] of [['T1', 'aaa11111', older], ['T2', 'bbb22222', old]]) {
+      const done = join(h.dir, '.agents/claims', id, 'done')
+      await writeFile(done, `${sha} 可合并（基于 build9）\n`)
+      await utimes(done, at, at)
+    }
+    h.relay.taskStoreMaxActive = 2
+    h.relay.taskArchiveMaxBytes = 8 * 1024 * 1024
+    assert.match(await h.call('peer_tasks', {}), /T1/) // 首次查询导入任务库
+    const swept = await h.relay.taskArchiveSweep()
+    assert.deepEqual(swept.archived, ['T1'], '只归档最老的终态任务，刚好降到上限')
+    const exported = await readFile(board, 'utf8')
+    assert.doesNotMatch(exported, /\| T1 \|/)
+    assert.match(exported, /\| T2 \|/)
+    assert.match(exported, /\| T3 \|/)
+  } finally { await h.cleanup() }
+})
+
 test('任务树：split 父子/串行依赖、dispatch dry_run、子任务完成后父任务自动完成', async () => {
   const h = await setup()
   try {

@@ -36,6 +36,15 @@ test('解析 help / list / alias', () => {
   assert.deepEqual(parseRelayCommand('unalias rel'), { kind: 'unalias', name: 'rel' })
 })
 
+test('解析任务库导入 / 导出', () => {
+  assert.deepEqual(parseRelayCommand('task import'), { kind: 'task-import', force: false })
+  assert.deepEqual(parseRelayCommand('task import --force'), { kind: 'task-import', force: true })
+  assert.equal(parseRelayCommand('task import --bogus').kind, 'invalid')
+  assert.equal(parseRelayCommand('task import extra').kind, 'invalid')
+  assert.deepEqual(parseRelayCommand('task export'), { kind: 'task-export' })
+  assert.equal(parseRelayCommand('task export --force').kind, 'invalid')
+})
+
 test('别名校验', () => {
   assert.equal(validateAlias(' Release '), 'release')
   assert.throws(() => validateAlias('new'), RelayError)

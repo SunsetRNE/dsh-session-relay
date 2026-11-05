@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.10.0 - 2026-11-06
+
+任务库清理：导入/导出命令、活动库上限与归档冷存。
+
+- 新命令 `/relay task import --force`：把手改过的工作区导出快照（`.agents/TASKS.md` + `claims/` + `TASKS-archive.md`）重新导入插件任务库；覆盖前把现有看板、认领和归档备份到 `.agents/backups/import/<时间戳>/`，失败不落盘。用户或本工作区主会话可执行。
+- 新命令 `/relay task export`：把插件任务库重新导出成工作区只读快照，并列出写入的文件；手写坏快照时用它恢复。
+- 活动库上限 `taskStoreMaxActive`（默认 500）：超过时先把最老的终态（已合入/已放弃）任务归档，不看 7 天期限。
+- 归档冷存 `taskArchiveMaxBytes`（默认 1 MiB）：`TASKS-archive.md` 超限时把最老的整段归档移入任务库内的 `tasks-archive.jsonl`（一行一个任务/一段），保留最新段；手动 `/relay tasks archive apply` 后也触发。
+- 撤掉 1.8 设计里提到的 `--legacy` 只读回退说明：任务库只走插件数据目录。
+- 测试 238 → 243。
+
+需要 `/relay reload` 后生效。
+
+**要求 DSH 0.2.2-rc.1 及以上**。安装：插件管理器 → 从 Release 安装，或直接下载下面的 `dsh-session-relay-1.10.0.tgz`。
+
 ## 1.9.0 - 2026-11-06
 
 任务派发（父/子 + 依赖）。

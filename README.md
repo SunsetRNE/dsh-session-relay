@@ -12,6 +12,7 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - 任务看板写操作：`/relay task new|claim|takeover|handoff|release|done|abandon|update`（模型用 `peer_task`），加锁写 `.agents/TASKS.md` 与 claims，格式同看板认领规则。
 - 任务派发（1.9）：`peer_task action=split` 拆父子任务（可串行依赖），`action=dispatch` 按任务/子树唤醒持有者或拉起新会话，依赖未完成不派；父任务在子任务全结束后自动完成。
 - 任务看板（1.8）：任务与认领的事实源在插件数据目录（`tasks/<工作区>/`），仓库里的 `.agents/TASKS.md` / `claims/` 是只读导出快照；终态任务自动归档。
+- 任务库维护（1.10）：`/relay task import --force` 把手改过的导出快照重新导入（覆盖前备份），`/relay task export` 随时重导出快照；活动库超过 `taskStoreMaxActive`（默认 500）先归档最老的终态任务，`TASKS-archive.md` 超过 `taskArchiveMaxBytes`（默认 1 MiB）把最老的整段移入 `tasks-archive.jsonl` 冷存。
 - 模型工具（15 个）：`peer_list`、`peer_report`、`peer_send`、`peer_spawn`、`peer_alias`、`peer_inspect`、`peer_tasks`、`peer_task`、`peer_mail`，主会话另有 `peer_line`、`peer_assign`、`peer_workspace`、`peer_handoff`、`peer_ask_user`、`peer_watch`。`peer_send` 的 `mode=interrupt`（主会话专用，`stop:true` 用「停止并汇报」信封）取代了 1.4.0 的独立工具 `peer_interrupt`。
 - 协作邮箱（1.5.0）：核验成功这类公共通知只写进工作区邮箱（插件数据目录 `mailbox.json`），同一会话 5 分钟窗口内的多条通知合并成一条短通知（带最新 id）；需要细节时用 `peer_mail` read，主会话可用 `send`/`force` 推送。用户可用 `/relay mail` 看未读、读全文、归档和查看最近 7 天「短通知 / 全文」统计。失败/超时仍直接送达并响手机。
 - 协作面板（Web 客户端）：看板、交接预览、会话唤醒、等你决定的提问、自动置顶、开发者模式开关。

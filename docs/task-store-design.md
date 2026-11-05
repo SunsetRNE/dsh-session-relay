@@ -1,6 +1,6 @@
-# 插件任务库（1.8/1.9）设计与迁移
+# 插件任务库（1.8/1.9/1.10）设计与迁移
 
-状态：1.8 已实现（插件任务库 + 导入/导出 + 自动归档）；1.9 已实现（父子/依赖 + split + dispatch）。用户 2026-11-06 已定三条：
+状态：1.8 已实现（插件任务库 + 导入/导出 + 自动归档）；1.9 已实现（父子/依赖 + split + dispatch）；1.10 已实现（`/relay task import --force`、`/relay task export`、活动库上限、归档冷存；legacy 回退不再保留）。用户 2026-11-06 已定三条：
 1. 插件为唯一事实源，旧 `.agents/TASKS.md` / `.agents/claims` 首次导入，之后**只读导出**（其它工作区/脚本仍能看）。
 2. 主会话可以按优先级/依赖**自动派发**，受唤醒预算与派发上限约束，可随时停。
 3. 任务支持**父/子 + 依赖**（串行/并行），子任务可单独派发，父任务全子任务完成后自动 done。
@@ -44,15 +44,17 @@ tasks/<group>/
   - `<workspace>/.agents/TASKS-archive.md`
 - 导出原子写；失败不阻塞插件内的任务状态，下一次写操作重试。
 - 导入后若有人手改 `.agents/TASKS.md`，**不会**被读回（源已切换）；需要时用 `/relay task import --force` 重新导入（明确覆盖，带备份）。
+  - 1.10 实现：`/relay task import --force`（用户或主会话）把工作区 `TASKS.md`、`TASKS-archive.md`、`claims/` 镜像回插件库，覆盖前把现有看板/归档/认领备份到 `.agents/backups/import/<时间戳>/`。
+  - `/relay task export` 随时把插件库重新导出成工作区快照（手写坏快照时用它恢复），事实源不变。
 
-## 4. 自动归档
+## 4. 自动归档与冷存（1.8 起，1.10 补上限）
 
 - 终态：`merged`、`abandoned`（沿用现有分类）。
-- 条件：终态且 `updatedAt` 超过 `taskArchiveAfterDays`（默认 7 天）；或活动任务数超过 `taskStoreMaxActive`（默认 500）时先归档最老的终态。
-- 动作：任务从 `tasks` 移到 `archive`（保留全部字段 + `archivedAt`），追加 `events.jsonl`，重导出 `TASKS.md` / `TASKS-archive.md`。
+- 条件：终态且 claim 的完成/放弃时间超过 `taskArchiveAfterDays`（默认 7 天）；或活动库任务数超过 `taskStoreMaxActive`（默认 500）时，先归档最老的终态任务，直到回到上限以内（不看天数）。
+- 动作：表格行与详情段从 `TASKS.md` 原样移到 `TASKS-archive.md`，认领目录移到插件库 `.archived-claims/`（不物理删除），然后重导出 `TASKS.md` / `TASKS-archive.md`。
 - 触发：插件 tick（默认每小时一次）+ 每次写操作后顺手清理；归档是幂等的。
-- 手动：`/relay tasks archive` 仍可用（预览/执行），底层操作 JSON。
-- 永不物理删除；`archive` 超过上限再写 `tasks-archive.jsonl` 冷存。
+- 手动：`/relay tasks archive` 仍可用（预览/执行）；执行后同样触发冷存。
+- 冷存（1.10）：`TASKS-archive.md` 超过 `taskArchiveMaxBytes`（默认 1 MiB）时，把最老的整段归档（`## … 归档 N 个`）移到插件库的 `.agents/tasks-archive.jsonl`（一行一个任务/一段，含 id、归档时间、原文 block），保留最新的若干段；整段搬迁保证段内计数仍准确。冷存文件只在插件库，不导出。
 
 ## 5. 派发（1.9 已实现）
 
@@ -77,14 +79,14 @@ tasks/<group>/
 
 - 其它工作区（DSH-A-mod 等）继续能读导出的 `.agents/TASKS.md` / claims；但**写**必须走插件，否则不会回读（需要时 `--force` 重新导入）。
 - 仓库里不要提交 `tasks.json`（在插件数据目录，不进工作树）。
-- 迁移期保留 `--legacy` 只读回退：设置 `taskStore: 'legacy'` 时走旧文件读写（一个版本），默认新库；1.10 删除。
-- 测试：现有任务测试改为走插件库 + 断言导出文件；新增导入、导出原子性、自动归档、派发预算、父子依赖、失败重试。
+- 1.8 迁移期设计里提到的 `--legacy` 只读回退在 1.10 撤掉：任务库只走插件数据目录，默认路径从 1.8 起就是新库；没有文件回退开关。
+- 测试：现有任务测试改为走插件库 + 断言导出文件；新增导入、导出原子性、自动归档、派发预算、父子依赖、失败重试、上限归档、冷存。
 
 ## 8. 分期
 
-- **1.8**：taskstore 模块（JSON + 锁 + 导入/导出 + 事件）、看板/`peer_tasks`/`peer_task` 切到任务库、自动归档 tick、兼容开关、测试迁移。
+- **1.8**：taskstore 模块（任务库 + 锁 + 导入/导出 + 事件）、看板/`peer_tasks`/`peer_task` 切到任务库、自动归档 tick、测试迁移。
 - **1.9**：dispatch（单任务/子树）、split、父子自动完成、派发预算与审计、面板“可派发”区。
-- **1.10**：删除 legacy 文件回退；`/relay task import/export` 命令；归档冷存。
+- **1.10**（已完成）：`/relay task import --force` / `/relay task export`；`taskStoreMaxActive` 上限归档；`TASKS-archive.md` 超限冷存到 `tasks-archive.jsonl`；撤掉 legacy 回退说明。
 
 ## 9. 风险
 
