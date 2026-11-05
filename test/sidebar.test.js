@@ -218,3 +218,29 @@ test('正文 chunk：顶栏 GitHub 身份胶囊；换号标红，未登录提示
   const none = await pill(undefined)
   assert.ok(!none.includes('ghPill') && !none.includes('@alice'))
 })
+
+test('入口：设置页 / 协作标签 / 监督面板的正文在 client.panel.js，第一次渲染才下载；不配套时提示刷新', async () => {
+  const React = fakeReact()
+  const lazies = []
+  React.lazy = (factory) => { lazies.push(factory); return function LazyStub() { return 'lazy' } }
+  React.Suspense = 'suspense'
+  const asked = []
+  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 1 }
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve(reply) })
+  assert.equal(asked.length, 0, '载入入口时不下载正文')
+  const tree = React.createElement(mod.BoardPage, { t })
+  assert.equal(tree.type, 'suspense')
+  assert.equal(textOf(tree.props.fallback), 'panelLoading')
+  assert.equal((await lazies[0]()).default(), 'board')
+  React.createElement(mod.SessionRelaySettings, { t })
+  assert.equal((await lazies[1]()).default(), 'settings')
+  assert.deepEqual(asked, ['./client.panel.js'], '几个页面共用一次下载')
+  // 正文 kit 版本不配套
+  reply = { make: () => ({}), KIT_VERSION: 0 }
+  const second = await load('client.js', React, () => Promise.resolve(reply))
+  React.createElement(second.mod.BoardPage, { t })
+  assert.equal(textOf((await lazies.at(-1)()).default({ t })), 'panelStale')
+  const { mod: chunk, chunk: name } = await load('client.panel.js', fakeReact())
+  assert.equal(name, 'client.panel.js')
+  assert.equal(chunk.KIT_VERSION, second.mod.PANEL_KIT, '正文与入口的 kit 版本一致')
+})

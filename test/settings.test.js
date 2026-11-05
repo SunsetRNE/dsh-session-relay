@@ -164,8 +164,12 @@ async function loadClient(React) {
   globalThis.window = { __ModuleLoader__: { load: ({ factory }) => { mod = factory((name) => { if (name === 'react') return React; throw new Error('unexpected require ' + name) }) } } }
   const source = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   new Function(source)()
+  // 正文按需加载（client.panel.js）：测试里直接载入并注入 kit，拿到真组件
+  let panel
+  globalThis.window = { __ModuleLoader__: { load: ({ chunk, factory }) => { assert.equal(chunk, 'client.panel.js'); panel = factory((name) => { if (name === 'react') return React; throw new Error('unexpected require ' + name) }) } } }
+  new Function(await readFile(new URL('../lib/client.panel.js', import.meta.url), 'utf8'))()
   delete globalThis.window
-  return mod
+  return { ...mod, ...mod.loadPanel(panel), lazy: mod }
 }
 
 function textOf(node) {
