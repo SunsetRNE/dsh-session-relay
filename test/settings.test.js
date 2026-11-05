@@ -221,6 +221,36 @@ test('面板概览：给出快速交接入口（主会话先整理快照再交�
   assert.match(source, /handoff-auto['"][\s\S]{0,160}handoff-confirm/)
 })
 
+test('面板看板：合并队列按队列号列出待合并会话与已分配构建号', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => key
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const board = {
+    scope: 'workspace', workspace: null, hiddenByScope: 0, coordinator: null, line: null, others: [], othersTotal: 0, restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a',
+    entries: [
+      // 队列 #2 排在前面，验证是按队列号排序而不是数组顺序
+      { sessionId: 'session-two', label: '@two', status: 'ready', category: 'ready', queue: 2, assigned: 'build301', branch: 'feat/two', commit: 'bbbbbbb1', state: 'idle', updatedAt: 1 },
+      { sessionId: 'session-one', label: '@one', status: 'ready', category: 'ready', queue: 1, branch: 'feat/one', commit: 'aaaaaaa1', state: 'idle', updatedAt: 1, declaration: { rel: '.agents/worktrees/feat/one', mergeLabel: '可合并', kind: 'done' } },
+      { sessionId: 'session-plain', label: '@plain', status: 'working', category: 'active', state: 'running', updatedAt: 1 }
+    ]
+  }
+  const original = React.useState
+  let calls = 0
+  React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
+  React.useState = original
+  assert.match(page, /mergeQueueTitle/)
+  // 展开时标题行不显示摘要，这里只校验内容是齐的
+  const firstOne = page.indexOf('@one'), firstTwo = page.indexOf('@two')
+  assert.ok(firstOne >= 0 && firstTwo >= 0 && firstOne < firstTwo, '按队列号排序：#1 在 #2 前面')
+  assert.match(page, /build301/, '已分配的构建号显示出来')
+  assert.match(page, /mergeQueueNoBuild/, '没构建号的给说明')
+  assert.match(page, /可合并/, '带声明状态')
+  const queuePart = page.slice(page.indexOf('mergeQueueTitle'), page.indexOf('catReady'))
+  assert.ok(!queuePart.includes('@plain'), '不在队列里的会话不进合并队列')
+})
+
 test('面板看板：分组只有一两条时强制展开（折叠态跨工作区继承会让新工作区看不到卡片）', async () => {
   const { React } = fakeReact()
   const mod = await loadClient(React)
