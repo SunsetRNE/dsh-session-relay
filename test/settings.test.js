@@ -207,8 +207,19 @@ test('Client：注册 settings.section；有数据时渲染公告、模板、速
     React.useState = (initial) => (calls++ === 0 ? [data, () => {}] : original(initial))
     const full = React.createElement(mod.SessionRelaySettings, { t: (key) => key })
     React.useState = original
-    const text = textOf(full)
+    let text = textOf(full)
+    // 默认：版本线与插件状态展开，模板与速查收起只显示摘要
     assert.match(text, /lineTitle/)
+    assert.match(text, /setTplSum/)
+    assert.doesNotMatch(text, /读 TASKS\.md/)
+    assert.match(text, /setRefSum/)
+    assert.match(text, /reloadHint/)
+    // 展开（折叠状态记在 localStorage）
+    const saved = globalThis.window
+    globalThis.window = { localStorage: { getItem: () => JSON.stringify({ 'set-tpl': true, 'set-ref': true, 'set-ref-tpl': true }), setItem() {} } }
+    calls = 0
+    React.useState = (initial) => (calls++ === 0 ? [data, () => {}] : original(initial))
+    try { text = textOf(React.createElement(mod.SessionRelaySettings, { t: (key) => key })) } finally { React.useState = original; globalThis.window = saved }
     assert.match(text, /claim/)
     assert.match(text, /refTitle/)
     assert.match(text, /\/relay tpl save claim/)
@@ -677,7 +688,8 @@ test('Client：概览页的「等你决定」、唤醒暂停横幅 / 计数行�
   // GitHub 账号：换号时折叠标题标红；登录进行中自动展开，显示验证码与取消
   const gh = (extra) => ({ match: 'ok', source: 'gh', state: 'ready', login: 'alice', accountId: 101, scopes: ['repo'], error: null, checkedAt: 1, pinned: { accountId: 101, login: 'alice' }, loginFlow: null, ...extra })
   text = render({ ...base, github: gh({ match: 'mismatch', login: 'mallory', accountId: 666 }) }, { initialPage: 'ops' })
-  assert.match(text, /ghTitle[\s\S]*ghSumBad/)
+  // 不一致时默认展开，直接看到说明与重新锁定
+  assert.match(text, /ghTitle[\s\S]*ghPinnedBad[\s\S]*ghRepin/)
   text = render({ ...base, github: gh({ match: 'missing', state: 'missing', login: null, accountId: null, pinned: null, loginFlow: { state: 'pending', userCode: 'WXYZ-1234', verificationUri: 'https://github.com/login/device', opened: true } }) }, { initialPage: 'ops' })
   assert.match(text, /ghCode[\s\S]*WXYZ-1234[\s\S]*ghCodeOpened[\s\S]*ghCancel/)
   assert.doesNotMatch(text, /ghLogin/)
