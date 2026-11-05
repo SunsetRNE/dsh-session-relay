@@ -334,3 +334,40 @@ test('正文 chunk：折叠与筛选记在本机，换会话 / 重开标签后�
   } finally { globalThis.window = saved }
   assert.ok(textOf(tree).includes('@w3'), '空白会话按记住的「展开」列出')
 })
+
+test('正文 chunk：轮询带上次的 since；notModified 时不换看板对象（卡片不重画），只更新时间', async () => {
+  const React = fakeReact()
+  const effects = []
+  React.useEffect = (fn) => { effects.push(fn) }
+  const sets = []
+  React.useState = (initial) => [typeof initial === 'function' ? initial() : initial, (value) => sets.push(value)]
+  const calls = []
+  let reply = { ok: true, entries: sampleBoard().entries, version: 'v1' }
+  const kit = { ...kitFor(), request: async (method, body, query) => { calls.push(query); return reply } }
+  const saved = globalThis.document
+  globalThis.document = { visibilityState: 'visible', addEventListener() {}, removeEventListener() {}, querySelector: () => null, createElement: () => ({ dataset: {}, remove() {} }), head: { appendChild() {} } }
+  const cleanups = []
+  // 找出更新看板的那次 setState（还有刷新提示等别的更新）
+  const boardUpdate = () => sets.map((value) => (typeof value === 'function' ? value({ board: undefined }) : value)).find((value) => value && typeof value === 'object' && 'board' in value && value.at !== undefined)
+  try {
+    const { mod } = await load('client.sidebar.js', React)
+    React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-poll', useTabInfo: () => ({ tab: { visible: true } }) })
+    cleanups.push(...effects.map((fn) => fn()))
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    assert.equal(calls[0].since, undefined)
+    const first = boardUpdate()
+    assert.equal(first.version, 'v1')
+    // 第二轮：模块缓存里有 v1，带 since；服务端回 notModified
+    reply = { ok: true, notModified: true, version: 'v1' }
+    effects.length = 0; sets.length = 0
+    React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-poll', useTabInfo: () => ({ tab: { visible: true } }) })
+    cleanups.push(...effects.map((fn) => fn()))
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    assert.equal(calls.at(-1).since, 'v1')
+    const updated = boardUpdate()
+    assert.equal(updated.board, first.board, '看板对象沿用')
+  } finally {
+    for (const cleanup of cleanups) if (typeof cleanup === 'function') cleanup()
+    globalThis.document = saved
+  }
+})

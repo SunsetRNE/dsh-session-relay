@@ -2368,3 +2368,25 @@ test('GitHub 面板动作：只走设置路由；锁定后换号拒绝登记 CI 
     await assert.rejects(perform(h.relay, { action: 'github-bogus', fromSession: h.caller.id }), /未知的 GitHub 动作|未知/)
   } finally { await h.cleanup() }
 })
+
+test('看板版本：内容不变两次版本相同，带 since 只回 notModified；有变化换版本', async () => {
+  const h = await setup()
+  try {
+    await h.run('main here')
+    const route = h.routes.find((item) => typeof item.handler === 'function' || typeof item === 'function')
+    const handler = route?.handler ?? route
+    const get = (query) => new Promise((resolve) => {
+      const res = { statusCode: 0, headers: {}, setHeader(k, v) { this.headers[k] = v }, writeHead(code, headers) { this.statusCode = code; Object.assign(this.headers, headers ?? {}) }, end(text) { resolve(JSON.parse(text)) } }
+      void handler({ method: 'GET', url: '/api/dsha-session-relay?' + query, headers: { host: 'local' } }, res)
+    })
+    const first = await get('view=board&session=' + h.caller.id)
+    assert.equal(typeof first.version, 'string')
+    assert.ok(Array.isArray(first.entries))
+    const again = await get('view=board&session=' + h.caller.id + '&since=' + first.version)
+    assert.deepEqual(again, { ok: true, notModified: true, version: first.version })
+    await h.run('line main=abc')
+    const changed = await get('view=board&session=' + h.caller.id + '&since=' + first.version)
+    assert.notEqual(changed.version, first.version)
+    assert.ok(Array.isArray(changed.entries))
+  } finally { await h.cleanup() }
+})
