@@ -121,7 +121,8 @@ const sampleBoard = () => ({
   line: { text: 'main=a8f06fe' },
   entries: [
     { sessionId: 'session-w1aaaaaa', label: '@w1', title: '侧边栏改版', status: 'question', state: 'idle', summary: '要不要改', question: 'A 还是 B', branch: 'feat/side', commit: 'abcdef1234', conflicts: [{ label: '@w2', paths: ['lib/client.js'] }] },
-    { sessionId: 'session-w2bbbbbb', label: '@w2', status: 'ready', state: 'idle', queue: 1 }
+    { sessionId: 'session-w2bbbbbb', label: '@w2', status: 'ready', state: 'idle', queue: 1 },
+    { sessionId: 'session-w3cccccc', label: '@w3', status: 'working', category: 'blank', state: 'idle', summary: '空白会话' }
   ],
   othersTotal: 3,
   taskBoard: { open: [{ id: 'T1', priority: 'P1', title: '侧边栏' }], claimed: 2 }
@@ -136,18 +137,22 @@ function kitFor(opened = []) {
   }
 }
 
-// useState 顺序：board 状态、tick、filter、selected、lineOpen、copied
-const states = (board, { filter = 'all', selected } = {}) => [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined]
+// useState 顺序：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note
+const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false } = {}) => [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined]
 
 test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；列表有顶栏、计数、主会话、版本线、卡片与任务', async () => {
   const React = fakeReact(states(sampleBoard()))
   const { mod, chunk } = await load('client.sidebar.js', React)
   assert.equal(chunk, 'client.sidebar.js')
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) }))
-  for (const part of ['dsha-session-relay', 'sideJustNow', 'sideCountAttention', 'sideCountReady', 'sideCountOpen', 'mainIs', '@main', 'main=a8f06fe',
-    'sideFAll', 'sideFAttention', '@w1', 'status_question', '要不要改', 'feat/side', 'abcdef1', '⚠ 1', '@w2', 'queueNo', 'sideOthers', 'tasksTitle', 'sideClaimed', 'T1', 'P1', '侧边栏', 'openSession']) {
+  for (const part of ['dsha-session-relay', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'sideCountOpenN', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
+    '@w1', 'status_question', '要不要改', 'feat/side', 'abcdef1', '⚠ 1', '@w2', 'queueNo', 'sideOthers', 'tasksTitle', 'sideClaimed', 'T1', 'P1', '侧边栏', 'openSession']) {
     assert.ok(text.includes(part), '缺少 ' + part)
   }
+  // 空白会话合成一行，不单独列卡片；计数本身就是筛选
+  assert.ok(text.includes('catBlank 1'))
+  assert.ok(!text.includes('@w3'))
+  assert.ok(!text.includes('sideFAll'), '没有单独的「全部」筛选')
 })
 
 test('正文 chunk：筛选「可合并」只留 ready 的卡片；空分组给提示', async () => {
@@ -156,9 +161,15 @@ test('正文 chunk：筛选「可合并」只留 ready 的卡片；空分组给�
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(text.includes('@w2'))
   assert.ok(!text.includes('要不要改'), '待答复的卡片不在「可合并」里')
-  const React2 = fakeReact(states({ ...sampleBoard(), entries: [sampleBoard().entries[0]] }, { filter: 'done' }))
+  const React2 = fakeReact(states(sampleBoard(), { filter: 'active' }))
   const { mod: mod2 } = await load('client.sidebar.js', React2)
-  assert.ok(textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })).includes('sideFEmpty'))
+  assert.ok(textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })).includes('sideFEmpty'), '空白会话不算进行中')
+  // 会话不到 3 个：不给筛选，即使记着旧筛选也全列
+  const React3 = fakeReact(states({ ...sampleBoard(), entries: sampleBoard().entries.slice(0, 2) }, { filter: 'ready' }))
+  const { mod: mod3 } = await load('client.sidebar.js', React3)
+  const few = textOf(React3.createElement(mod3.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  assert.ok(few.includes('@w1') && few.includes('@w2') && few.includes('sideBoard'))
+  assert.ok(!few.includes('sideCountReady'))
 })
 
 test('正文 chunk：点卡片进详情——返回、路径、状态、问题、信息表、冲突', async () => {
@@ -194,13 +205,14 @@ test('正文 chunk：空白会话按服务端分类显示「空白」，不算�
   const React = fakeReact(states(board))
   const { mod } = await load('client.sidebar.js', React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
-  assert.ok(text.includes('catBlank'), '胶囊显示分组名')
-  assert.ok(!text.includes('status_working'), '不显示过时的汇报状态')
-  assert.ok(text.includes('0sideCountActive'), '空白会话不计入进行中')
+  assert.ok(text.includes('catBlank 1'), '合成一行显示分组名')
   assert.ok(text.includes('sideNoOpenTasks'))
-  const React2 = fakeReact(states(board, { filter: 'active' }))
+  // 展开后列卡片：胶囊显示分组名，不显示过时的汇报状态
+  const React2 = fakeReact(states(board, { quietOpen: true }))
   const { mod: mod2 } = await load('client.sidebar.js', React2)
-  assert.ok(textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })).includes('sideFEmpty'), '「进行中」筛选里没有空白会话')
+  const open = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  assert.ok(open.includes('catBlank') && open.includes('f4ada307'))
+  assert.ok(!open.includes('status_working'))
   const chunk = await readFile(new URL('../lib/client.sidebar.js', import.meta.url), 'utf8')
   assert.ok(!chunk.includes('brand-primary'), '强调色用链接蓝，不用主题里接近黑白的 brand-primary')
 })
@@ -243,4 +255,38 @@ test('入口：设置页 / 协作标签 / 监督面板的正文在 client.panel.
   const { mod: chunk, chunk: name } = await load('client.panel.js', fakeReact())
   assert.equal(name, 'client.panel.js')
   assert.equal(chunk.KIT_VERSION, second.mod.PANEL_KIT, '正文与入口的 kit 版本一致')
+})
+
+test('正文 chunk：等你决定直接点选项（以用户身份回答）；提醒条只在有事时出现；任务只列前 3 条', async () => {
+  const posted = []
+  const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
+  const board = {
+    ...sampleBoard(),
+    asks: [{ id: 'a1', question: 'build281 给谁', options: ['lint', 'adb'], byLabel: '@main', at: 1 }],
+    unattended: { paused: true },
+    declarations: { mismatches: 2 },
+    watches: [{ id: 'w1', state: 'failed', line: 'CI 123 失败', what: 'CI 123', checkedAt: Date.now() }, { id: 'w2', state: 'active', line: 'CI 9 运行中', what: 'CI 9' }],
+    taskBoard: { open: ['T1', 'T2', 'T3', 'T4', 'T5'].map((id) => ({ id, title: id + ' 标题' })), claimed: 0 }
+  }
+  const React = fakeReact(states(board))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const text = textOf(tree)
+  for (const part of ['askTitle', 'build281 给谁', 'lint', 'adb', 'askDismiss', 'sideAlertWake', 'wakeResume', 'sideAlertDecl', 'CI 123 失败', 'sideWatching', 'T3 标题', 'sideMoreTasks']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(!text.includes('T4 标题'))
+  const find = (node, label) => {
+    if (!node || typeof node !== 'object') return undefined
+    if (Array.isArray(node)) { for (const child of node) { const hit = find(child, label); if (hit) return hit } return undefined }
+    if (node.type === 'button' && textOf(node.children) === label) return node
+    return find(node.children, label)
+  }
+  await find(tree, 'lint').props.onClick()
+  assert.deepEqual(posted[0], ['POST', { action: 'ask-answer', id: 'a1', option: 'lint', fromSession: 'session-self' }])
+  await find(tree, 'wakeResume').props.onClick()
+  assert.equal(posted[1][1].action, 'unattended-resume')
+  // 没事：不出现提醒区
+  const React2 = fakeReact(states(sampleBoard()))
+  const { mod: mod2 } = await load('client.sidebar.js', React2)
+  const calm = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  assert.ok(!/askTitle|sideAlert|sideWatching/.test(calm))
 })
