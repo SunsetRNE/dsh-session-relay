@@ -121,7 +121,7 @@ test('归档：预览不写文件；apply 校验 planId、备份、原子替换�
 test('持有者事实：最后一轮出错后用户又发消息不算死；取最近一次 totalTokens', () => {
   const ev = (seq, type, data) => ({ seq, time: seq * 1000, type, data })
   const crashed = tailFacts([
-    ev(1, 'user/message', { content: [], source: { kind: 'user' } }),
+    ev(1, 'user/message', { content: [{ type: 'text', text: 'x'.repeat(300_000) }], source: { kind: 'user' } }),
     ev(2, 'assistant/message', { usage: { totalTokens: 100_000 } }),
     ev(3, 'assistant/attempt', { stream: [{ chunk: { type: 'usage', usage: { inputTokens: 30_000, cacheReadTokens: 190_000 } } }] }),
     ev(4, 'turn/end', { reason: { kind: 'error', error: { code: 'EMPTY_RESPONSE' } } })
@@ -130,6 +130,25 @@ test('持有者事实：最后一轮出错后用户又发消息不算死；取�
   assert.equal(crashed.contextTokens, 220_000)
   const resumed = tailFacts([ev(1, 'turn/end', { reason: { kind: 'error' } }), ev(2, 'user/message', { content: [], source: { kind: 'user' } })])
   assert.equal(resumed.lastEnd, undefined)
+})
+
+test('上下文估算：供应商虚报的 token 以会话累计字符封顶，正常值不变', async () => {
+  const { boundContextTokens, usageTokens } = await import('../lib/tasks.js')
+  const ev = (seq, type, data) => ({ seq, time: seq * 1000, type, data })
+  // 实测：新会话第二步只有约 14 万字符，中转却报 410k
+  const inflated = tailFacts([
+    ev(1, 'system/message', { text: 'x'.repeat(120_000) }),
+    ev(2, 'assistant/message', { usage: { inputTokens: 6_244, cacheReadTokens: 28_288, totalTokens: 34_566 } }),
+    ev(3, 'tool/result', { text: 'y'.repeat(20_000) }),
+    ev(4, 'assistant/message', { usage: { inputTokens: 405_984, totalTokens: 410_634 } })
+  ])
+  assert.ok(inflated.contextTokens > 140_000 && inflated.contextTokens < 141_000, String(inflated.contextTokens))
+  const honest = tailFacts([ev(1, 'system/message', { text: 'x'.repeat(120_000) }), ev(2, 'assistant/message', { usage: { totalTokens: 34_566 } })])
+  assert.equal(honest.contextTokens, 34_566)
+  assert.equal(boundContextTokens(500_000, Infinity), 500_000) // 字符数未知不封顶
+  assert.equal(boundContextTokens(500_000, undefined), 500_000)
+  assert.equal(boundContextTokens(0, 10), undefined)
+  assert.equal(usageTokens({ inputTokens: 1, cacheReadTokens: 2, cacheWriteTokens: 3 }), 6)
 })
 
 test('看板上下文：变大时提示用 peer_tasks 与归档；始终提醒只写一行结论', () => {

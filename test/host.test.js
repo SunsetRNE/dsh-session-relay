@@ -1318,6 +1318,27 @@ test('peer_tasks：汇总 / 单个任务 / 失效持有者；归档只有主会�
   } finally { await h.cleanup() }
 })
 
+test('上下文估算：实时观察时虚报的 usage 按累计字符封顶，不提前出 context-budget', async () => {
+  const h = await setup()
+  try {
+    const agent = h.makeAgent('5b5b5b5b-0000-0000-0000-00000000005b', { cwd: h.dir })
+    const events = agent.session.snapshotEvents()
+    const push = (event) => { events.push(event); h.relay.observe(agent.session, event) }
+    push({ type: 'system/message', data: { text: 'x'.repeat(100_000) } })
+    push({ type: 'assistant/message', data: { usage: { totalTokens: 30_000 } } })
+    assert.equal(h.relay.contextTokensOf(agent.session.id), 30_000)
+    push({ type: 'tool/result', data: { text: 'y'.repeat(40_000) } })
+    push({ type: 'assistant/message', data: { usage: { inputTokens: 720_000, totalTokens: 725_000 } } })
+    const tokens = h.relay.contextTokensOf(agent.session.id)
+    assert.ok(tokens > 140_000 && tokens < 142_000, String(tokens))
+    assert.equal(h.relay.contextBudgetText(agent.session.id, false), '')
+    // 没有快照可补时不封顶
+    const bare = { id: 'session-5c5c5c5c-0000-0000-0000-00000000005c', header: { cwd: h.dir } }
+    h.relay.observe(bare, { type: 'assistant/message', data: { usage: { totalTokens: 500_000 } } })
+    assert.equal(h.relay.contextTokensOf(bare.id), 500_000)
+  } finally { await h.cleanup() }
+})
+
 test('面板唤醒：wake-plan 只读预判；小上下文原地唤醒发「继续」，过大新建会话接手', async () => {
   const h = await setup()
   try {
