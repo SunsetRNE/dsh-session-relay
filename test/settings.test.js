@@ -667,6 +667,13 @@ test('Client：概览页的「等你决定」、唤醒暂停横幅 / 计数行�
   assert.match(text, /wakeLine/)
   assert.doesNotMatch(text, /wakePaused/)
   assert.match(text, /delegTitle/)
+  // 开发者模式：开启时概览顶部有提示和关闭按钮；交接与核验页有开关
+  text = render({ ...base, devMode: { enabled: true, until: 2_000_000_000_000, enabledAt: 1, defaultHours: 2, maxHours: 24 } })
+  assert.match(text, /devBanner[\s\S]*devDisable/)
+  text = render({ ...base, devMode: { enabled: false, until: null, enabledAt: null, defaultHours: 2, maxHours: 24 } })
+  assert.doesNotMatch(text, /devBanner/)
+  text = render({ ...base, devMode: { enabled: false, until: null, enabledAt: null, defaultHours: 2, maxHours: 24 } }, { initialPage: 'ops' })
+  assert.match(text, /devTitle/)
   // 暂停：横幅 + 继续
   text = render({ ...base, unattended: { wakesThisHour: 16, limit: 16, approxTokensThisHour: 0, paused: true, pausedAt: 1 } })
   assert.match(text, /wakePaused[\s\S]*wakeResume/)

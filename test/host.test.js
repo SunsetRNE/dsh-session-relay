@@ -1800,6 +1800,73 @@ test('peer_ask_user：只给主会话根会话；去重、上限校验；面板�
   } finally { await h.cleanup() }
 })
 
+test('peer_ask_user action=withdraw：主会话撤回过时的问题；不写 id 列出待答；只有主会话能撤；撤回后不能再答', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await h.call('peer_ask_user', { question: '推 tag 吗', options: ['推', '不推'] })
+    const ask = (await h.relay.board(undefined, { session: h.caller.id })).asks[0]
+    assert.match(h.contextFor(h.caller), /action=withdraw/)
+    assert.match(await h.call('peer_ask_user', { action: 'withdraw' }), new RegExp(`${ask.id}：推 tag 吗`))
+    await assert.rejects(h.call('peer_ask_user', { action: 'withdraw', id: ask.id }, h.peer), (error) => error.code === 'not_coordinator')
+    assert.match(await h.call('peer_ask_user', { action: 'withdraw', id: ask.id }), /已撤回/)
+    assert.equal((await h.relay.board(undefined, { session: h.caller.id })).asks.length, 0)
+    assert.doesNotMatch(h.contextFor(h.caller), /Waiting for the user/)
+    await assert.rejects(h.call('peer_ask_user', { action: 'withdraw', id: ask.id }), /已被主会话撤回/)
+    const { perform } = await import('../lib/settings-route.js')
+    await assert.rejects(perform(h.relay, { action: 'ask-answer', fromSession: h.caller.id, id: ask.id, option: '推' }), /已被主会话撤回/)
+    assert.match(await h.call('peer_ask_user', { action: 'withdraw' }), /没有在等/)
+    await assert.rejects(h.call('peer_ask_user', { question: '只有问题' }), /需要 question 和 options/)
+    // 重新加载后状态还在
+    const { AwayStore } = await import('../lib/away.js')
+    const reloaded = new AwayStore(h.relay.away.path)
+    await h.relay.away.chain
+    await reloaded.load()
+    assert.equal(reloaded.find('ws-1', ask.id).state, 'withdrawn')
+  } finally { await h.cleanup() }
+})
+
+test('开发者模式：用户限时打开后模型可只读查看别的工作区并记审计；写操作边界不变；到期自动关', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    const outsider = h.makeAgent('99999999-0000-0000-0000-000000000009', { cwd: '/z' })
+    h.agents.set(outsider.id, outsider)
+    h.workspaces.push({ id: 'ws-b', title: 'B', path: '/z', sessionIds: [outsider.id] })
+    h.services.sessionQuery = {
+      readSession: async (id) => ({ session: { id, cwd: h.dir }, events: sampleEvents() }),
+      readSurface: async () => ({ events: sampleEvents() })
+    }
+    await h.run('main here')
+    await assert.rejects(h.call('peer_inspect', { session: outsider.id }), /开发者模式/)
+    await assert.rejects(h.call('peer_inspect', { query: 'EMPTY', scope: 'all' }), /开发者模式/)
+    assert.doesNotMatch(h.contextFor(h.caller), /dev-mode/)
+    assert.match((await h.run('dev')).text, /关闭/)
+    assert.match((await h.run('dev on 30')).text, /0–24 小时/)
+    const { perform } = await import('../lib/settings-route.js')
+    const on = await perform(h.relay, { action: 'dev-mode', fromSession: h.caller.id, enabled: true, hours: 1 })
+    assert.equal(on.board.devMode.enabled, true)
+    assert.match(h.contextFor(h.caller), /<dev-mode until=/)
+    assert.match(await h.call('peer_inspect', { session: outsider.id }), /出错 EMPTY_RESPONSE/)
+    assert.match(await h.call('peer_inspect', { query: 'EMPTY', scope: 'all' }), /个会话/)
+    assert.match(await h.call('peer_workspace', { session: outsider.id }), /另一个工作区（B）/)
+    // 写操作仍限本工作区
+    await assert.rejects(h.call('peer_assign', { target: outsider.id, value: 'build1' }), (error) => error.code === 'outside_workspace')
+    await h.relay.devMode.chain
+    const audit = (await readFile(h.relay.devMode.auditPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    assert.deepEqual(audit.map((item) => item.event), ['enable', 'read', 'search', 'read'])
+    assert.equal(audit[1].target, outsider.id)
+    // 到期即关
+    h.relay.devMode.now = () => Date.now() + 2 * 3600_000
+    assert.equal(h.relay.devMode.active(), false)
+    await assert.rejects(h.call('peer_inspect', { session: outsider.id }), /不在本工作区/)
+    h.relay.devMode.now = Date.now
+    assert.match((await h.run('dev off')).text, /关闭/)
+    assert.equal(h.relay.devMode.active(), false)
+  } finally { await h.cleanup() }
+})
+
 test('无人值守唤醒预算：只算模型唤醒空闲会话；到上限改放收件箱并只通知一次；用户投递不受影响；继续后重新计数', async () => {
   const h = await setup()
   try {
