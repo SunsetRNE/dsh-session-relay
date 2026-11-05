@@ -1666,6 +1666,22 @@ test('子代理通讯：树内经根会话转交；对外署名根会话、回�
     // 子代理提问照常唤醒，并标明是子代理
     await h.call('peer_report', { status: 'question', summary: '要不要改接口', question: '改 A 还是 B' }, h.child)
     assert.equal(h.relay.coord.snapshot().board[h.caller.id].status, 'working')
+    // 1.0.1 之前被子代理改写的旧条目：载入时挪进 subagents，父会话回到进行中
+    const { migrateSubagentEntry } = await import('../lib/core.js')
+    const migrated = migrateSubagentEntry({ status: 'done', summary: '［子代理 bb04cc9f］完成模块调查', branch: 'feat/x', reportedAt: 5, updatedAt: 6 })
+    assert.equal(migrated.status, 'working')
+    assert.equal(migrated.summary, undefined)
+    assert.equal(migrated.branch, 'feat/x')
+    assert.deepEqual(migrated.subagents.bb04cc9f, { status: 'done', summary: '完成模块调查', reportedAt: 5 })
+    const untouched = { status: 'done', summary: '父会话自己做完' }
+    assert.equal(migrateSubagentEntry(untouched), untouched)
+    const { CoordStore } = await import('../lib/core.js')
+    const legacyPath = join(h.dir, 'legacy-coord.json')
+    await writeFile(legacyPath, JSON.stringify({ version: 2, board: { 'session-x': { status: 'done', summary: '［子代理 bb04cc9f］完成', updatedAt: Date.now() } }, links: {}, groups: {} }))
+    const legacy = new CoordStore(legacyPath)
+    await legacy.load()
+    assert.equal(legacy.state.board['session-x']?.status, 'working')
+    assert.equal(legacy.state.board['session-x']?.subagents?.bb04cc9f?.status, 'done')
     const { frameReportBatch } = await import('../lib/core.js')
     const framed = frameReportBatch({ reports: [{ sessionId: h.caller.id, subagentId: h.child.id, parentStatus: 'working', label: '@a', status: 'done', summary: 'x' }], hop: 1, maxHops: 3 })
     assert.match(framed, /子代理 cccccccc（父会话 @a.*子代理已完成；父会话自己的状态不变（进行中）/)
