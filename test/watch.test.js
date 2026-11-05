@@ -84,6 +84,19 @@ test('核验：投递失败保留待发，下一轮补发；手机通知只发�
   } finally { await h.cleanup() }
 })
 
+test('核验：CI 结论为 cancelled 记成「已取消」并按好消息通知一次（不挂红色告警）', () => {
+  const item = { kind: 'ci', runId: '42074880855', repo: 'o/r' }
+  const outcome = evaluate(item, { done: true, ok: false, status: 'completed', conclusion: 'cancelled', sha: 'abc1234', title: 'PR check', url: 'https://x' }, Date.now())
+  assert.equal(outcome.state, 'cancelled')
+  assert.equal(outcome.notice.ok, true, '被取代的取消不算坏消息')
+  assert.match(outcome.notice.text, /已取消/)
+  assert.doesNotMatch(outcome.notice.text, /结束：cancelled/)
+  const failed = evaluate(item, { done: true, ok: false, status: 'completed', conclusion: 'failure', sha: 'abc1234', title: 'PR check' }, Date.now())
+  assert.equal(failed.state, 'failed')
+  assert.equal(failed.notice.ok, false)
+  assert.match(failed.notice.text, /结束：failure/)
+})
+
 test('核验：查询失败按退避重试，连续 5 次发一次失败通知，恢复后发恢复；超时发超时', async () => {
   let fail = true
   const h = await harness({ ci: async () => { if (fail) throw new Error('gh: network'); return { done: false, status: 'queued' } } })
