@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.7.1 - 2026-11-06
+
+修 1.7.0 的文案遗漏。
+
+- 开发者模式上下文、`/relay dev` 状态和 `peer_workspace` 列表尾部仍在提示已删除的 `peer_workspace session=<id>`；改成 `peer_inspect view=digest`（开发者模式读其它工作区也走同一入口）。
+- 235/235 测试通过。
+
+需要 `/relay reload` 后生效。
+
+**要求 DSH 0.2.2-rc.1 及以上**。安装：插件管理器 → 从 Release 安装，或直接下载下面的 `dsh-session-relay-1.7.1.tgz`。
+
 ## 1.7.0 - 2026-11-06
 
 工具边界收紧第二轮。

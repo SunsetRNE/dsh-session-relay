@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-relay",
   "description": "DSHA 平级会话互通：主会话 + 工作会话协作，版本线公告、指令模板、汇报合并唤醒",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "type": "module",
   "engines": {
     "dsh": ">=0.2.2-rc.1 <0.3.0-0 || >=0.2.3-rc.1 <0.3.0-0 || >=0.2.4-rc.1 <0.3.0-0"
