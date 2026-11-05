@@ -109,7 +109,7 @@ test('注册了 /relay 与四个 peer 工具', async () => {
   try {
     assert.ok(h.commands.has('relay'))
     assert.equal(h.routes[0].path, '/api/dsha-session-relay')
-    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_ask_user', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_line', 'peer_list', 'peer_report', 'peer_send', 'peer_spawn', 'peer_task', 'peer_tasks', 'peer_watch', 'peer_workspace'])
+    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_ask_user', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_interrupt', 'peer_line', 'peer_list', 'peer_mail', 'peer_report', 'peer_send', 'peer_spawn', 'peer_task', 'peer_tasks', 'peer_watch', 'peer_workspace'])
   } finally { await h.cleanup() }
 })
 
@@ -187,6 +187,43 @@ test('peer_send：模型消息标记为 agent-message，并在 maxHops 后拒绝
     assert.match(back.content[0].text, /第 2\/2 跳/)
     h.listeners['session/event'](h.caller.session, { type: 'user/message', data: back })
     await assert.rejects(h.call('peer_send', { target: 'peer', message: '再说一句' }), /跳/)
+  } finally { await h.cleanup() }
+})
+
+test('peer_interrupt：主会话专用，插入主会话指令；worker 不能调用', async () => {
+  const h = await setup()
+  try {
+    await h.run('main here')
+    const out = await h.call('peer_interrupt', { target: h.peer.id, text: '停止当前工作并汇报进度', mode: 'stop' })
+    assert.match(out, /插播主会话指令/)
+    const message = h.peer.inbox.at(-1)[1]
+    assert.match(message.content[0].text, /\[主会话指令 · 停止并汇报\] 停止当前工作并汇报进度/)
+    await assert.rejects(h.call('peer_interrupt', { target: h.caller.id, text: 'x' }, h.peer), /只给本工作区主会话/)
+  } finally { await h.cleanup() }
+})
+
+test('peer_mail：主会话发给单个会话后能 list/force/归档，目标收短通知与强推全文', async () => {
+  const h = await setup()
+  try {
+    await h.run('main here')
+    const sent = await h.call('peer_mail', { action: 'send', to: h.peer.id, subject: '给 peer 的通知', body: '正文 1.4.0 验收', deadline_minutes: 1 })
+    assert.match(sent, /已发送邮箱消息/)
+    const id = sent.match(/m_[a-z0-9]+/)?.[0]
+    assert.ok(id !== undefined, sent)
+    // 目标只收到一行短通知，不长正文。
+    const notice = h.peer.inbox.at(-1)[1].content[0].text
+    assert.match(notice, /协作邮箱/)
+    assert.match(notice, new RegExp(id))
+    assert.doesNotMatch(notice, /正文 1\.4\.0 验收/)
+    // 主会话能看到只发给 peer 的消息（之前 scope=session 对主会话不可见，force 会报错）。
+    assert.match(await h.call('peer_mail', { action: 'list' }), /给 peer 的通知/)
+    const forced = await h.call('peer_mail', { action: 'force', ids: [id] })
+    assert.match(forced, /已强推 1 条/)
+    assert.match(h.peer.inbox.at(-1)[1].content[0].text, /正文 1\.4\.0 验收/)
+    // 目标自己读全文，主会话归档后双方都看不到。
+    assert.match(await h.call('peer_mail', { action: 'read', ids: [id] }, h.peer), /正文 1\.4\.0 验收/)
+    assert.match(await h.call('peer_mail', { action: 'mark', ids: [id], state: 'archived' }), /已归档/)
+    assert.match(await h.call('peer_mail', { action: 'list' }), /没有消息/)
   } finally { await h.cleanup() }
 })
 
@@ -1665,7 +1702,7 @@ test('核验：新工作区没有主会话时，本会话可以自己登记 / �
   } finally { await h.cleanup() }
 })
 
-test('核验 tag：登记后换了主会话，tag 推上来时通知现任主会话（不是登记者），并发手机通知', async () => {
+test('核验 tag：登记后换了主会话，tag 推上来时通知现任主会话（不是登记者），并发邮箱短通知（成功不响手机）', async () => {
   const h = await setup()
   try {
     let remote = null
@@ -1683,7 +1720,7 @@ test('核验 tag：登记后换了主会话，tag 推上来时通知现任主会
     const toPeer = h.peer.inbox.map(([, message]) => message.content[0].text).join('\n')
     assert.match(toPeer, /0\.15\.0 tag/)
     assert.doesNotMatch(h.caller.inbox.map(([, message]) => message.content[0].text).join('\n'), /0\.15\.0 tag/)
-    assert.ok(h.notified.some(([title, text]) => /0\.15\.0 tag/.test(`${title} ${text}`)))
+    assert.ok(h.relay.mailbox.items().some((item) => /0\.15\.0 tag/.test(item.subject)))
   } finally { await h.cleanup() }
 })
 
