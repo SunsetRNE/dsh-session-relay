@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.7.0 - 2026-11-06
+
+工具边界收紧第二轮。
+
+- `peer_workspace` 只管列表与工作树声明核对（主会话专用）；原来的单会话最近几轮摘要移到 `peer_inspect` 的 `view=digest`（从原始 surface 读，`turns` 1–10，开发者模式仍可看其它工作区）。看一个会话现在只有 `peer_inspect` 一个入口。
+- `peer_watch` 与邮箱的分工写清楚：成功结果只进工作区邮箱（`peer_mail list --kind watch`，批量短通知、不响手机）；失败/超时直接送达并响手机。登记回复和核验清单也同步这句。
+- `peer_mail` 说明补上 watch 结果（`kind=watch`）。
+- 测试 235 项全过。
+
+需要 `/relay reload` 后生效。
+
+**要求 DSH 0.2.2-rc.1 及以上**。安装：插件管理器 → 从 Release 安装，或直接下载下面的 `dsh-session-relay-1.7.0.tgz`。
+
 ## 1.6.0 - 2026-11-06
 
 工具收紧：把 1.4.0 的独立插播工具并回 `peer_send`。

@@ -17,7 +17,7 @@
 
 ### 2.1 搜索使用完整原始日志
 
-`peer_inspect` / `/relay search` 使用 `sessionQuery.readSession()`，而 `peer_workspace` 的最近对话摘要使用 `readSurface()`。这是有意区分的：
+`peer_inspect` / `/relay search` 使用 `sessionQuery.readSession()`，而 `peer_inspect view=digest`（原 `peer_workspace` 的最近对话摘要）使用 `readSurface()`。这是有意区分的：
 
 - `readSession()` 是完整原始事件，能保留工具参数、工具结果、错误码、文件改动、轮次结束原因和 reasoning，适合审计和精确搜索。
 - `readSurface()` 是当前模型表层，压缩或替换后的旧消息可能已不在其中，适合给主会话看“当前上下文摘要”，不应替代完整审计搜索。

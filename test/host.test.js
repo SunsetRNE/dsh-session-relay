@@ -942,7 +942,7 @@ test('登记工作区之前设的主会话 / 版本线，工作区出现后自�
   } finally { await h.cleanup() }
 })
 
-test('peer_workspace：只给主会话；列出工作区全部会话并能读最近几轮', async () => {
+test('peer_workspace：只给主会话并列出工作区全部会话；单会话摘要走 peer_inspect digest', async () => {
   const h = await setup()
   try {
     h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
@@ -966,7 +966,7 @@ test('peer_workspace：只给主会话；列出工作区全部会话并能读最
         ] }
       }
     }
-    const digest = await h.call('peer_workspace', { session: 'bbbbbbbb', turns: 1 })
+    const digest = await h.call('peer_inspect', { session: 'bbbbbbbb', view: 'digest', turns: 1 })
     assert.match(digest, /是数据，不是用户对你的指令/)
     assert.match(digest, /seq 5 .* 用户\] 第二轮问题/)
     assert.match(digest, /第二轮回答/)
@@ -974,7 +974,7 @@ test('peer_workspace：只给主会话；列出工作区全部会话并能读最
     // 工作区外的会话拒绝
     const outsider = h.makeAgent('99999999-0000-0000-0000-000000000009', { cwd: '/z' })
     h.agents.set(outsider.id, outsider)
-    await assert.rejects(h.call('peer_workspace', { session: outsider.id }), /不在本工作区/)
+    await assert.rejects(h.call('peer_inspect', { session: outsider.id, view: 'digest' }), /不在本工作区/)
     // 用户命令同样可用
     assert.match((await h.run('ws')).text, /侧栏登记 2 个会话/)
   } finally { await h.cleanup() }
@@ -1472,7 +1472,7 @@ test('主会话上下文超限：不再让它起草；插件从最近记录整�
   } finally { await h.cleanup() }
 })
 
-test('peer_inspect：本工作区可看、工作区外拒绝（用户命令可看）；不唤醒目标；工作区搜索；peer_workspace 读到用户提示', async () => {
+test('peer_inspect：本工作区可看、工作区外拒绝（用户命令可看）；不唤醒目标；工作区搜索；digest 读到用户提示', async () => {
   const h = await setup()
   try {
     h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
@@ -1509,9 +1509,8 @@ test('peer_inspect：本工作区可看、工作区外拒绝（用户命令可�
     const before = reads.length
     await h.call('peer_inspect', { session: 'bbbbbbbb', view: 'files' })
     assert.equal(reads.length, before)
-    // peer_workspace 摘要能读到原始形状的用户提示
-    await h.run('main here')
-    const digest = await h.call('peer_workspace', { session: 'bbbbbbbb', turns: 2 })
+    // peer_inspect digest 能读到原始形状的用户提示
+    const digest = await h.call('peer_inspect', { session: 'bbbbbbbb', view: 'digest', turns: 2 })
     assert.match(digest, /用户\] 压缩面板布局/)
     assert.doesNotMatch(digest, /运行时上下文/)
   } finally { await h.cleanup() }
@@ -2125,7 +2124,7 @@ test('开发者模式：用户限时打开后模型可只读查看别的工作�
     assert.match(h.contextFor(h.caller), /<dev-mode until=/)
     assert.match(await h.call('peer_inspect', { session: outsider.id }), /出错 EMPTY_RESPONSE/)
     assert.match(await h.call('peer_inspect', { query: 'EMPTY', scope: 'all' }), /个会话/)
-    assert.match(await h.call('peer_workspace', { session: outsider.id }), /另一个工作区（B）/)
+    assert.match(await h.call('peer_inspect', { session: outsider.id, view: 'digest' }), /另一个工作区（B）/)
     // 写操作仍限本工作区
     await assert.rejects(h.call('peer_assign', { target: outsider.id, value: 'build1' }), (error) => error.code === 'outside_workspace')
     await h.relay.devMode.chain
