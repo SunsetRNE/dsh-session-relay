@@ -17,6 +17,7 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - `/relay wt <会话> [--from <基分支|提交>] [--name <名字>]`：用官方工作树服务给会话建分支与新目录并切过去，不用手动 `git worktree add`；宿主没启用该功能时明确报错。
 - GitHub 账号（设置页）：面板登录 gh、锁定账号数字 id；换号或退出时标红、发一次通知，并暂停 relay 自己的 CI 核验。
 - 开发者模式（`/relay dev on [小时]`，默认关闭、限时、记审计）：模型可只读查看所有工作区的会话。
+- 截图：`screenshots.json` 里列了 `assets/screenshots/sidebar.png`（右侧边栏「协作」标签，演示数据，已裁掉无关界面）；换图推仓库即可，不用提 PR。
 - 维护文档：[设计、已知坑与审阅边界](docs/maintenance-guide.md)；[上架 awesome-dsh-plugin 的公开约定](docs/awesome-dsh-plugin-submission.md)（条目格式、`dsh.bundle`、tarball 两种写法、peer 预发布陷阱、held 标签、本容器的 REST 配方）。
 
 ## 运行环境
