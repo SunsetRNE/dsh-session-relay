@@ -1870,6 +1870,51 @@ test('任务库：首次导入后工作区文件只读；终态任务自动归�
   } finally { await h.cleanup() }
 })
 
+test('任务树：split 父子/串行依赖、dispatch dry_run、子任务完成后父任务自动完成', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |\n|---|---|---|---|---|---|\n| T1 | P1 | 父任务 | a | 否 | 待认领 |\n')
+    const split = await h.call('peer_task', { action: 'split', id: 'T1', subtasks: ['子一', '子二'], serial: true })
+    assert.match(split, /T1\.1、T1\.2/)
+    const board = () => readFile(join(h.dir, '.agents/TASKS.md'), 'utf8')
+    assert.match(await board(), /T1\.1/)
+    assert.match(await board(), /T1\.2/)
+    const plan = await h.call('peer_task', { action: 'dispatch', id: 'T1', dry_run: true })
+    assert.match(plan, /T1\.1/)
+    assert.doesNotMatch(plan, /- T1\.2 →/)
+    const viaCommand = await h.run('task dispatch T1 --dry-run')
+    assert.equal(viaCommand.kind, 'success')
+    assert.match(viaCommand.text, /T1\.1/)
+    // 两个子任务都放弃后，父任务自动完成。
+    for (const id of ['T1.1', 'T1.2']) {
+      assert.match(await h.call('peer_task', { action: 'claim', id }, h.peer), /已认领/)
+      assert.match(await h.call('peer_task', { action: 'abandon', id, text: '测试放弃' }, h.peer), /已放弃/)
+    }
+    assert.match(await board(), /已合入（子任务全部完成）/)
+  } finally { await h.cleanup() }
+})
+
+test('任务派发：dispatch spawn 拉起新会话并带任务指令', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |\n|---|---|---|---|---|---|\n| T8 | P1 | 独立任务 | a | 否 | 待认领 |\n')
+    const before = new Set(h.agents.keys())
+    const out = await h.call('peer_task', { action: 'dispatch', mode: 'spawn', limit: 1 })
+    assert.match(out, /拉起新会话 1/)
+    const created = [...h.agents.keys()].find((id) => !before.has(id))
+    assert.ok(created !== undefined)
+    const text = h.agents.get(created).inbox[0][1].content[0].text
+    assert.match(text, /T8/)
+    assert.match(text, /认领/)
+  } finally { await h.cleanup() }
+})
+
 test('子代理通讯：树内经根会话转交；对外署名根会话、回复落根；别人的子代理经其根转交；特权不继承、认领记在根会话；树内限流', async () => {
   const h = await setup()
   try {

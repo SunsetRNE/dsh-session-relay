@@ -1,6 +1,6 @@
 # 插件任务库（1.8/1.9）设计与迁移
 
-状态：1.8 已实现（插件任务库 + 导入/导出 + 自动归档）；1.9 派发待做。用户 2026-11-06 已定三条：
+状态：1.8 已实现（插件任务库 + 导入/导出 + 自动归档）；1.9 已实现（父子/依赖 + split + dispatch）。用户 2026-11-06 已定三条：
 1. 插件为唯一事实源，旧 `.agents/TASKS.md` / `.agents/claims` 首次导入，之后**只读导出**（其它工作区/脚本仍能看）。
 2. 主会话可以按优先级/依赖**自动派发**，受唤醒预算与派发上限约束，可随时停。
 3. 任务支持**父/子 + 依赖**（串行/并行），子任务可单独派发，父任务全子任务完成后自动 done。
@@ -27,7 +27,7 @@ tasks/<group>/
 ```
 
 - 写操作仍是现有 `withBoardLock` + 原子替换，只是路径在插件目录；事件、备份、锁都不再进工作区。
-- 1.9 的父子/依赖会另加 `graph.json`（`{ [id]: { parentId, dependsOn[] } }`），不塞进 markdown 表格。
+- 父子/依赖在 `graph.json`（`{ [id]: { parentId, dependsOn[] } }`），不塞进 markdown 表格。
 - 任务详情、认领链、完成/放弃时间沿用 `parseTaskDoc` / `readClaims` 的既有语义。
 
 ## 3. 导入 / 导出
@@ -54,23 +54,18 @@ tasks/<group>/
 - 手动：`/relay tasks archive` 仍可用（预览/执行），底层操作 JSON。
 - 永不物理删除；`archive` 超过上限再写 `tasks-archive.jsonl` 冷存。
 
-## 5. 派发（1.9）
+## 5. 派发（1.9 已实现）
 
-工具：`peer_task action=dispatch`，参数：
-- `id`：单个任务，或父任务（整棵子树）；
-- `mode`：`auto|wake|spawn`（默认 auto：有 assignee 就 wake，没有就 spawn）；
-- `dry_run`：只出计划，不投递；
-- `limit`：本次最多派发几个（默认 3，上限 8）。
-
-语义：
-1. 读任务树，按 `dependsOn` 过滤：依赖未完成的子任务不派发，报“等待依赖”。
-2. 对每个可派发任务：
-   - 有 assignee 且会话在：`peer_send` 发任务正文（标题、详情、验收标准、依赖、边界）并唤醒；受 `unattendedWakesPerHour` 预算限制。
-   - 无 assignee：复用 `launchClaimer` 新建会话，首条消息带任务全文，并自动把 assignee 记成新会话。
-3. 父任务：不直接派发（除非它有独立正文）；子任务全部 `merged/abandoned` 后父任务自动 `done`，事件写“子任务全部完成”。
-4. 拆分：`peer_task action=split id=<父> subtasks=[{title,priority,detail,dependsOn}]`；生成 `T49.1` 这样的子号（或用户给号），`parentId` 指向父任务，`dependsOn` 引用同树子号。
-5. 自动派发：主会话每轮上下文可看到“可派发任务（已满足依赖）”；由主会话**显式**调用 dispatch（不自动插播、不在 read 路径产生唤醒）。用户可 `/relay task dispatch <id|--auto>`。
-6. 预算与审计：每次派发写事件（谁派、派给谁、消耗一次唤醒），受 `away` 预算约束；预算用完返回 `budget_queued`，不自动重试。
+- `peer_task action=split id=<父> subtasks=[...] [serial]`：在父任务下建 `<父>.1…` 子任务，写 `graph.json`；`serial` 让子任务串行依赖前一个。
+- `peer_task action=dispatch [id] [mode] [limit] [dry_run]`：
+  - 带 `id` 派发整棵子树；不带 `id` 派发依赖已满足的待认领/进行中任务；有子任务的父任务不直接派发（按子任务派）。
+  - `mode=auto`：有持有者就唤醒（`deliver`，受无人值守预算），没有就复用 `launchClaimer` 拉起新会话并带任务认领指令；`wake` / `spawn` 可强制。
+  - 依赖：`dependsOn` 里的任务必须已 `merged/abandoned/archived` 才派发；否则跳过并说明。
+  - `limit` 默认 3、上限 8；`dry_run` 只出计划。
+  - 每次派发写 `task-events.jsonl`（谁派、派给谁、mode）。
+- 父任务自动完成：子任务全部 `merged/abandoned` 时，把父任务状态改成「已合入（子任务全部完成）」；在子任务 done/abandon 和 dispatch 后触发。
+- 不自动插播/不自动轮询：主会话显式调用 dispatch；用户可 `/relay task dispatch …`。
+- 失败/预算用尽：保持原状态，不标记已派发；派发结果里列出失败与跳过。
 
 ## 6. 看板与上下文
 
