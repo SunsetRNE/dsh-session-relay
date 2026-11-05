@@ -57,6 +57,30 @@ test('parseDeclaration：持有者、接手前任、分支、合并状态与提�
   assert.equal(parseClaimOwner(`session-${GONE}\n2026\n接手 session-${A} 2026\n`), `session-${A}`)
 })
 
+test('scanWorkspace：DSH 自动新建的工作树（没写 relay 声明）按 git 登记认出来，并带上分支', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'relay-official-'))
+  try {
+    // 官方「更改请求与工作树」建的工作树：有 .git，没有 .ACTIVE-SESSION / .SESSION-DONE
+    const wt = join(root, '.agents/worktrees/dsh-6b1f02c4-9a3e')
+    await mkdir(wt, { recursive: true })
+    await writeFile(join(wt, '.git'), `gitdir: ${join(root, '.git/worktrees/dsh-6b1f02c4-9a3e')}\n`)
+    const scan = await scanWorkspace(root, { worktrees: [{ path: wt, head: 'deadbeef', branch: 'dsh-6b1f02c4-9a3e' }, { path: root, branch: 'main' }] })
+    assert.deepEqual(scan.undeclared, [join('.agents/worktrees/dsh-6b1f02c4-9a3e')])
+    assert.deepEqual(scan.officialWorktrees, [join('.agents/worktrees/dsh-6b1f02c4-9a3e')])
+    assert.equal(scan.worktreeBranches[join('.agents/worktrees/dsh-6b1f02c4-9a3e')], 'dsh-6b1f02c4-9a3e')
+    const text = describeDeclarations(reconcile(scan, {}, new Set()), () => '@x')
+    assert.ok(text.includes('分支 dsh-6b1f02c4-9a3e'), '明细里带分支')
+    assert.ok(text.includes('更改请求与工作树'), '说明这是官方新建的')
+    assert.ok(!text.includes('（分支 main）'), '主检出不算无声明工作树')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('parseWorktreeList：解析 porch（porcelain）输出', async () => {
+  const { parseWorktreeList } = await import('../lib/gitcheck.js')
+  const rows = parseWorktreeList(['worktree /r/main', 'HEAD 5f46eae0', 'branch refs/heads/main', '', 'worktree /r/.agents/worktrees/dsh-1a2b3c4d-5e6f', 'HEAD deadbeef', 'detached', ''].join('\n'))
+  assert.deepEqual(rows, [{ path: '/r/main', head: '5f46eae0', branch: 'main' }, { path: '/r/.agents/worktrees/dsh-1a2b3c4d-5e6f', head: 'deadbeef', detached: true }])
+})
+
 test('scanWorkspace + reconcile：分类与看板不一致', async () => {
   const root = await fixture()
   try {
