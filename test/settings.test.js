@@ -179,6 +179,24 @@ function textOf(node) {
   return textOf(node.children)
 }
 
+test('面板看板：分组只有一两条时强制展开（折叠态跨工作区继承会让新工作区看不到卡片）', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const { foldStartsOpen } = mod
+  assert.equal(typeof foldStartsOpen, 'function')
+  // 记着「收起」但只有一两条：仍展开
+  assert.equal(foldStartsOpen({ forceOpen: true, saved: false, defaultOpen: false }), true)
+  // 条数多时尊重用户的选择
+  assert.equal(foldStartsOpen({ forceOpen: false, saved: false, defaultOpen: true }), false)
+  assert.equal(foldStartsOpen({ forceOpen: false, saved: true, defaultOpen: false }), true)
+  // 没记过就用默认
+  assert.equal(foldStartsOpen({ saved: undefined, defaultOpen: true }), true)
+  assert.equal(foldStartsOpen({ saved: undefined, defaultOpen: false }), false)
+  // 分组渲染处确实把「≤2 条」传成 forceOpen
+  const source = await readFile(new URL('../lib/client.panel.js', import.meta.url), 'utf8')
+  assert.match(source, /forceOpen: list\.length <= 2 && cat !== 'idle' && cat !== 'blank'/)
+})
+
 test('Client：注册 settings.section；有数据时渲染公告、模板、速查不抛错', async () => {
   const { React } = fakeReact()
   const mod = await loadClient(React)
