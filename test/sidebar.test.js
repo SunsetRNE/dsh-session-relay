@@ -146,7 +146,7 @@ test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；列表�
   assert.equal(chunk, 'client.sidebar.js')
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) }))
   for (const part of ['dsha-session-relay', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'sideCountOpenN', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
-    '@w1', 'status_question', '要不要改', 'feat/side', 'abcdef1', '⚠ 1', '@w2', 'queueNo', 'sideOthers', 'tasksTitle', 'sideClaimed', 'T1', 'P1', '侧边栏', 'openSession']) {
+    '@w1', 'why_question', '要不要改', 'feat/side', 'abcdef1', '⚠ 1', '@w2', 'queueNo', 'sideOthers', 'tasksTitle', 'sideClaimed', 'T1', 'P1', '侧边栏', 'openSession']) {
     assert.ok(text.includes(part), '缺少 ' + part)
   }
   // 空白会话合成一行，不单独列卡片；计数本身就是筛选
@@ -176,7 +176,7 @@ test('正文 chunk：点卡片进详情——返回、路径、状态、问题�
   const React = fakeReact(states(sampleBoard(), { selected: 'session-w1aaaaaa' }))
   const { mod } = await load('client.sidebar.js', React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
-  for (const part of ['sideBack', 'dsha-session-relay / @w1', '侧边栏改版', '● status_question', 'question', 'A 还是 B', 'sideDetailSummary', 'sideDetailInfo', 'sideBranch', 'feat/side', 'sideCommit', 'sideDetailIssues', 'sideOverlap']) {
+  for (const part of ['sideBack', 'dsha-session-relay / @w1', '侧边栏改版', '● why_question', 'question', 'A 还是 B', 'sideDetailSummary', 'sideDetailInfo', 'sideBranch', 'feat/side', 'sideCommit', 'sideDetailIssues', 'sideOverlap']) {
     assert.ok(text.includes(part), '详情缺少 ' + part)
   }
   assert.ok(!text.includes('sideCountAttention'), '详情页不显示列表计数')
@@ -370,6 +370,40 @@ test('正文 chunk：轮询带上次的 since；notModified 时不换看板对�
     for (const cleanup of cleanups) if (typeof cleanup === 'function') cleanup()
     globalThis.document = saved
   }
+})
+
+test('正文 chunk：需要处理的卡片胶囊说原因（最后一轮出错 / 上下文过大），不显示已经过时的汇报状态', async () => {
+  const board = () => ({
+    workspace: { title: 'w', path: '/root/dsha-session-relay' },
+    line: { text: 'main=abc' },
+    entries: [
+      { sessionId: 'session-f1aaaaaa', label: '@f1', status: 'working', category: 'attention', categoryReason: 'failed', categoryDetail: 'EMPTY_RESPONSE', state: 'idle', summary: '上一轮失败了' },
+      { sessionId: 'session-h1bbbbbb', label: '@h1', status: 'working', category: 'attention', categoryReason: 'heavy', state: 'idle', summary: '上下文满了' },
+      { sessionId: 'session-a1cccccc', label: '@a1', status: 'working', category: 'active', state: 'running', summary: '在跑' }
+    ],
+    othersTotal: 0
+  })
+  const React = fakeReact(states(board()))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const text = textOf(tree)
+  assert.ok(text.includes('why_failed'), '出错说原因')
+  assert.ok(text.includes('why_heavy'), '上下文过大说原因')
+  assert.equal(text.split('status_working').length - 1, 1, '只有真正进行中的那张卡片显示汇报状态，需要处理的两张改说原因')
+  const pills = []
+  const walk = (node) => {
+    if (node === null || node === undefined || node === false) return
+    if (Array.isArray(node)) { node.forEach(walk); return }
+    if (typeof node !== 'object') return
+    if (node.props?.className === 'dshaSv_pill') pills.push(node)
+    walk(node.children)
+  }
+  walk(tree)
+  const failed = pills.find((pill) => textOf(pill) === 'why_failed')
+  assert.equal(failed.props['data-tone'], 'error', '最后一轮出错用错误色')
+  assert.equal(failed.props.title, 'status_working · EMPTY_RESPONSE', '悬停给出原始状态与错误码')
+  const heavy = pills.find((pill) => textOf(pill) === 'why_heavy')
+  assert.equal(heavy.props['data-tone'], 'warn', '上下文过大用提醒色')
 })
 
 test('正文 chunk：卡片主操作随状态——待答复回复、可合并排号、久未活动唤醒；都要二次确认，以用户身份发出', async () => {
