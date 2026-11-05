@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.10 - 2026-11-06
+
+适配 DSH 0.2.2-rc.1，修好新版本下 GitHub 相关功能全部失败的问题。
+- 新版本把 gh 入口换成用 `DSHA_GH_HOST_ROOT` 拼 CA 包路径，而升级后这个根目录（`/data/user/0/<包名>/files/linux/ubuntu`）里没有 `usr/local/share/dsha/`，gh 退回旧的系统 CA 包去校验 api.github.com，一律报 `x509: certificate signed by unknown authority`，`gh auth status` 还会顺带说「token 无效」，看起来像掉登录。现在 relay 调 gh 前自己探测这种情况，把 `DSHA_GH_CA` 指到真身那一份（`/data/data/<包名>/…`）；用户或壳已经设了 `DSHA_GH_CA`、或路径本来就正常时不动，DSHA 修好后自动失效。身份探测、CI 核验、面板登录都恢复。
+- 兼容性核对（0.2.2-rc.1）：插件用到的宿主接口都还在——`@deepseek-ai/dsh-commands/brand`、`dsh-tools` 的 `defineTool`、`dsh-llm` 的 `createUserMessage`、`dsh-subagent` 的 `delegationDepthOf`；`session/event`、`session/disposed`、`agent/status` 事件名与 `turn/end` 记录形状不变；`sidebar.right.pane.tab`、`sidebar.panellist`、`settings.section` 插槽、客户端 `__ModuleLoader__` + `require.async` 分块加载机制不变；`engines.dsh >=0.2.1-rc.1 <0.3.0-0` 覆盖 0.2.2-rc.1。
+
+需要 `/relay reload`（服务端改动），不用重启 DSH。
+
 ## 1.0.9 - 2026-11-05
 
 右侧边栏卡片说清楚「为什么需要你」。
