@@ -19,7 +19,8 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 
 ## 运行环境
 
-- DeepSeek Harness，插件依赖的 `@deepseek-ai/dsh-*` 包由宿主提供，不单独安装。
+- DeepSeek Harness **0.2.2-rc.1 及以上**（`package.json` 的 `engines.dsh` 与 `peerDependencies` 都是 `>=0.2.2-rc.1 <0.3.0-0`）。更老的宿主只保留基本功能：官方「更改请求与工作树」（forge）相关的工作树识别、声明外置等不再保证可用，插件会在声明视图里注明降级，也不再把旧版本作为兼容基准维护。
+- 插件依赖的 `@deepseek-ai/dsh-*` 包由宿主提供，不单独安装。
 - 部分功能（设备桥）读取 DSHA 容器内的 `/root/.dsh/.bridge_headers` 与 `/root/.dsh/.bridge_port`，非 DSHA 环境下这些功能不可用。
 
 ## 安装

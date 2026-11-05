@@ -75,6 +75,45 @@ test('scanWorkspace：DSH 自动新建的工作树（没写 relay 声明）按 g
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
+test('scanWorkspace：外置声明（.agents/declarations/<名字>）覆盖 checkout 里的旧位置，声明不落在工作树里', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'relay-external-'))
+  try {
+    const name = 'dsh-6b1f02c4-9a3e'
+    const wt = join(root, '.agents/worktrees', name)
+    await mkdir(wt, { recursive: true })
+    await writeFile(join(wt, '.git'), `gitdir: ${join(root, '.git/worktrees', name)}\n`)
+    // 外置声明：不写进 checkout
+    const external = join(root, '.agents/declarations', name)
+    await mkdir(external, { recursive: true })
+    await writeFile(join(external, '.ACTIVE-SESSION'), decl({ branch: '', session: `session-${A}`, files: 'lib/x.js' }))
+    const scan = await scanWorkspace(root, { worktrees: [{ path: wt, branch: name, head: 'deadbeef' }] })
+    const found = scan.declarations.find((item) => item.where === 'declarations')
+    assert.ok(found, '外置声明被读到')
+    assert.equal(found.name, name)
+    assert.equal(found.worktreePath, wt, '按名字对上工作树')
+    assert.equal(found.branch, name, '分支从 git 登记补上')
+    assert.deepEqual(scan.undeclared, [], '有外置声明就不算无声明工作树')
+    // 同一个工作树里又留了一份旧声明：以外置为准，不重复计数
+    await writeFile(join(wt, '.ACTIVE-SESSION'), decl({ branch: name, session: `session-${B}` }))
+    const scan2 = await scanWorkspace(root, { worktrees: [{ path: wt, branch: name, head: 'deadbeef' }] })
+    const here = scan2.declarations.filter((item) => item.name === name)
+    assert.equal(here.length, 1, '同名只留外置那一份')
+    assert.equal(here[0].where, 'declarations')
+    assert.deepEqual(scan2.undeclared, [])
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('hostver：最低宿主版本与 0.2.2-rc.1 的比较', async () => {
+  const { atLeast, forgeWorktreesSupported, parseVersion } = await import('../lib/hostver.js')
+  assert.deepEqual(parseVersion('0.2.2-rc.1'), [0, 2, 2, ['rc', '1']])
+  assert.equal(atLeast('0.2.2-rc.1', '0.2.2-rc.1'), true)
+  assert.equal(atLeast('0.2.1-rc.5', '0.2.2-rc.1'), false)
+  assert.equal(atLeast('0.2.2', '0.2.2-rc.1'), true, '正式版高于同号预发布')
+  assert.equal(atLeast('nonsense', '0.2.2-rc.1'), undefined, '不可解析时交给调用方决定')
+  assert.equal(forgeWorktreesSupported('0.2.3-rc.1'), true)
+  assert.equal(forgeWorktreesSupported('0.2.1-rc.5'), false)
+})
+
 test('parseWorktreeList：解析 porch（porcelain）输出', async () => {
   const { parseWorktreeList } = await import('../lib/gitcheck.js')
   const rows = parseWorktreeList(['worktree /r/main', 'HEAD 5f46eae0', 'branch refs/heads/main', '', 'worktree /r/.agents/worktrees/dsh-1a2b3c4d-5e6f', 'HEAD deadbeef', 'detached', ''].join('\n'))

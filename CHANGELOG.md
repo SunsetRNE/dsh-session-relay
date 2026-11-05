@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 - 2026-11-06
+
+只支持 DSH 0.2.2-rc.1 及以上；工作树声明可以放在 checkout 外面。
+- 宿主版本线收紧：`engines.dsh` 与 `peerDependencies` 从 `>=0.2.1-rc.1` 提到 `>=0.2.2-rc.1 <0.3.0-0`。官方「更改请求与工作树」（forge）在 0.2.2 才有，声明外置、工作树分支自动识别都以它为前提；更老的宿主不再作为兼容基准维护，插件仍会加载但把相关提示降级，并在声明视图里写明「宿主 <版本> 低于 0.2.2-rc.1：官方工作树相关功能不可用，只按旧约定读声明」。
+- 声明可以外置：`<工作区>/.agents/declarations/<工作树名>/.ACTIVE-SESSION | .SESSION-DONE`，字段与旧位置完全一样。relay 两处都读，同一个工作树两边都有时以外置那份为准、不重复计数；外置声明按名字对上 git 登记的工作树，分支从 `git worktree list` 自动补。
+- 为什么需要它：官方工作树是真 checkout，按旧约定把 `.ACTIVE-SESSION` 写在里会变成那条分支的**未跟踪文件**——`git add -A` 会带上、更改请求的 Local changes 也会列出来。以后给官方工作树写声明一律放 `.agents/declarations/`，旧的 `.agents/worktrees/<名字>/.ACTIVE-SESSION` 仍然能读，不用迁移。
+
+需要 `/relay reload`（服务端改动），不用重启 DSH。
+
 ## 1.0.10 - 2026-11-06
 
 适配 DSH 0.2.2-rc.1，修好新版本下 GitHub 相关功能全部失败的问题。
