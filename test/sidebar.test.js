@@ -84,7 +84,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body' }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 2 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -95,6 +95,19 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   assert.equal(loaded.default(), 'body')
 })
 
+test('入口：浏览器拿到不配套的旧正文时显示「请重开」，不把 undefined 当组件', async () => {
+  const React = fakeReact()
+  let lazyFactory
+  React.lazy = (factory) => { lazyFactory = factory; return () => null }
+  React.Suspense = 'suspense'
+  const { mod } = await load('client.js', React, () => Promise.resolve({ RelaySidebar: () => 'old body' }))
+  mod.makeSidebarTab({ t })
+  const loaded = await lazyFactory()
+  assert.equal(textOf(loaded.default()), 'sideStale')
+  const { mod: chunk } = await load('client.sidebar.js', fakeReact())
+  assert.equal(chunk.KIT_VERSION, 2, '正文与入口的 kit 版本一致')
+})
+
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
   const React = fakeReact()
   React.lazy = () => () => null
@@ -102,34 +115,92 @@ test('入口：宿主没有 require.async 时显示加载失败而不是崩溃',
   assert.equal(textOf(React.createElement(mod.makeSidebarTab({ t }), { sessionId: 's' })), 'sideLoadFailed')
 })
 
-test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js，渲染主会话、版本线、看板与任务', async () => {
-  const board = {
-    workspace: { title: 'dsha-session-relay' },
-    coordinator: { sessionId: 'session-main1234', label: '@main', state: 'running' },
-    line: { text: 'main=a8f06fe' },
-    entries: [{ sessionId: 'session-w1', label: '@w1', status: 'question', summary: '要不要改' }],
-    othersTotal: 3,
-    taskBoard: { open: [{ id: 'T1', priority: 'P1', title: '侧边栏' }], claimed: 2 }
-  }
-  const React = fakeReact([{ board, error: undefined }, 0])
-  const { mod, chunk } = await load('client.sidebar.js', React)
-  assert.equal(chunk, 'client.sidebar.js')
-  const opened = []
-  const kit = {
-    t, format: (text, values) => text + JSON.stringify(values), shortId: (id) => id.slice(8, 16),
+const sampleBoard = () => ({
+  workspace: { title: 'dsha-session-relay', path: '/root/dsha-session-relay' },
+  coordinator: { sessionId: 'session-main1234', label: '@main', state: 'running' },
+  line: { text: 'main=a8f06fe' },
+  entries: [
+    { sessionId: 'session-w1aaaaaa', label: '@w1', title: '侧边栏改版', status: 'question', state: 'idle', summary: '要不要改', question: 'A 还是 B', branch: 'feat/side', commit: 'abcdef1234', conflicts: [{ label: '@w2', paths: ['lib/client.js'] }] },
+    { sessionId: 'session-w2bbbbbb', label: '@w2', status: 'ready', state: 'idle', queue: 1 }
+  ],
+  othersTotal: 3,
+  taskBoard: { open: [{ id: 'T1', priority: 'P1', title: '侧边栏' }], claimed: 2 }
+})
+
+function kitFor(opened = []) {
+  return {
+    t, format: (text, values) => text + JSON.stringify(values), formatTime: () => '2026-11-05 10:00', shortId: (id) => id.slice(8, 16),
     statusText: (_t, status) => 'status_' + status, stateText: (_t, state) => 'state_' + state,
-    request: async () => ({}), errorText: () => 'err', Button: (props) => ({ type: 'button', props, children: props.children }),
+    request: async () => ({}), errorText: () => 'err', copyText: async () => true,
     openSession: (id) => opened.push(id)
   }
-  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
-  const text = textOf(tree)
-  for (const part of ['dsha-session-relay', 'mainIs', '@main', 'main=a8f06fe', '@w1', 'status_question', '要不要改', 'sideOthers', 'sideTasks', 'T1 P1 · 侧边栏']) assert.match(text, new RegExp(part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+}
+
+// useState 顺序：board 状态、tick、filter、selected、lineOpen、copied
+const states = (board, { filter = 'all', selected } = {}) => [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined]
+
+test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；列表有顶栏、计数、主会话、版本线、卡片与任务', async () => {
+  const React = fakeReact(states(sampleBoard()))
+  const { mod, chunk } = await load('client.sidebar.js', React)
+  assert.equal(chunk, 'client.sidebar.js')
+  const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) }))
+  for (const part of ['dsha-session-relay', 'sideJustNow', 'sideCountAttention', 'sideCountReady', 'sideCountOpen', 'mainIs', '@main', 'main=a8f06fe',
+    'sideFAll', 'sideFAttention', '@w1', 'status_question', '要不要改', 'feat/side', 'abcdef1', '⚠ 1', '@w2', 'queueNo', 'sideOthers', 'tasksTitle', 'sideClaimed', 'T1', 'P1', '侧边栏', 'openSession']) {
+    assert.ok(text.includes(part), '缺少 ' + part)
+  }
+})
+
+test('正文 chunk：筛选「可合并」只留 ready 的卡片；空分组给提示', async () => {
+  const React = fakeReact(states(sampleBoard(), { filter: 'ready' }))
+  const { mod } = await load('client.sidebar.js', React)
+  const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  assert.ok(text.includes('@w2'))
+  assert.ok(!text.includes('要不要改'), '待答复的卡片不在「可合并」里')
+  const React2 = fakeReact(states({ ...sampleBoard(), entries: [sampleBoard().entries[0]] }, { filter: 'done' }))
+  const { mod: mod2 } = await load('client.sidebar.js', React2)
+  assert.ok(textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })).includes('sideFEmpty'))
+})
+
+test('正文 chunk：点卡片进详情——返回、路径、状态、问题、信息表、冲突', async () => {
+  const React = fakeReact(states(sampleBoard(), { selected: 'session-w1aaaaaa' }))
+  const { mod } = await load('client.sidebar.js', React)
+  const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  for (const part of ['sideBack', 'dsha-session-relay / @w1', '侧边栏改版', '● status_question', 'question', 'A 还是 B', 'sideDetailSummary', 'sideDetailInfo', 'sideBranch', 'feat/side', 'sideCommit', 'sideDetailIssues', 'sideOverlap']) {
+    assert.ok(text.includes(part), '详情缺少 ' + part)
+  }
+  assert.ok(!text.includes('sideCountAttention'), '详情页不显示列表计数')
 })
 
 test('正文 chunk：还没数据时显示读取中；没有会话时不渲染', async () => {
   const React = fakeReact()
   const { mod } = await load('client.sidebar.js', React)
-  const kit = { t, request: async () => ({}), errorText: () => 'err', Button: () => null }
+  const kit = kitFor()
   assert.match(textOf(React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })), /loading/)
   assert.equal(React.createElement(mod.RelaySidebar, { kit, sessionId: '' }), null)
+})
+
+test('正文 chunk：样式随标签注入，不在入口里；不用 backdrop-filter 和常驻动画', async () => {
+  const chunk = await readFile(new URL('../lib/client.sidebar.js', import.meta.url), 'utf8')
+  const entry = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
+  assert.ok(chunk.includes('.dshaSv_card'))
+  assert.ok(!entry.includes('.dshaSv_'), '入口不带侧边栏样式')
+  const cssText = chunk.slice(chunk.indexOf('const css = ['), chunk.indexOf("].join('')"))
+  assert.ok(cssText.length > 100)
+  assert.ok(!/backdrop-filter|@keyframes|animation:/.test(cssText))
+})
+
+test('正文 chunk：空白会话按服务端分类显示「空白」，不算进行中；没有待领任务给提示；不用黑色 brand-primary', async () => {
+  const board = { ...sampleBoard(), entries: [{ sessionId: 'session-f4ada307', label: 'f4ada307', status: 'working', category: 'blank', state: 'idle', summary: '空白会话，等待用户输入第一句' }], taskBoard: { open: [], claimed: 0 } }
+  const React = fakeReact(states(board))
+  const { mod } = await load('client.sidebar.js', React)
+  const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  assert.ok(text.includes('catBlank'), '胶囊显示分组名')
+  assert.ok(!text.includes('status_working'), '不显示过时的汇报状态')
+  assert.ok(text.includes('0sideCountActive'), '空白会话不计入进行中')
+  assert.ok(text.includes('sideNoOpenTasks'))
+  const React2 = fakeReact(states(board, { filter: 'active' }))
+  const { mod: mod2 } = await load('client.sidebar.js', React2)
+  assert.ok(textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })).includes('sideFEmpty'), '「进行中」筛选里没有空白会话')
+  const chunk = await readFile(new URL('../lib/client.sidebar.js', import.meta.url), 'utf8')
+  assert.ok(!chunk.includes('brand-primary'), '强调色用链接蓝，不用主题里接近黑白的 brand-primary')
 })
