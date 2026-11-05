@@ -56,6 +56,25 @@ tarball: https://github.com/owner/repo/releases/download/v1.2.0/pkg-1.2.0.tgz  #
 - 必须是 `https` + GitHub Release 托管（`github.com/.../releases/...`），第三方图床/网盘一律不收
 - 每个 Release 只挂一个 `.tgz`（插件管理器按 Release 安装时只认唯一附件）
 
+## 4b. 市场会不会「钉住」你第一次发的版本？（实测：不会）
+
+`awesome-dsh-plugin.com/plugins.json` 是把 `data/plugins/*.yml` 原样发布的：`tarball` 就是你写的那条字符串，生成时不重写、不解析。
+所以：
+
+- `latest/download/<不带版本的文件名>`：**永远解析到当时的 latest**。以后发新版，所有人都拿到新版，不用再提 PR 改条目
+- `/releases/download/vX.Y.Z/...`：真正的版本钉死，这时必须永远不删、不改写那个 tag
+
+线上现状（2026-11-05 拉取，8879 条）：有 `tarball` 的 1257 条里，`latest/download/` 形式 469 条、钉 tag 形式 748 条——两条都正当；
+其中已有 5 条踩了「latest/download + 文件名带版本号」的烂链形态。
+
+两个细节：
+
+- **GitHub 的 `latest` 排除 draft 和 prerelease**。把某版标成 pre-release，`latest/download/` 会继续指向上一个正式版——既是坑，也可以当「先放出来但不当默认」的杠杆
+- **目录是定时重建的**：合并 ≠ 立刻生效。market 拉到的那份 `plugins.json` 有 `updated` 字段，可以先看它是不是当天的
+
+打包时的小技巧：资产名要「不带版本号」时，除了上传 API 指定 name，也可以**先把本地文件改名成 `pkg.tgz` 再 `gh release create`**——gh 用文件名当资产名，改好文件名最省事。
+另外 proroot 环境下 gh 报的附件体积可能失真（有会话遇到过上报 714MB 的），发布后务必核 `size` + `sha256`。
+
 ## 5. 截图：放自己仓库（可选，强烈推荐）
 
 仓库根（monorepo 放子目录）放 `screenshots.json`，列 1–8 张图：
