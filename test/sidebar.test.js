@@ -371,3 +371,47 @@ test('正文 chunk：轮询带上次的 since；notModified 时不换看板对�
     globalThis.document = saved
   }
 })
+
+test('正文 chunk：卡片主操作随状态——待答复回复、可合并排号、久未活动唤醒；都要二次确认，以用户身份发出', async () => {
+  const find = (node, pred) => {
+    if (!node || typeof node !== 'object') return undefined
+    if (Array.isArray(node)) { for (const child of node) { const hit = find(child, pred); if (hit) return hit } return undefined }
+    if (pred(node)) return node
+    return find(node.children, pred)
+  }
+  const button = (label) => (node) => node.type === 'button' && textOf(node.children) === label
+  const posted = []
+  const kit = kitFor()
+  const sidebarStates = (board, cardStates, quietOpen = false) => [{ board, error: undefined, at: Date.now() }, 0, 'all', undefined, false, undefined, quietOpen, false, false, undefined, false, ...cardStates]
+  const q = sampleBoard().entries[0]
+  let React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [q] }, ['reply', '先做 A', false]))
+  let m = (await load('client.sidebar.js', React)).mod
+  let tree = React.createElement(m.RelaySidebar, { kit: { ...kit, request: async (method, body) => { posted.push(body); return {} } }, sessionId: 'session-self' })
+  assert.ok(find(tree, button('reply')), '待答复卡片有「回复」')
+  assert.ok(find(tree, (n) => n.type === 'textarea'), '展开后是输入框')
+  await find(tree, button('send')).props.onClick({ stopPropagation() {} })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(posted.at(-1), { action: 'reply', target: q.sessionId, text: '先做 A', mode: 'followup', fromSession: 'session-self' })
+  const r = sampleBoard().entries[1]
+  React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [r] }, ['assign', 'build281', false]))
+  m = (await load('client.sidebar.js', React)).mod
+  tree = React.createElement(m.RelaySidebar, { kit: { ...kit, request: async (method, body) => { posted.push(body); return {} } }, sessionId: 'session-self' })
+  await find(tree, button('assignSend')).props.onClick({ stopPropagation() {} })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(posted.at(-1), { action: 'assign', target: r.sessionId, value: 'build281', notify: true, fromSession: 'session-self' })
+  const idle = { sessionId: 'session-i1iiiiii', label: '@i1', status: 'working', category: 'idle', state: 'idle' }
+  // 久未活动默认收在一行里：展开后才有卡片
+  React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [idle] }, ['wake', '', false], true))
+  m = (await load('client.sidebar.js', React)).mod
+  tree = React.createElement(m.RelaySidebar, { kit: { ...kit, request: async (method, body) => { posted.push(body); return {} } }, sessionId: 'session-self' })
+  assert.ok(textOf(tree).includes('sideWakeAsk'), '唤醒先问一句')
+  await find(tree, button('wakeConfirm')).props.onClick({ stopPropagation() {} })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(posted.at(-1), { action: 'wake', target: idle.sessionId, force: 'resume', fromSession: 'session-self' })
+  // 进行中的卡片只有「打开」
+  const working = { sessionId: 'session-k1kkkkkk', label: '@k1', status: 'working', category: 'active', state: 'running' }
+  React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [working] }, [undefined]))
+  m = (await load('client.sidebar.js', React)).mod
+  tree = React.createElement(m.RelaySidebar, { kit, sessionId: 'session-self' })
+  assert.ok(!find(tree, button('reply')) && !find(tree, button('assign')) && !find(tree, button('wake')))
+})
