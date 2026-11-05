@@ -4,6 +4,7 @@
 
 适配 DSH 0.2.2-rc.1，修好新版本下 GitHub 相关功能全部失败的问题。
 - 新版本把 gh 入口换成用 `DSHA_GH_HOST_ROOT` 拼 CA 包路径，而升级后这个根目录（`/data/user/0/<包名>/files/linux/ubuntu`）里没有 `usr/local/share/dsha/`，gh 退回旧的系统 CA 包去校验 api.github.com，一律报 `x509: certificate signed by unknown authority`，`gh auth status` 还会顺带说「token 无效」，看起来像掉登录。现在 relay 调 gh 前自己探测这种情况，把 `DSHA_GH_CA` 指到真身那一份（`/data/data/<包名>/…`）；用户或壳已经设了 `DSHA_GH_CA`、或路径本来就正常时不动，DSHA 修好后自动失效。身份探测、CI 核验、面板登录都恢复。
+- 措辞分清两种「失败」：核验清单里的「连续 N 次没查到结果」是插件用本机 `gh` / `git` 查询失败（本机网络、登录或 CA 问题），不是 CI 运行失败、也不是远端分支本身出错；CI 的真实结论仍写成「结束：<结论>」。恢复时说的是「又能查到了」；通知抬头、列表状态、登记时的永久性错误、协作页角标文案一起改了，避免把本机查询问题当成发布失败去重跑。
 - 认出官方「更改请求与工作树」新建的工作树：DSH 0.2.2 的实验功能把新工作树建在 `<仓库>/.agents/worktrees/<名字>`、分支名 `dsh-<会话 id 前 8 位>-<4 位随机>`，但它不写 relay 的 `.ACTIVE-SESSION`。现在扫描时用 `git worktree list --porcelain` 认出这类登记过的工作树、读出它们的分支，标成「DSH 自动新建」，不再和「旧约定漏写声明」混为一类；处置规则不变，一律不动、先问用户。
 - 兼容性核对（0.2.2-rc.1）：插件用到的宿主接口都还在——`@deepseek-ai/dsh-commands/brand`、`dsh-tools` 的 `defineTool`、`dsh-llm` 的 `createUserMessage`、`dsh-subagent` 的 `delegationDepthOf`；`session/event`、`session/disposed`、`agent/status` 事件名与 `turn/end` 记录形状不变；`sidebar.right.pane.tab`、`sidebar.panellist`、`settings.section` 插槽、客户端 `__ModuleLoader__` + `require.async` 分块加载机制不变；`engines.dsh >=0.2.1-rc.1 <0.3.0-0` 覆盖 0.2.2-rc.1。
 

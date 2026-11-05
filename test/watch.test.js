@@ -92,7 +92,7 @@ test('核验：查询失败按退避重试，连续 5 次发一次失败通知�
     await runner.add({ kind: 'ci', runId: '1', repo: 'o/r', cwd: h.dir, deadlineHours: 1 }, { group: 'g', createdBy: 'm', origin: 'user' })
     await runner.firstCheck
     for (let i = 0; i < 5; i += 1) { h.advance(11 * 60_000); await runner.tick() }
-    const failures = h.delivered.filter(([, text]) => /连续 5 次失败/.test(text))
+    const failures = h.delivered.filter(([, text]) => /连续 5 次没查到结果/.test(text))
     assert.equal(failures.length, 1)
     fail = false
     h.advance(11 * 60_000)
