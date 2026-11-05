@@ -212,6 +212,31 @@ test('peer_send：模型发给已卸任的主会话时拒绝，并给出现任�
   } finally { await h.cleanup() }
 })
 
+test('peer_send：main@<工作区> 每次解析成那个工作区的现任主会话，交接后自动跟到新主会话', async () => {
+  const h = await setup()
+  try {
+    const mainA = h.makeAgent('eeeeeeee-0000-0000-0000-00000000000a', { cwd: '/root/DSH-A-mod' })
+    const mainB = h.makeAgent('ffffffff-0000-0000-0000-00000000000b', { cwd: '/root/DSH-A-mod' })
+    for (const agent of [mainA, mainB]) h.agents.set(agent.id, agent)
+    h.workspaces.push(
+      { id: 'ws-a', title: 'DSH-A-mod', path: '/root/DSH-A-mod', sessionIds: [mainA.id, mainB.id] },
+      { id: 'ws-r', title: 'relay', path: '/root/dsha-session-relay', sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here', mainA)
+    await h.call('peer_send', { target: 'main@DSH-A-mod', message: '对接要求' })
+    assert.equal(mainA.inbox.length, 1)
+    // 交接：B 成为主会话；同一个写法自动送到 B
+    await h.run('main here', mainB)
+    await h.call('peer_send', { target: 'main@dsh-a-mod', message: '第二条' })
+    assert.equal(mainB.inbox.length, 1)
+    assert.equal(mainA.inbox.length, 1, '旧主会话不再收到')
+    // 按路径末段也能写；不存在的工作区报出可选名字
+    await h.call('peer_send', { target: '@main@/root/DSH-A-mod', message: '第三条' })
+    assert.equal(mainB.inbox.length, 2)
+    await assert.rejects(h.call('peer_send', { target: 'main@nope', message: 'x' }), /找不到工作区「nope」；可用：DSH-A-mod、relay/)
+    await assert.rejects(h.call('peer_send', { target: 'main@relay', message: 'x' }), /还没有主会话/)
+  } finally { await h.cleanup() }
+})
+
 test('peer_spawn：新会话首条消息带 Agent 创建说明', async () => {
   const h = await setup()
   try {
