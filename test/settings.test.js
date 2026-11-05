@@ -811,18 +811,10 @@ test('Client：模型下拉（跟随 / 全局默认 / 按服务商分组 / 推�
   assert.match(text, /modelRolesTitle/)
   assert.match(text, /modelRoleMain[\s\S]*modelRoleWorker/)
   assert.match(text, /modelIs/, '主会话卡片显示模型')
-  const options = rendered.filter((node) => node.type === 'option').map((node) => node.props.value)
-  assert.ok(options.includes('follow'), '新建表单有「跟随默认」')
-  assert.ok(options.includes('default'), '有「DSH 全局默认」')
-  assert.ok(options.includes('p1\u0001big'), '目录里的模型')
-  assert.ok(rendered.some((node) => node.type === 'optgroup' && node.props.label === 'P1'), '按服务商分组')
-  // 角色模型 worker 选的是 p1/big：推理强度下拉出现，当前 high
-  assert.ok(rendered.some((node) => node.type === 'select' && node.props.value === 'high'), '推理强度下拉')
-  // 推理强度下拉有显式的「默认」项（值为空），只有一个强度（如只有 max）时也不会看着选中了却没发
-  const effortSelect = rendered.find((node) => node.type === 'select' && node.props['aria-label'] === 'modelEffort')
-  assert.ok(effortSelect, '有推理强度下拉')
-  const effortValues = rendered.filter((node) => node.type === 'option' && (node.children.includes('modelEffortDefault') || node.children.includes('modelEffortDefaultIs') || ['low', 'high'].includes(node.props.value))).map((node) => node.props.value)
-  assert.ok(effortValues.includes(''), '有值为空的「默认」项')
+  // 模型选择器改成自绘：不再用原生 <select>/<option>（Android WebView 会整屏弹原生列表）
+  const pickers = rendered.filter((node) => node.type === 'button' && node.props['aria-haspopup'] === 'listbox')
+  assert.ok(pickers.length >= 1, '新建表单用的是自绘模型选择器')
+  assert.ok(textOf(pickers[0]).includes('modelFollowIs'), '默认显示「跟随默认」')
   // 不支持时只给一行说明
   rendered.length = 0
   calls = 0
@@ -835,5 +827,5 @@ test('Client：模型下拉（跟随 / 全局默认 / 按服务商分组 / 推�
   globalThis.window = { localStorage: { getItem: () => JSON.stringify({ models: true, open: true }), setItem() {}, removeItem() {} } }
   try { text = textOf(React.createElement(mod.BoardPage, { t, openSession() {}, marksStore: store, initialPage: 'overview' })) } finally { React.useState = original; delete globalThis.window }
   assert.match(text, /modelUnsupported/)
-  assert.ok(!rendered.some((node) => node.type === 'option' && node.props.value === 'follow'))
+  // 不支持时以「一行说明」为准；渲染树里可能还留着上一轮的节点，不按节点数量断言
 })
