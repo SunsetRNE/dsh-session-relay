@@ -190,6 +190,28 @@ test('peer_send：模型消息标记为 agent-message，并在 maxHops 后拒绝
   } finally { await h.cleanup() }
 })
 
+test('peer_send：模型发给已卸任的主会话时拒绝，并给出现任主会话 id（用户发不拦）', async () => {
+  const h = await setup()
+  try {
+    // peer 原是主会话，交接给 caller
+    await h.run('main here', h.peer)
+    await h.run('main here', h.caller)
+    const key = h.relay.groupKeyOf(h.caller.id)
+    await h.relay.handoffs.complete(key, { from: h.peer.id, to: h.caller.id })
+    const other = h.makeAgent('eeeeeeee-0000-0000-0000-000000000005', { cwd: h.dir })
+    h.agents.set(other.id, other)
+    await assert.rejects(h.call('peer_send', { target: h.peer.id, message: '旧主会话收' }, other), (error) => {
+      assert.equal(error.code, 'former_main')
+      assert.match(error.message, new RegExp('现任主会话是 ' + h.caller.id))
+      return true
+    })
+    assert.equal(h.peer.inbox.length, 0, '旧会话没被唤醒')
+    // 用户从 /relay 发照常送达
+    await h.run(`${h.peer.id} 用户亲自问一句`, h.caller)
+    assert.equal(h.peer.inbox.length, 1)
+  } finally { await h.cleanup() }
+})
+
 test('peer_spawn：新会话首条消息带 Agent 创建说明', async () => {
   const h = await setup()
   try {
