@@ -179,6 +179,20 @@ function textOf(node) {
   return textOf(node.children)
 }
 
+test('模型下拉：同一个模型 id 出现在多个 provider 时补上 provider 名，避免两条一模一样的行', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const { modelOptionLabel } = mod
+  const groups = [
+    { id: 'deepseek', name: 'DeepSeek', models: [{ id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash' }, { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' }] },
+    { id: 'deepseek-account', name: 'DeepSeek Account', models: [{ id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash' }] }
+  ]
+  assert.equal(modelOptionLabel(groups, groups[0], groups[0].models[0]), 'DeepSeek-V4.1-Flash（deepseek-flash · DeepSeek）', '重复的模型带 provider')
+  assert.equal(modelOptionLabel(groups, groups[1], groups[1].models[0]), 'DeepSeek-V4.1-Flash（deepseek-flash · DeepSeek Account）')
+  assert.equal(modelOptionLabel(groups, groups[0], groups[0].models[1]), 'DeepSeek-V4-Pro（deepseek-v4-pro）', '不重复的不加后缀')
+  assert.equal(modelOptionLabel([{ id: 'x', name: 'X', models: [{ id: 'm' }] }], { id: 'x', name: 'X', models: [{ id: 'm' }] }, { id: 'm' }), 'm')
+})
+
 test('面板概览：给出快速交接入口（主会话先整理快照再交接，工作会话直接新建接手），上下文大时提示', async () => {
   const { React } = fakeReact()
   const mod = await loadClient(React)
