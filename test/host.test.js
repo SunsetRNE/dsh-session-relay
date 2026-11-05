@@ -1076,6 +1076,17 @@ test('自动置顶：默认关闭；开启后主会话最上、还在做的置�
     await h.call('peer_report', { status: 'done', summary: '完成' }, h.peer)
     await h.relay.autoPin.sync()
     assert.deepEqual(registry.pinnedSessionIds, [h.caller.id, manual.id])
+    // 看板一变就补跑一轮，不用等 30 秒轮询（这里开 kick，延迟 5ms）
+    h.relay.autoPin.kickDelayMs = 5
+    await h.call('peer_report', { status: 'working', summary: '又开始做' }, w2)
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    await h.relay.autoPin.running?.catch(() => {})
+    assert.ok(registry.pinnedSessionIds.includes(w2.id), '汇报后马上置顶')
+    await h.call('peer_report', { status: 'done', summary: '完成' }, w2)
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    await h.relay.autoPin.running?.catch(() => {})
+    assert.ok(!registry.pinnedSessionIds.includes(w2.id), '做完马上取消')
+    h.relay.autoPin.kickDelayMs = -1
     // 用户手动取消主会话的置顶：插件重新置顶并归自己；再被取消就记 declined，不抢回
     await registry.unpinSession(h.caller.id)
     await h.relay.autoPin.sync()
