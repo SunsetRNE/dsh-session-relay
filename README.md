@@ -13,6 +13,7 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - 模型工具（14 个）：`peer_list`、`peer_report`、`peer_send`、`peer_spawn`、`peer_alias`、`peer_inspect`、`peer_tasks`、`peer_task`，主会话另有 `peer_line`、`peer_assign`、`peer_workspace`、`peer_handoff`、`peer_ask_user`、`peer_watch`。
 - 协作面板（Web 客户端）：看板、交接预览、会话唤醒、等你决定的提问、自动置顶、开发者模式开关。
 - 右侧边栏「协作」标签：本工作区的主会话、版本线、看板卡片（按分组筛选、点开看详情）和任务看板；正文第一次打开标签才加载，只在标签可见时刷新。
+- GitHub 账号（设置页）：面板登录 gh、锁定账号数字 id；换号或退出时标红、发一次通知，并暂停 relay 自己的 CI 核验。
 - 开发者模式（`/relay dev on [小时]`，默认关闭、限时、记审计）：模型可只读查看所有工作区的会话。
 - 维护文档：[设计、已知坑与审阅边界](docs/maintenance-guide.md)。
 
