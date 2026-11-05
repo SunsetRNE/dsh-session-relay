@@ -237,6 +237,114 @@ test('peer_send：main@<工作区> 每次解析成那个工作区的现任主会
   } finally { await h.cleanup() }
 })
 
+// 仿 DSH agent inbox：next-turn / next-step 两个列表，按 id 删除
+function withRealInbox(agent) {
+  const lists = { 'next-turn': [], 'next-step': [] }
+  agent.status = 'running'
+  agent.inbox = {
+    get nextTurn() { return lists['next-turn'] },
+    get nextStep() { return lists['next-step'] },
+    remove(id) {
+      for (const key of Object.keys(lists)) { const at = lists[key].findIndex((m) => m.id === id); if (at >= 0) { lists[key].splice(at, 1); return true } }
+      return false
+    }
+  }
+  agent.followup = (message) => { lists['next-turn'].push(message) }
+  agent.inject = (message) => { lists['next-step'].push(message) }
+  agent.steer = (message) => { lists['next-step'].push(message) }
+  agent.take = () => lists['next-turn'].shift()
+  return agent
+}
+
+test('peer_send 队列：回执带消息 id 与对方队列状态；withdraw 列出 / 按 id / all 撤回，只能撤自己的', async () => {
+  const h = await setup()
+  try {
+    withRealInbox(h.peer)
+    const third = h.makeAgent('eeeeeeee-0000-0000-0000-000000000007', { cwd: h.dir })
+    h.agents.set(third.id, third)
+    const r1 = await h.call('peer_send', { target: h.peer.id, message: '第一条：发布 run 进行中' })
+    const id1 = /消息 id (\S+?)（/.exec(r1)[1]
+    assert.match(r1, /对方队列现有 1 条（其中你发的 1 条，最早一条排了 不到 1 分钟）/)
+    const r2 = await h.call('peer_send', { target: h.peer.id, message: '第二条：合并指令' })
+    assert.match(r2, /对方队列现有 2 条（其中你发的 2 条/)
+    await h.call('peer_send', { target: h.peer.id, message: '别人发的' }, third)
+    // 列出：只列自己的两条，带正文摘要（去掉插件头）
+    const list = await h.call('peer_send', { action: 'withdraw', target: h.peer.id })
+    assert.match(list, /队列里共 3 条，你能撤回 2 条/)
+    assert.match(list, /第一条：发布 run 进行中/)
+    assert.ok(!list.includes('别人发的'))
+    assert.ok(!list.includes('不是用户本人的指令'), '摘要不含插件加的头')
+    // 按 id 撤回一条
+    assert.match(await h.call('peer_send', { action: 'withdraw', target: h.peer.id, id: id1 }), /撤回 1 条；队列里还剩 2 条/)
+    await assert.rejects(h.call('peer_send', { action: 'withdraw', target: h.peer.id, id: id1 }), /队列里没有这条/)
+    // 别人的那条撤不了
+    const otherId = h.peer.inbox.nextTurn.find((m) => m.source.senderSessionId === third.id).id
+    await assert.rejects(h.call('peer_send', { action: 'withdraw', target: h.peer.id, id: otherId }), /不是你.*发的/)
+    // all：只撤自己的
+    assert.match(await h.call('peer_send', { action: 'withdraw', target: h.peer.id, id: 'all' }), /撤回 1 条；队列里还剩 1 条/)
+    assert.equal(h.peer.inbox.nextTurn.length, 1)
+    // 对方已取走的撤不回
+    const r3 = await h.call('peer_send', { target: h.peer.id, message: '第三条' })
+    const id3 = /消息 id (\S+?)（/.exec(r3)[1]
+    h.peer.take(); h.peer.take()
+    await assert.rejects(h.call('peer_send', { action: 'withdraw', target: h.peer.id, id: id3 }), /可能已经送达/)
+    await assert.rejects(h.call('peer_send', { target: h.peer.id }), /send 需要 message/)
+  } finally { await h.cleanup() }
+})
+
+test('peer_send 队列：supersede 作废自己之前排队的，只留最新一条；别人的不动', async () => {
+  const h = await setup()
+  try {
+    withRealInbox(h.peer)
+    const third = h.makeAgent('eeeeeeee-0000-0000-0000-000000000008', { cwd: h.dir })
+    h.agents.set(third.id, third)
+    await h.call('peer_send', { target: h.peer.id, message: '旧指令 1' })
+    await h.call('peer_send', { target: h.peer.id, message: '旧指令 2' })
+    await h.call('peer_send', { target: h.peer.id, message: '别人的' }, third)
+    const out = await h.call('peer_send', { target: h.peer.id, message: '最新指令', supersede: true })
+    assert.match(out, /已作废你之前排队的 2 条/)
+    const texts = h.peer.inbox.nextTurn.map((m) => m.content[0].text)
+    assert.equal(texts.length, 2)
+    assert.ok(texts.some((t) => t.includes('最新指令')) && texts.some((t) => t.includes('别人的')))
+  } finally { await h.cleanup() }
+})
+
+test('peer_send 队列：现任主会话能撤回前任主会话排队的消息，并写审计', async () => {
+  const h = await setup()
+  try {
+    withRealInbox(h.peer)
+    const oldMain = h.makeAgent('eeeeeeee-0000-0000-0000-000000000009', { cwd: h.dir })
+    h.agents.set(oldMain.id, oldMain)
+    await h.run('main here', oldMain)
+    await h.call('peer_send', { target: h.peer.id, message: '前任发的：发布进行中' }, oldMain)
+    // 交接给 caller
+    await h.run('main here', h.caller)
+    await h.relay.handoffs.complete(h.relay.groupKeyOf(h.caller.id), { from: oldMain.id, to: h.caller.id })
+    const list = await h.call('peer_send', { action: 'withdraw', target: h.peer.id })
+    assert.match(list, /你能撤回 1 条/)
+    assert.match(list, /前任主会话 eeeeeeee 发的/)
+    assert.match(await h.call('peer_send', { action: 'withdraw', target: h.peer.id, id: 'all' }), /撤回 1 条/)
+    const { readFile } = await import('node:fs/promises')
+    const audit = (await readFile(h.relay.queueAuditPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    assert.equal(audit.at(-1).event, 'withdraw-former')
+    assert.equal(audit.at(-1).by, h.caller.id)
+    assert.equal(audit.at(-1).messages[0].from, oldMain.id)
+    // 不是主会话的会话看不到也撤不了前任的
+    const worker = h.makeAgent('eeeeeeee-0000-0000-0000-00000000000c', { cwd: h.dir })
+    h.agents.set(worker.id, worker)
+    await h.relay.send({ caller: oldMain, target: h.peer.id, text: '前任又一条', mode: 'followup', origin: 'model' }).catch(() => {})
+    assert.match(await h.call('peer_send', { action: 'withdraw', target: h.peer.id }, worker), /没有你能撤回的/)
+  } finally { await h.cleanup() }
+})
+
+test('peer_send 队列：宿主看不到对方队列时 withdraw 说明原因', async () => {
+  const h = await setup()
+  try {
+    await h.call('peer_send', { target: h.peer.id, message: '普通替身' })
+    await assert.rejects(h.call('peer_send', { action: 'withdraw', target: h.peer.id }), /看不到对方的待送队列/)
+  } finally { await h.cleanup() }
+})
+
 test('peer_spawn：新会话首条消息带 Agent 创建说明', async () => {
   const h = await setup()
   try {
