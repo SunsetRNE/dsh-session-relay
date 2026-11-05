@@ -110,7 +110,7 @@ test('注册了 /relay 与四个 peer 工具', async () => {
   try {
     assert.ok(h.commands.has('relay'))
     assert.equal(h.routes[0].path, '/api/dsha-session-relay')
-    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_ask_user', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_interrupt', 'peer_line', 'peer_list', 'peer_mail', 'peer_report', 'peer_send', 'peer_spawn', 'peer_task', 'peer_tasks', 'peer_watch', 'peer_workspace'])
+    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_ask_user', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_line', 'peer_list', 'peer_mail', 'peer_report', 'peer_send', 'peer_spawn', 'peer_task', 'peer_tasks', 'peer_watch', 'peer_workspace'])
   } finally { await h.cleanup() }
 })
 
@@ -191,15 +191,15 @@ test('peer_send：模型消息标记为 agent-message，并在 maxHops 后拒绝
   } finally { await h.cleanup() }
 })
 
-test('peer_interrupt：主会话专用，插入主会话指令；worker 不能调用', async () => {
+test('peer_send mode=interrupt：主会话专用，插入主会话指令；worker 不能调用', async () => {
   const h = await setup()
   try {
     await h.run('main here')
-    const out = await h.call('peer_interrupt', { target: h.peer.id, text: '停止当前工作并汇报进度', mode: 'stop' })
+    const out = await h.call('peer_send', { target: h.peer.id, message: '停止当前工作并汇报进度', mode: 'interrupt', stop: true })
     assert.match(out, /插播主会话指令/)
     const message = h.peer.inbox.at(-1)[1]
     assert.match(message.content[0].text, /\[主会话指令 · 停止并汇报\] 停止当前工作并汇报进度/)
-    await assert.rejects(h.call('peer_interrupt', { target: h.caller.id, text: 'x' }, h.peer), /只给本工作区主会话/)
+    await assert.rejects(h.call('peer_send', { target: h.caller.id, message: 'x', mode: 'interrupt' }, h.peer), /只给本工作区主会话/)
   } finally { await h.cleanup() }
 })
 

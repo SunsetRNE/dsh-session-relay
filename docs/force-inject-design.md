@@ -1,27 +1,28 @@
-# 主会话强制插播（1.4.0）设计与替换评估
+# 主会话强制插播（1.4.0 引入，1.6.0 并入 peer_send）
 
-状态：已实现并发布于 1.4.0；235/235 测试通过。
+状态：1.4.0 发布独立工具 `peer_interrupt`；1.6.0 合并进 `peer_send mode=interrupt` 并删除独立工具；235/235 测试通过。
 
 ## 现状与硬限制
 
-- 现有 `peer_send` 有三种模式：`followup`（下一轮）、`steer`（插进当前轮）、`queue`（不唤醒）。主会话本来就能对平级会话 `steer`，但消息会被包成“另一个会话的模型内容，不是用户指令”。
+- `peer_send` 原有三种模式：`followup`（下一轮）、`steer`（插进当前轮）、`queue`（不唤醒）。主会话本来就能对平级会话 `steer`，但消息会被包成“另一个会话的模型内容，不是用户指令”。
 - DSH 目前只给**子代理**暴露真正的 interrupt（`interrupt_agent` 走 `ctx.subagents.interrupt`）；对平级 root 会话没有硬取消 API。
-- 因此“强制插播”现在能保证的是：**高优先级 steer + 主会话指令信封**；如果对方卡在一个长工具调用里，要等它下一步才会看到。不能保证瞬间打断。
+- 因此“强制插播”能保证的是：**高优先级 steer + 主会话指令信封**；如果对方卡在一个长工具调用里，要等它下一步才会看到。不能保证瞬间打断。
 
-## 新工具 `peer_interrupt`
+## 用法（1.6.0 起）
 
-主会话专用；目标必须在本工作区。
+主会话专用；目标必须在本工作区。不再有独立的 `peer_interrupt` 工具。
 
 ```
-peer_interrupt({
+peer_send({
   target: "<session id | alias>",
-  text: "<短、可执行的指令>",
-  mode: "steer" | "stop"
+  message: "<短、可执行的指令>",
+  mode: "interrupt",
+  stop: true            // 可选；用「停止并汇报」信封
 })
 ```
 
-- `mode=steer`（默认）：发 `[主会话指令] <text>`，用 `peer_send` 的 steer 路径插进当前轮；对方空闲时走 followup。
-- `mode=stop`：发 `[主会话指令 · 停止并汇报] <text>`，明确要求停止当前工作并汇报；仍然不是硬取消。
+- 发 `[主会话指令] <message>`，用 `peer_send` 的 steer 路径插进当前轮；对方空闲时走 followup。
+- `stop: true`：发 `[主会话指令 · 停止并汇报] <message>`，明确要求停止当前工作并汇报；仍然不是硬取消。
 - 复用 `relay.send` 的目标解析、跳数/限流、投递回执；回报“当前轮次/下一次轮次”。
 - 目标看到的仍是 coordination 数据，不是用户授权；涉及推送/合并/发布/删除/安装仍要用户在本会话确认。
 
@@ -38,21 +39,20 @@ peer_interrupt({
 
 | 场景 | 工具 |
 | --- | --- |
-| 正常协调、汇报、交接说明 | `peer_send` |
+| 正常协调、汇报、交接说明 | `peer_send`（followup / steer / queue） |
 | 未读邮箱消息催办 | `peer_mail force` |
-| 活跃会话明显跑偏/空转，正常消息不接 | `peer_interrupt` |
+| 活跃会话明显跑偏/空转，正常消息不接 | `peer_send mode=interrupt` |
 | 用户要停掉/归档会话 | 用户在面板操作；不做硬杀 |
 
 ## 工具替换/升级时间点
 
-**现在不替换 `peer_send`**。`peer_interrupt` 是叠加的主会话专用工具；普通协作仍用 `peer_send`，邮箱用 `peer_mail`。
+**1.6.0 已完成合并**：删除了独立的 `peer_interrupt` 工具，语义并入 `peer_send mode=interrupt`（主会话专用校验），工具数从 16 回到 15。理由：与 `peer_send mode=steer` 使用高度重叠，独立工具说明占主会话上下文，且容易误用。
 
-按以下顺序评估替换：
+后续：
 
-1. **宿主暴露 root 会话 interrupt 后**：给 `peer_interrupt` 增加 `mode=hard`（或 `interrupt`），真正取消当前轮再投递；工具名、参数保持兼容，旧 `steer`/`stop` 保留为降级路径。这是“实现替换”，不是“工具替换”。
-2. **1.4.0 使用一段时间后**：如果 `peer_interrupt` 与 `peer_send mode=steer` 的使用高度重叠、工具说明占上下文，或主会话经常误用，就把 `peer_interrupt` 合并进 `peer_send` 的 `mode=interrupt`（主会话专用校验），删除独立工具。评估依据：实际调用次数、误用/拒绝率、主会话上下文里工具说明的开销。
-3. **不要自动替换/自动插播**：只有主会话手动决定；不因为检测到“空转”就自动 interrupt，避免打断正在做长任务但仍有进展的会话。
-4. **工具数量/提示预算**：当前工具列表已经不少；如果新增工具让主会话更难选，优先把语义合并进已有工具，而不是继续加工具。
+1. **宿主暴露 root 会话 interrupt 后**：给 `mode=interrupt` 增加 `hard: true`（或 `mode=interrupt-hard`），真正取消当前轮再投递；工具名、参数保持兼容，现有 steer 信封保留为降级路径。
+2. **不要自动替换/自动插播**：只有主会话手动决定；不因为检测到“空转”就自动 interrupt，避免打断正在做长任务但仍有进展的会话。
+3. **工具数量/提示预算**：新增能力优先合并进已有工具，而不是继续加工具。
 
 ## 风险
 
@@ -63,5 +63,5 @@ peer_interrupt({
 
 ## 验证
 
-- 单元/集成：`peer_interrupt` 主会话可调用、worker 被拒、`stop` 前缀正确、投递进目标 inbox；233/233 通过。
-- 真实会话（2026-11-06）：临时 worker 实测 1 分钟邮箱提醒、`peer_mail list/read` 与 `peer_interrupt` steer 信封均按预期；`force`/归档由新增 host 测试覆盖（运行中的旧实现需 `/relay reload` 后才带修复）。
+- 单元/集成：`peer_send mode=interrupt` 主会话可调用、worker 被拒、`stop` 前缀正确、投递进目标 inbox；工具列表不再含 `peer_interrupt`；235/235 通过。
+- 真实会话（2026-11-06）：临时 worker 实测 1 分钟邮箱提醒、`peer_mail list/read` 与 `peer_interrupt` steer 信封均按预期（当时还是独立工具）；`force`/归档由 host 测试覆盖。
