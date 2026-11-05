@@ -32,7 +32,7 @@ function makeAgent(id, { depth = 0, status = 'idle', cwd = '/tmp' } = {}) {
   return agent
 }
 
-async function setup() {
+async function setup(options = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'relay-host-'))
   const agents = new Map()
   const listeners = {}
@@ -94,6 +94,7 @@ async function setup() {
     notify: async (title, text) => { notified.push([title, text]) },
     restart: { intervalMs: 1_000_000, stableMs: 0 },
     aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), pinPath: join(dir, 'pins.json'), watchPath: join(dir, 'watches.json'), watch: false, autoPinIntervalMs: 0, titlePath: join(dir, 'titles.json'), autoTitleIntervalMs: 0, chainWatchIntervalMs: 0, remoteReleaseTags: false, maxHops: 2, githubAuto: false,
+    ...options,
     setTimer: (fn) => { timers.push(fn); return timers.length }, clearTimer: () => {}
   })
   assert.match(await shell.ready, /已加载/)
@@ -224,6 +225,37 @@ test('peer_mail：主会话发给单个会话后能 list/force/归档，目标�
     assert.match(await h.call('peer_mail', { action: 'read', ids: [id] }, h.peer), /正文 1\.4\.0 验收/)
     assert.match(await h.call('peer_mail', { action: 'mark', ids: [id], state: 'archived' }), /已归档/)
     assert.match(await h.call('peer_mail', { action: 'list' }), /没有消息/)
+  } finally { await h.cleanup() }
+})
+
+test('邮箱批量：窗口内合并一条短通知；/relay mail 可列表/读全文/归档', async () => {
+  const h = await setup({ mailboxBatchWindowMs: 0, mailboxTickMs: 0 })
+  try {
+    await h.run('main here')
+    const group = h.relay.groupKeyOf(h.caller.id)
+    const publish = (subject, body) => h.relay.publishMail({ group, from: 'plugin', targets: [h.peer.id], kind: 'watch', severity: 'info', subject, body, batch: true })
+    const first = await publish('CI 1 成功', '正文一')
+    await publish('CI 2 成功', '正文二')
+    assert.equal(first.scheduled, true)
+    // 窗口内不立刻发；tick 后合并成一条。
+    assert.equal(h.peer.inbox.filter(([, message]) => /协作邮箱/.test(message.content[0].text)).length, 0)
+    await h.relay.mailboxTick()
+    const notices = h.peer.inbox.filter(([, message]) => /协作邮箱/.test(message.content[0].text))
+    assert.equal(notices.length, 1)
+    assert.match(notices[0][1].content[0].text, /2 条新消息/)
+    assert.match(notices[0][1].content[0].text, /CI 2 成功/)
+    assert.equal(h.notified.length, 0, '批量短通知不响手机')
+
+    const list = await h.run('mail')
+    assert.equal(list.kind, 'success')
+    assert.match(list.text, /CI 2 成功/)
+    assert.match(list.text, /最近 7 天/)
+    const ids = h.relay.mailbox.items().map((item) => item.id)
+    const read = await h.run(`mail read ${ids.join(' ')}`)
+    assert.match(read.text, /正文一/)
+    assert.match(read.text, /正文二/)
+    assert.match(await h.run('mail archive read').then((result) => result.text), /已归档/)
+    assert.match(await h.run('mail').then((result) => result.text), /没有消息/)
   } finally { await h.cleanup() }
 })
 
@@ -1680,7 +1712,7 @@ test('核验：只有主会话 / 用户能登记与取消；工作会话能看�
 })
 
 test('核验：新工作区没有主会话时，本会话可以自己登记 / 取消，通知发给登记人；有了主会话后别人不能再登记', async () => {
-  const h = await setup()
+  const h = await setup({ mailboxBatchWindowMs: 0 })
   try {
     let remote = null
     h.relay.watches.checkers = { repoOf: async () => 'o/r', ci: async () => ({ done: false }), ref: async () => ({ sha: remote }) }
@@ -1693,6 +1725,7 @@ test('核验：新工作区没有主会话时，本会话可以自己登记 / �
     await h.relay.watches.tick() // 等登记时触发的那一轮结束
     for (const item of h.relay.watches.store.items()) item.nextAt = 0
     await h.relay.watches.tick()
+    await h.relay.mailboxTick()
     assert.match(h.caller.inbox.map(([, message]) => message.content[0].text).join('\n'), /新区 tag/)
     await h.call('peer_watch', { action: 'add', kind: 'ref', ref: 'v2', sha: 'abcdef12' })
     const second = /核验 ([0-9a-f]{8})/.exec(await h.call('peer_watch', { action: 'add', kind: 'ref', ref: 'v3', sha: 'abcdef13' }))[1]
@@ -1703,7 +1736,7 @@ test('核验：新工作区没有主会话时，本会话可以自己登记 / �
 })
 
 test('核验 tag：登记后换了主会话，tag 推上来时通知现任主会话（不是登记者），并发邮箱短通知（成功不响手机）', async () => {
-  const h = await setup()
+  const h = await setup({ mailboxBatchWindowMs: 0 })
   try {
     let remote = null
     h.relay.watches.checkers = { repoOf: async () => 'o/r', ci: async () => ({ done: false }), ref: async () => ({ sha: remote }) }
@@ -1717,10 +1750,12 @@ test('核验 tag：登记后换了主会话，tag 推上来时通知现任主会
     await h.relay.watches.tick() // 等登记时触发的那一轮结束
     for (const item of h.relay.watches.store.items()) item.nextAt = 0
     await h.relay.watches.tick()
+    await h.relay.mailboxTick()
     const toPeer = h.peer.inbox.map(([, message]) => message.content[0].text).join('\n')
     assert.match(toPeer, /0\.15\.0 tag/)
     assert.doesNotMatch(h.caller.inbox.map(([, message]) => message.content[0].text).join('\n'), /0\.15\.0 tag/)
     assert.ok(h.relay.mailbox.items().some((item) => /0\.15\.0 tag/.test(item.subject)))
+    assert.equal(h.notified.length, 0, '成功类只进邮箱/短通知，不响手机')
   } finally { await h.cleanup() }
 })
 

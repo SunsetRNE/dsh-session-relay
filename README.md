@@ -4,14 +4,14 @@ DeepSeek Harness（DSHA）平级会话互通插件：一个主会话协调多个
 
 ## English
 
-A DeepSeek Harness plugin for coordinating several root sessions. One session is the main (coordinator) session; others report to it with `peer_report`, and reports are batched into a single wake-up. It adds a `/relay` command, 16 `peer_*` model tools, a notification mailbox (public notices land in a per-workspace mailbox while sessions get a one-line notice), a main-session interrupt nudge, a version-line notice every worker sees, a `.agents/TASKS.md` task board with claims, main-session handoff and session wake/takeover, read-only session inspection and search, and a web panel. Subagent reports are filed separately and never change the parent session's status. Phone notifications use the DSHA device bridge and are unavailable elsewhere. Run `/relay help` for the full command reference.
+A DeepSeek Harness plugin for coordinating several root sessions. One session is the main (coordinator) session; others report to it with `peer_report`, and reports are batched into a single wake-up. It adds a `/relay` command, 16 `peer_*` model tools, a notification mailbox (public notices land in a per-workspace mailbox; notices are batched per session within 5 minutes, and `/relay mail` lists/reads/archives them with a 7-day token ledger), a main-session interrupt nudge, a version-line notice every worker sees, a `.agents/TASKS.md` task board with claims, main-session handoff and session wake/takeover, read-only session inspection and search, and a web panel. Subagent reports are filed separately and never change the parent session's status. Phone notifications use the DSHA device bridge and are unavailable elsewhere. Run `/relay help` for the full command reference.
 
 ## 功能
 
 - `/relay` 命令：新建 / 打开会话、指派编号、群发指令、版本线、模板、接手与唤醒、主会话交接、任务看板（`/relay tasks`）、会话检查与搜索（`/relay inspect`、`/relay search`）。完整用法见 `/relay help`。
 - 任务看板写操作：`/relay task new|claim|takeover|handoff|release|done|abandon|update`（模型用 `peer_task`），加锁写 `.agents/TASKS.md` 与 claims，格式同看板认领规则。
 - 模型工具（16 个）：`peer_list`、`peer_report`、`peer_send`、`peer_spawn`、`peer_alias`、`peer_inspect`、`peer_tasks`、`peer_task`、`peer_mail`，主会话另有 `peer_line`、`peer_assign`、`peer_workspace`、`peer_handoff`、`peer_ask_user`、`peer_watch`、`peer_interrupt`。
-- 协作邮箱（1.4.0）：核验成功这类公共通知只写进工作区邮箱（插件数据目录 `mailbox.json`），并发一行带 id 的短通知；需要细节时用 `peer_mail` read，主会话可用 `send`/`force` 推送。失败/超时仍直接送达并响手机。
+- 协作邮箱（1.5.0）：核验成功这类公共通知只写进工作区邮箱（插件数据目录 `mailbox.json`），同一会话 5 分钟窗口内的多条通知合并成一条短通知（带最新 id）；需要细节时用 `peer_mail` read，主会话可用 `send`/`force` 推送。用户可用 `/relay mail` 看未读、读全文、归档和查看最近 7 天「短通知 / 全文」统计。失败/超时仍直接送达并响手机。
 - 协作面板（Web 客户端）：看板、交接预览、会话唤醒、等你决定的提问、自动置顶、开发者模式开关。
 - 右侧边栏「协作」标签：本工作区的主会话、版本线、看板卡片（按分组筛选、点开看详情）和任务看板；正文第一次打开标签才加载，只在标签可见时刷新。
 - 会话在哪个 checkout：卡片自动显示每个会话的目录、分支、是否在 git 工作树里、从哪个分支哪个提交分叉（worker 没汇报也能看到；官方「更改请求与工作树」新建的会话尤其需要）。只读，按目录缓存 60 秒。

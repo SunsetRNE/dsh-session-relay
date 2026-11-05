@@ -90,3 +90,24 @@ test('邮箱：主会话可读、强推并归档只发给单个会话的消息',
     assert.match(archive, /给 b 的私信/)
   } finally { await rm(h.dir, { recursive: true, force: true }) }
 })
+
+test('邮箱：短通知排期/投递记账与 7 天统计', async () => {
+  const h = await harness()
+  try {
+    const item = await h.store.add({ at: h.now(), group: 'g', scope: { type: 'workspace', id: 'g' }, subject: 's', body: 'abcde', targets: ['a'] })
+    assert.equal(item.item.bodyBytes, 5)
+    await h.store.scheduleNotice(item.item.id, h.now())
+    assert.equal(h.store.pendingNotices(h.now()).length, 1)
+    assert.equal(h.store.pendingNotices(h.now() - 1).length, 0)
+    await h.store.noticed([item.item.id], { at: h.now(), text: 'hello' })
+    assert.equal(h.store.pendingNotices(h.now()).length, 0)
+    const stats = h.store.stats('g')
+    assert.equal(stats.items, 1)
+    assert.equal(stats.bodyBytes, 5)
+    assert.equal(stats.noticeBytes, 5)
+    assert.equal(stats.notices, 1)
+    // 7 天窗口外不计入
+    h.advance(8 * 24 * 3600_000)
+    assert.equal(h.store.stats('g').items, 0)
+  } finally { await rm(h.dir, { recursive: true, force: true }) }
+})

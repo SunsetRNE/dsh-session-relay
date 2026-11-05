@@ -1,6 +1,6 @@
 # 通知邮箱（1.4.0）设计稿
 
-状态：已实现并发布于 1.4.0（邮箱 MVP）。
+状态：1.4.0 发布 MVP；1.5.0 发布第二阶段（5 分钟批量短通知、`/relay mail` 命令、token 统计）。
 
 ## 目标
 
@@ -96,6 +96,7 @@ peer_mail({
 - `peek`：subject + 一行摘要。
 - `mark`：标记已读/未读/归档；主会话可标记工作区，worker 只能标记自己的 readBy。
 - `send` 暂不开放给模型；插件内部用 `publish()`，用户用 `/relay mail send`，避免变成绕过汇报的私聊通道。
+  实现后（1.4.0）：主会话模型可以用 `send`/`force`；用户命令 `/relay mail` 提供 list/read/archive 与 7 天统计（1.5.0）。
 - 权限：工作区隔离；`scope=session` 只对目标会话可见；主会话可读本工作区全部；不读别的 workspace。
 
 ## 面板
@@ -136,17 +137,20 @@ peer_mail({
 
 ## 分阶段
 
-1. **MVP**：`mailbox.json` + `peer_mail` list/read + `view=mail` + 面板「邮箱」页；先接「核验成功/ref 完成、build 发布、版本线更新」三类；问题/blocked/冲突仍直送。
-2. **省 token 第二阶段**：5 分钟批量短通知、手机通知抑制、`/relay mail` 命令、统计。
+1. **MVP（1.4.0）**：`mailbox.json` + `peer_mail` list/read + `view=mail` + 面板「邮箱」页；先接「核验成功/ref 完成、build 发布、版本线更新」三类；问题/blocked/冲突仍直送。
+2. **省 token 第二阶段（1.5.0）**：5 分钟窗口批量短通知（失败/冲突仍直送）、手机通知抑制、`/relay mail` 命令、7 天 token 统计。
 3. **扩展**：`peer_report` 摘要化（先测量再决定）、看板变化、按角色订阅、归档/导出。
 
 ## 测试
 
-- store：追加、去重、scope 过滤、readBy、TTL、损坏留底、并发锁。
+- store：追加、去重、scope 过滤、readBy、TTL、损坏留底、并发锁；主会话可读/强推/归档 scope=session。
 - tool：list/read/peek/mark 的输出上限、权限、未读计数、跨 workspace 拒绝。
 - 投递：CI 成功只进邮箱 + 短通知；失败直送 + 邮箱；不重复手机通知。
+- 批量（1.5.0）：同一目标窗口内多条合并一条、窗口外不合并、失败按次数放弃、reload 后按排期继续；批量短通知不响手机。
+- 统计（1.5.0）：bodyBytes / noticeBytes / noticeCount，7 天窗口。
+- 命令（1.5.0）：`/relay mail` list/read/archive 的解析与输出。
 - UI：看板 payload 的 unread 摘要；邮箱页在 360/480/760/1000/1280 宽度下的单双栏；竖屏/横屏和 composer 高度。
-- 回归：227 项现有测试保持全过。
+- 回归：235 项现有测试保持全过。
 
 ## 已定（2026-11-06）
 
