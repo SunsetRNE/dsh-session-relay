@@ -1647,7 +1647,28 @@ test('子代理通讯：树内经根会话转交；对外署名根会话、回�
     await assert.rejects(h.call('peer_report', { status: 'working', summary: 'x' }, h.child), /根会话就是主会话/)
     await h.run('main here', h.peer)
     await h.call('peer_report', { status: 'working', summary: '跑完一半' }, h.child)
-    assert.match(h.relay.coord.snapshot().board[h.caller.id].summary, /^［子代理 cccccccc］跑完一半/)
+    let rootEntry = h.relay.coord.snapshot().board[h.caller.id]
+    assert.equal(rootEntry.status, 'working')
+    assert.equal(rootEntry.summary, undefined, '子代理摘要不写进父会话自己的摘要')
+    assert.equal(rootEntry.subagents[h.child.id].summary, '跑完一半')
+    // 回归：子代理报「已完成」不能让父会话显示已完成，也不默认唤醒主会话
+    await h.call('peer_report', { status: 'working', summary: '父会话在发版' })
+    const peerInbox = h.peer.inbox.length
+    const reply = await h.call('peer_report', { status: 'done', summary: '子任务做完' }, h.child)
+    assert.match(reply, /父会话自己的状态仍是「进行中」/)
+    rootEntry = h.relay.coord.snapshot().board[h.caller.id]
+    assert.equal(rootEntry.status, 'working')
+    assert.equal(rootEntry.summary, '父会话在发版')
+    assert.equal(rootEntry.subagents[h.child.id].status, 'done')
+    assert.match(h.contextFor(h.peer), /父会话在发版[\s\S]*↳ 子代理 cccccccc（不是本会话自己的状态）· 已完成/)
+    await h.relay.batcher.flushAll?.()
+    assert.equal(h.peer.inbox.length, peerInbox, '子代理完成不唤醒主会话')
+    // 子代理提问照常唤醒，并标明是子代理
+    await h.call('peer_report', { status: 'question', summary: '要不要改接口', question: '改 A 还是 B' }, h.child)
+    assert.equal(h.relay.coord.snapshot().board[h.caller.id].status, 'working')
+    const { frameReportBatch } = await import('../lib/core.js')
+    const framed = frameReportBatch({ reports: [{ sessionId: h.caller.id, subagentId: h.child.id, parentStatus: 'working', label: '@a', status: 'done', summary: 'x' }], hop: 1, maxHops: 3 })
+    assert.match(framed, /子代理 cccccccc（父会话 @a.*子代理已完成；父会话自己的状态不变（进行中）/)
 
     // 认领记在根会话；子代理不继承主会话特权
     await h.run('main here')
