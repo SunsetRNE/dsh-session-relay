@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { after } from 'node:test'
 import { sampleEvents } from './fixtures/inspect-events.js'
 import { fixture as taskFixture } from './fixtures/task-board.js'
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises'
 import { parseTaskDoc } from '../lib/tasks.js'
 
 // 代次目录必须在包目录内（裸模块名从包的 node_modules 解析），测试用单独的目录并在结束时清理
@@ -1831,10 +1831,42 @@ test('peer_task：认领 / 拒抢 / 接手失效者 / 完成 / 登记 / 转交 /
 
     // 状态查询读到的是新结果
     assert.match(await h.call('peer_tasks', { id: 'T9' }), /接手 1 次|→/)
-    const events = (await readFile(join(h.dir, '.agents/task-events.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    // 1.8：任务事件、备份与锁都在插件任务库；工作区 .agents 里只留导出的看板/认领文件。
+    const storeAgents = join(h.dir, 'tasks', h.relay.groupKeyOf(h.caller.id), '.agents')
+    const events = (await readFile(join(storeAgents, 'task-events.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
     assert.deepEqual(events.map((event) => event.action), ['claim', 'done', 'takeover', 'new', 'handoff', 'release', 'claim', 'abandon', 'update'])
-    assert.ok((await readdir(join(h.dir, '.agents/backups/ops'))).length >= 8)
-    await assert.rejects(readFile(join(h.dir, '.agents/.tasks.lock')), /ENOENT/)
+    assert.ok((await readdir(join(storeAgents, 'backups/ops'))).length >= 8)
+    await assert.rejects(readFile(join(storeAgents, '.tasks.lock')), /ENOENT/)
+  } finally { await h.cleanup() }
+})
+
+test('任务库：首次导入后工作区文件只读；终态任务自动归档', async () => {
+  const h = await setup()
+  try {
+    await h.run('main here')
+    const board = join(h.dir, '.agents/TASKS.md')
+    const claim = join(h.dir, '.agents/claims/T1')
+    await mkdir(claim, { recursive: true })
+    await writeFile(board, '| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |\n|---|---|---|---|---|---|\n| T1 | P1 | 旧任务 | a | 否 | 已放弃 |\n')
+    await writeFile(join(claim, 'owner'), `session-${h.caller.id}\n`)
+    await writeFile(join(claim, 'abandoned'), '不做了\n')
+    const old = new Date(Date.now() - 10 * 24 * 3600_000)
+    await utimes(join(claim, 'abandoned'), old, old)
+    await utimes(join(claim, 'owner'), old, old)
+
+    // 第一次查询导入插件任务库。
+    assert.match(await h.call('peer_tasks', {}), /T1/)
+    // 之后手改工作区文件不会被回读（源已是插件任务库）。
+    await writeFile(board, '| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |\n|---|---|---|---|---|---|\n| T2 | P1 | 手改的不回读 | b | 否 | 待认领 |\n')
+    assert.doesNotMatch(await h.call('peer_tasks', {}), /T2/)
+
+    // 终态超过 7 天：自动归档到插件归档库，并重导出。
+    h.relay.taskArchiveAfterDays = 7
+    const swept = await h.relay.taskArchiveSweep()
+    assert.deepEqual(swept.archived, ['T1'])
+    assert.doesNotMatch(await readFile(board, 'utf8'), /\| T1 \|/)
+    assert.match(await readFile(join(h.dir, '.agents/TASKS-archive.md'), 'utf8'), /T1/)
+    assert.doesNotMatch(await h.call('peer_tasks', {}), /T1/)
   } finally { await h.cleanup() }
 })
 

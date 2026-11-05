@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.8.0 - 2026-11-06
+
+任务看板搬进插件任务库。
+
+- 事实源改为插件数据目录 `tasks/<工作区>/.agents/`（TASKS.md、claims/、TASKS-archive.md、task-events.jsonl、backups）；仓库里的 `.agents/TASKS.md` 和 `claims/` 变成只读导出快照，其它工作区/脚本仍能看。
+- 首次访问从工作区现有看板 + 认领目录导入（保留 mtime），原文件不动；之后不再回读工作区文件。
+- 写操作（`peer_task` / `/relay task`）改在插件库上执行，事件、备份、锁都在插件目录；每次变更后把看板、认领目录、归档文件重新导出到工作区。
+- 自动归档：已合入/已放弃超过 7 天（`taskArchiveAfterDays` 可配）由每小时 tick 移进归档库并重导出；认领目录移到 `.archived-claims/`，不物理删除。
+- 上下文、面板、`peer_tasks` 仍显示工作区里的 `.agents/TASKS.md` 路径；测试 235 → 236。
+- 设计见 `docs/task-store-design.md`；1.9 起做任务派发（父/子 + 依赖）。
+
+需要 `/relay reload` 后生效。任务库里已有工作区看板的导入副本，首次 reload 后第一次查询会自动导入。
+
+**要求 DSH 0.2.2-rc.1 及以上**。安装：插件管理器 → 从 Release 安装，或直接下载下面的 `dsh-session-relay-1.8.0.tgz`。
+
 ## 1.7.1 - 2026-11-06
 
 修 1.7.0 的文案遗漏。

@@ -1,6 +1,6 @@
 # 插件任务库（1.8/1.9）设计与迁移
 
-状态：设计稿。用户 2026-11-06 已定三条：
+状态：1.8 已实现（插件任务库 + 导入/导出 + 自动归档）；1.9 派发待做。用户 2026-11-06 已定三条：
 1. 插件为唯一事实源，旧 `.agents/TASKS.md` / `.agents/claims` 首次导入，之后**只读导出**（其它工作区/脚本仍能看）。
 2. 主会话可以按优先级/依赖**自动派发**，受唤醒预算与派发上限约束，可随时停。
 3. 任务支持**父/子 + 依赖**（串行/并行），子任务可单独派发，父任务全子任务完成后自动 done。
@@ -11,56 +11,37 @@
 - 自动归档：终态任务到期自动进归档库，活动库保持小；归档可查、不删。
 - 工具直接派发：`peer_task action=dispatch` 可按任务/整棵子树唤醒已有会话或拉起新会话；拆分任务按依赖推进。
 
-## 2. 存储
+## 2. 存储（1.8 实际实现）
 
-路径（与 `mailbox.json` 同级）：`<插件数据目录>/tasks/<workspace-group>/`
+路径：`<插件数据目录>/tasks/<workspace-group>/`，内部复用现有 markdown/claims 格式（不另造 JSON 任务表，解析/写操作/分类全部沿用）：
 
-```json
-{
-  "version": 1,
-  "tasks": [
-    {
-      "id": "T48",
-      "title": "…",
-      "priority": "P1",
-      "state": "open|claimed|working|blocked|queued|merged|abandoned|archived",
-      "tableStatus": "原表格里的状态文字",
-      "detail": ["…"],
-      "parentId": null,
-      "dependsOn": [],
-      "assignee": "session-…",
-      "chain": ["session-…"],
-      "worktree": "…",
-      "build": "…",
-      "createdAt": 0,
-      "updatedAt": 0,
-      "done": { "text": "提交号 可否合并", "at": 0 },
-      "abandoned": { "text": "原因", "at": 0 },
-      "history": [{ "at": 0, "by": "session-…", "action": "claim", "text": "…" }]
-    }
-  ],
-  "archive": [],
-  "meta": { "importedAt": 0, "exportedAt": 0, "sourceFile": "/root/…/.agents/TASKS.md" }
-}
+```
+tasks/<group>/
+  .agents/TASKS.md          # 事实源（表格 + 详情段 + 认领规则）
+  .agents/claims/<号>/      # owner / done / abandoned（现有形状）
+  .agents/TASKS-archive.md  # 归档详情
+  .agents/task-events.jsonl # 事件日志
+  .agents/backups/ops/      # 每次写操作前的备份
+  .archived-claims/<号>/    # 归档后移出的认领目录
+  meta.json                 # { importedAt, sourceFile, exportRoot }
 ```
 
-- 写操作串行锁（同 mailbox 的 in-process chain + 文件锁），原子替换 + `.bak`。
-- 事件追加到 `tasks/<group>/events.jsonl`（认领、派发、完成、归档），面板/交接可查。
-- 单任务详情、子任务关系都在 JSON 里；看板表格和详情段由导出器渲染，不再反向解析。
+- 写操作仍是现有 `withBoardLock` + 原子替换，只是路径在插件目录；事件、备份、锁都不再进工作区。
+- 1.9 的父子/依赖会另加 `graph.json`（`{ [id]: { parentId, dependsOn[] } }`），不塞进 markdown 表格。
+- 任务详情、认领链、完成/放弃时间沿用 `parseTaskDoc` / `readClaims` 的既有语义。
 
 ## 3. 导入 / 导出
 
 **首次导入**（每个工作区一次，`meta.importedAt` 为空时）：
 1. 从会话目录往上找 `.agents/TASKS.md`（现有 `locateBoard`）；
-2. 用现有 `parseTaskDoc` + `readClaims` 读出表格行、详情段、认领链、done/abandoned；
-3. 转成上面 JSON；`sourceFile` 记原路径，`importedAt` 记时间；
-4. 原文件不动，留作对照；之后不再读它。
+2. 把 `TASKS.md`、`TASKS-archive.md`、`claims/` 复制进插件目录（保留 mtime，终态时间不丢）；
+3. `meta.json` 记 `sourceFile`、`exportRoot`、`importedAt`；原文件不动，留作对照；之后不再读它。
 
 **导出**（只读快照，插件写、别人读）：
-- 每次写操作后（以及面板/命令显式刷新时）把 JSON 渲染回：
-  - `<workspace>/.agents/TASKS.md`（表格 + `### <号>` 详情段 + 认领规则原文）
-  - `<workspace>/.agents/claims/<号>/owner|done|abandoned`（保持现有认领目录形状）
-  - `<workspace>/.agents/TASKS-archive.md`（归档摘要，可选）
+- 每次写操作后把插件库里的文件复制回：
+  - `<workspace>/.agents/TASKS.md`
+  - `<workspace>/.agents/claims/<号>/owner|done|abandoned`
+  - `<workspace>/.agents/TASKS-archive.md`
 - 导出原子写；失败不阻塞插件内的任务状态，下一次写操作重试。
 - 导入后若有人手改 `.agents/TASKS.md`，**不会**被读回（源已切换）；需要时用 `/relay task import --force` 重新导入（明确覆盖，带备份）。
 
