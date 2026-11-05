@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.4 - 2026-11-05
+
+为上架插件市场（awesome-dsh-plugin / dsh-market）补齐包信息，功能不变。
+- `package.json` 声明 `engines.dsh` 与 `@deepseek-ai/dsh-llm`、`dsh-subagent`、`dsh-tools` 的 `peerDependencies`（范围 `>=0.2.1-rc.1 <0.3.0-0`，带预发布分支，含 0.2.1-rc.5；标为 optional，宿主版本不完全一致时也不会装不上）。市场据此显示兼容的 DSH 版本。
+- README 加英文简介；模型工具列表补全为 14 个（含 `peer_ask_user`、`peer_watch`），并写明开发者模式。
+
+不需要 reload 也能继续用；装新包后照常 `/relay reload`。
+
 ## 1.0.3 - 2026-11-05
 
 自动置顶不再等 30 秒轮询。
