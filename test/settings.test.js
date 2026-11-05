@@ -179,6 +179,34 @@ function textOf(node) {
   return textOf(node.children)
 }
 
+test('面板概览：给出快速交接入口（主会话先整理快照再交接，工作会话直接新建接手），上下文大时提示', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => `${key}`
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const base = { scope: 'workspace', workspace: null, hiddenByScope: 0, coordinator: null, line: null, others: [], othersTotal: 0, entries: [], restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a' }
+  const render = (self) => {
+    const board = { ...base, self }
+    const original = React.useState
+    let calls = 0
+    React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+    const text = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'overview' }))
+    React.useState = original
+    return text
+  }
+  const selfOf = (extra) => ({ sessionId: 'session-a', short: 'a', label: '@a', aliases: [], isMain: false, model: null, mainElsewhere: false, entry: null, participant: true, seesLine: true, ...extra })
+  const main = render(selfOf({ isMain: true }))
+  assert.match(main, /quickHandoffMain/, '主会话：整理快照并交接')
+  assert.match(main, /quickHandoffHint/)
+  const worker = render(selfOf({ sessionId: 'session-b', label: '@w' }))
+  assert.match(worker, /quickHandoffWorker/, '工作会话：直接新建接手')
+  const hot = render(selfOf({ isMain: true, contextTokens: 520_000 }))
+  assert.match(hot, /quickHandoffHot/, '上下文超过阈值时提示交接')
+  // 主会话两步：先整理草稿，再确认交接
+  const source = await readFile(new URL('../lib/client.panel.js', import.meta.url), 'utf8')
+  assert.match(source, /handoff-auto['"][\s\S]{0,160}handoff-confirm/)
+})
+
 test('面板看板：分组只有一两条时强制展开（折叠态跨工作区继承会让新工作区看不到卡片）', async () => {
   const { React } = fakeReact()
   const mod = await loadClient(React)
