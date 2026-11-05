@@ -93,7 +93,7 @@ async function setup() {
     stageRoot: STAGE, identityForAll: false,
     notify: async (title, text) => { notified.push([title, text]) },
     restart: { intervalMs: 1_000_000, stableMs: 0 },
-    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), pinPath: join(dir, 'pins.json'), watchPath: join(dir, 'watches.json'), watch: false, autoPinIntervalMs: 0, titlePath: join(dir, 'titles.json'), autoTitleIntervalMs: 0, chainWatchIntervalMs: 0, remoteReleaseTags: false, maxHops: 2,
+    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), pinPath: join(dir, 'pins.json'), watchPath: join(dir, 'watches.json'), watch: false, autoPinIntervalMs: 0, titlePath: join(dir, 'titles.json'), autoTitleIntervalMs: 0, chainWatchIntervalMs: 0, remoteReleaseTags: false, maxHops: 2, githubAuto: false,
     setTimer: (fn) => { timers.push(fn); return timers.length }, clearTimer: () => {}
   })
   assert.match(await shell.ready, /已加载/)
@@ -2326,5 +2326,45 @@ test('接手新建：沿用原会话模型；交接新建主会话：用主会�
     assert.equal(handed.modelLabel, 'p1/big@low')
     await m.flush()
     assert.deepEqual(m.defaults.currentSelection(), { provider: 'p1', model: 'base' })
+  } finally { await h.cleanup() }
+})
+
+test('GitHub 面板动作：只走设置路由；锁定后换号拒绝登记 CI 核验、核验器也不调 gh；看板默认不带验证码', async () => {
+  const h = await setup()
+  try {
+    const account = { value: { login: 'alice', id: 101 } }
+    const ghCalls = []
+    h.relay.github.gh = async (args) => {
+      ghCalls.push(args)
+      return { stdout: `HTTP/2.0 200 OK\r\nX-Oauth-Scopes: repo\r\n\r\n${JSON.stringify({ login: account.value.login, id: account.value.id })}`, stderr: '' }
+    }
+    h.relay.github.bridge = { get: async () => ({ result: '' }), post: async () => ({}), open: async () => {} }
+    await h.run('main here')
+    const { perform } = await import('../lib/settings-route.js')
+    const refreshed = await perform(h.relay, { action: 'github-refresh', fromSession: h.caller.id })
+    assert.equal(refreshed.result.github.login, 'alice')
+    assert.equal(refreshed.board.github.match, 'unpinned')
+    const pinned = await perform(h.relay, { action: 'github-pin', fromSession: h.caller.id })
+    assert.equal(pinned.board.github.pinned.accountId, 101)
+    assert.equal(JSON.parse(await readFile(join(h.dir, 'github.json'), 'utf8')).pinned.login, 'alice')
+    // 换号
+    account.value = { login: 'mallory', id: 666 }
+    await perform(h.relay, { action: 'github-refresh', fromSession: h.caller.id })
+    assert.equal(h.notified.filter(([title]) => title === 'GitHub 身份变了').length, 1)
+    await assert.rejects(h.call('peer_watch', { action: 'add', kind: 'ci', run_id: '123', repo: 'o/r', cwd: h.dir }), /不是锁定的 alice/)
+    const before = ghCalls.length
+    await assert.rejects(h.relay.watches.checkers.ci({ runId: '1', repo: 'o/r', cwd: h.dir }, { timeout: 1000 }), (error) => error.code === 'github_mismatch')
+    assert.equal(ghCalls.length, before, '只读身份，不跑 gh run view')
+    // 模型能看到的看板不带验证码字段
+    const board = await h.relay.board(undefined, { session: h.caller.id })
+    assert.equal(board.github.match, 'mismatch')
+    assert.equal(board.github.loginFlow, null)
+    const { snapshot } = await import('../lib/settings-route.js')
+    const settings = await snapshot(h.relay)
+    assert.equal(settings.github.match, 'mismatch')
+    assert.ok('userCode' in (settings.github.loginFlow ?? { userCode: null }))
+    await perform(h.relay, { action: 'github-unpin', fromSession: h.caller.id })
+    assert.equal(h.relay.github.pinned, null)
+    await assert.rejects(perform(h.relay, { action: 'github-bogus', fromSession: h.caller.id }), /未知的 GitHub 动作|未知/)
   } finally { await h.cleanup() }
 })

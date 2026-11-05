@@ -204,3 +204,17 @@ test('正文 chunk：空白会话按服务端分类显示「空白」，不算�
   const chunk = await readFile(new URL('../lib/client.sidebar.js', import.meta.url), 'utf8')
   assert.ok(!chunk.includes('brand-primary'), '强调色用链接蓝，不用主题里接近黑白的 brand-primary')
 })
+
+test('正文 chunk：顶栏 GitHub 身份胶囊；换号标红，未登录提示，读不到就不显示', async () => {
+  const pill = async (github) => {
+    const React = fakeReact(states({ ...sampleBoard(), github }))
+    const { mod } = await load('client.sidebar.js', React)
+    return textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  }
+  assert.ok((await pill({ state: 'ready', match: 'ok', login: 'alice', pinned: { login: 'alice' } })).includes('@alice'))
+  const bad = await pill({ state: 'ready', match: 'mismatch', login: 'mallory', pinned: { login: 'alice' } })
+  assert.ok(bad.includes('⚠ @mallory'))
+  assert.ok((await pill({ state: 'missing', match: 'missing', login: null, pinned: null })).includes('ghPillOut'))
+  const none = await pill(undefined)
+  assert.ok(!none.includes('ghPill') && !none.includes('@alice'))
+})

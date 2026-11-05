@@ -12,7 +12,7 @@ import { COMMAND_REFERENCE, HELP_TEXT } from '../lib/core.js'
 async function makeRelay() {
   const dir = await mkdtemp(join(tmpdir(), 'relay-settings-'))
   const relay = new SessionRelay({ logger: { warn() {} }, get: () => undefined, sessions: { get: () => undefined } }, {
-    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), watchPath: join(dir, 'watches.json'), watch: false
+    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), watchPath: join(dir, 'watches.json'), watch: false, githubAuto: false
   })
   await relay.ready()
   return { dir, relay, cleanup: async () => { await relay.away.chain; await rm(dir, { recursive: true, force: true }) } }
@@ -674,6 +674,13 @@ test('Client：概览页的「等你决定」、唤醒暂停横幅 / 计数行�
   assert.doesNotMatch(text, /devBanner/)
   text = render({ ...base, devMode: { enabled: false, until: null, enabledAt: null, defaultHours: 2, maxHours: 24 } }, { initialPage: 'ops' })
   assert.match(text, /devTitle/)
+  // GitHub 账号：换号时折叠标题标红；登录进行中自动展开，显示验证码与取消
+  const gh = (extra) => ({ match: 'ok', source: 'gh', state: 'ready', login: 'alice', accountId: 101, scopes: ['repo'], error: null, checkedAt: 1, pinned: { accountId: 101, login: 'alice' }, loginFlow: null, ...extra })
+  text = render({ ...base, github: gh({ match: 'mismatch', login: 'mallory', accountId: 666 }) }, { initialPage: 'ops' })
+  assert.match(text, /ghTitle[\s\S]*ghSumBad/)
+  text = render({ ...base, github: gh({ match: 'missing', state: 'missing', login: null, accountId: null, pinned: null, loginFlow: { state: 'pending', userCode: 'WXYZ-1234', verificationUri: 'https://github.com/login/device', opened: true } }) }, { initialPage: 'ops' })
+  assert.match(text, /ghCode[\s\S]*WXYZ-1234[\s\S]*ghCodeOpened[\s\S]*ghCancel/)
+  assert.doesNotMatch(text, /ghLogin/)
   // 暂停：横幅 + 继续
   text = render({ ...base, unattended: { wakesThisHour: 16, limit: 16, approxTokensThisHour: 0, paused: true, pausedAt: 1 } })
   assert.match(text, /wakePaused[\s\S]*wakeResume/)
