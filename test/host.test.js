@@ -1295,11 +1295,17 @@ test('拉起认领会话：首条消息写明身份、看板与认领方式；�
     assert.equal(typeof board.taskBoard.claimedRows[0].ownerLabel, 'string')
     assert.deepEqual(board.taskBoard.endedRows.map((row) => [row.id, row.claim]), [['T4', 'done']])
     assert.equal(board.taskBoard.ended, 1)
-    // 任务树依赖随快照带出，侧栏详情能显示「依赖」
+    // 任务树依赖随快照带出，侧栏详情能显示「依赖」；动态页地图拿父子关系 + issue 号
     const found = await h.relay.taskBoardFor({ session: h.caller.id })
-    await writeFile(join(found.board.storeRoot, 'graph.json'), JSON.stringify({ version: 1, tasks: { T3: { parentId: null, dependsOn: ['T1'] } } }))
+    await writeFile(join(found.board.storeRoot, 'graph.json'), JSON.stringify({ version: 1, tasks: { T1: { parentId: null, dependsOn: [] }, T3: { parentId: 'T1', dependsOn: ['T1'] } } }))
     const withDeps = await h.relay.board(undefined, { session: h.caller.id })
     assert.deepEqual(withDeps.taskBoard.open.find((row) => row.id === 'T3').dependsOn, ['T1'])
+    assert.equal(withDeps.taskBoard.map.length, 1)
+    assert.equal(withDeps.taskBoard.map[0].id, 'T1')
+    assert.equal(withDeps.taskBoard.map[0].childTotal, 1)
+    assert.deepEqual(withDeps.taskBoard.map[0].children.map((row) => [row.id, row.kind]), [['T3', 'open']])
+    assert.deepEqual(withDeps.taskBoard.map[0].children[0].dependsOn, ['T1'])
+    assert.equal(withDeps.taskBoard.map[0].children[0].issue, undefined)
     // 模型：peer_spawn claim=any（主会话）→ 按 agent 来源送达，取最高优先的
     const reply = await h.call('peer_spawn', { claim: 'any' })
     assert.match(reply, /去认领一个待认领任务/)
