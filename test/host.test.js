@@ -2913,14 +2913,16 @@ test('面板仓库：board 带能力探测与开关，用户动作改开关并�
     assert.equal(board.repo.repoInfo.hasIssues, true)
     assert.equal(board.repo.protection.state, 'none')
     assert.equal(board.repo.switches.find((item) => item.key === 'issues').available, true)
-    assert.equal(board.repo.switches.find((item) => item.key === 'mapIssues').available, false, 'sub-issues 不支持时地图票开关不可用')
+    const mapSwitch = board.repo.switches.find((item) => item.key === 'mapIssues')
+    assert.equal(mapSwitch.available, true, 'sub-issues 不支持时按正文 tasklist 降级，仍可开')
+    assert.match(mapSwitch.note, /tasklist/)
     const done = await h.relay.setRepoSwitch({ workspaceId: 'ws-repo', key: 'issues', enabled: true })
     assert.equal(done.changed, true)
     const stored = await h.relay.repoStore.probe('o/r')
     assert.equal(stored.switches.issues, true)
     const audit = await readFile(join(baseDir, 'tasks', 'repos', 'switch-audit.jsonl'), 'utf8')
     assert.match(audit, /"repo":"o\/r","key":"issues","from":false,"to":true,"by":"user"/)
-    await assert.rejects(h.relay.setRepoSwitch({ workspaceId: 'ws-repo', key: 'mapIssues', enabled: true }), /不支持 sub-issues/)
+    assert.equal((await h.relay.setRepoSwitch({ workspaceId: 'ws-repo', key: 'mapIssues', enabled: true })).changed, true)
     // 强制重新探测会再读一次 gh
     const before = calls.length
     const refreshed = await h.relay.refreshRepo({ workspaceId: 'ws-repo' })

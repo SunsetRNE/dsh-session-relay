@@ -110,8 +110,10 @@ test('开关：按仓库存盘、只认已知键、能力不满足时拒绝开�
     assert.equal((await again.switches('o/r')).issues, true)
     // 未知键
     await assert.rejects(store.setSwitch('o/r', 'nope', true), /未知仓库开关/)
-    // mapIssues 不支持 sub-issues 时拒绝
-    await assert.rejects(store.setSwitch('o/r', 'mapIssues', true), /不支持 sub-issues/)
+    // mapIssues 在 sub-issues 不支持/未知时降级为正文 tasklist，仍可开
+    await store.setSwitch('o/r', 'mapIssues', true)
+    assert.equal((await store.switches('o/r')).mapIssues, true)
+    assert.match(switchAvailability(await store.probe('o/r'), 'mapIssues').note, /tasklist/)
     // prLink 没有额外依赖，能开
     await store.setSwitch('o/r', 'prLink', true)
     assert.equal((await store.switches('o/r')).prLink, true)
@@ -125,7 +127,7 @@ test('describeRepo：列出能力、保护、sub-issues 和各开关可用性', 
     const store = new GithubRepoStore(base, { gh })
     const record = await store.probe('o/r')
     const text = describeRepo(record)
-    for (const part of ['GitHub 仓库：o/r', 'issues 开', 'projects 开', '合并方式 merge/rebase', 'main 保护：未开', 'sub-issues 不支持', 'issues（issue 投影）：关', 'approvalGate（合并前审批门）：开', '不可用', '用法：/relay repo']) {
+    for (const part of ['GitHub 仓库：o/r', 'issues 开', 'projects 开', '合并方式 merge/rebase', 'main 保护：未开', 'sub-issues 不支持', 'issues（issue 投影）：关', 'approvalGate（合并前审批门）：开', '降级为父 issue 正文 tasklist', '用法：/relay repo']) {
       assert.ok(text.includes(part), '缺少 ' + part)
     }
   } finally { await rm(base, { recursive: true, force: true }) }

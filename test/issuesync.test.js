@@ -197,3 +197,153 @@ test('命令解析：/relay sync 状态、刷新、回填、重试、解绑、�
   assert.equal(parseRelayCommand('sync retry').kind, 'invalid')
   assert.equal(parseRelayCommand('sync nope').kind, 'invalid')
 })
+
+test('labelSync：建缺失标签、收敛 relay:*、保留非 relay 标签，重复不重写', async () => {
+  let current = [{ name: 'bug' }, { name: 'relay:merged' }]
+  const calls = []
+  const gh = async (args) => {
+    calls.push(args)
+    if (args[0] === 'issue' && args[1] === 'list') return { stdout: '[]' }
+    if (args[1] === 'repos/o/r/issues' && args.includes('POST')) return { stdout: JSON.stringify({ number: 7, html_url: 'https://github.com/o/r/issues/7' }) }
+    if (args[1] === 'repos/o/r/issues/7' && args.includes('PATCH') && !args.includes('state=closed')) return { stdout: '{"state":"open"}' }
+    if (args[0] === 'label' && args[1] === 'list') return { stdout: JSON.stringify([{ name: 'relay:managed' }]) }
+    if (args[0] === 'label' && args[1] === 'create') return { stdout: '{}' }
+    if (args[0] === 'issue' && args[1] === 'view') return { stdout: JSON.stringify({ labels: current }) }
+    if (args[0] === 'issue' && args[1] === 'edit') {
+      const add = args.indexOf('--add-label') >= 0 ? args[args.indexOf('--add-label') + 1].split(',') : []
+      const remove = args.indexOf('--remove-label') >= 0 ? args[args.indexOf('--remove-label') + 1].split(',') : []
+      current = current.filter((item) => !remove.includes(item.name))
+      for (const name of add) if (!current.some((item) => item.name === name)) current.push({ name })
+      return { stdout: '{}' }
+    }
+    throw new Error('unexpected gh ' + args.join(' '))
+  }
+  const h = await tempSync({ gh, repoStore: switchesOf({ labelSync: true }) })
+  try {
+    await h.sync.enqueue('o/r', 'T1')
+    await h.sync.flush()
+    const creates = calls.filter((args) => args[0] === 'label' && args[1] === 'create').map((args) => args[2])
+    assert.deepEqual(creates.sort(), ['relay:in-progress', 'relay:stage:doing'])
+    const edits = calls.filter((args) => args[0] === 'issue' && args[1] === 'edit')
+    assert.equal(edits.length, 1)
+    assert.ok(edits[0].includes('--add-label'))
+    assert.ok(edits[0].includes('--remove-label'))
+    assert.ok(edits[0].includes('relay:merged'), '清掉过期的 relay 标签')
+    assert.ok(current.some((item) => item.name === 'bug'), '非 relay 标签保留')
+    assert.ok(current.some((item) => item.name === 'relay:managed'))
+    assert.ok(current.some((item) => item.name === 'relay:in-progress'))
+    // 再刷一次：标签已一致，不再写
+    await h.sync.enqueue('o/r', 'T1', { reason: 'again' })
+    await h.sync.flush()
+    assert.equal(calls.filter((args) => args[0] === 'issue' && args[1] === 'edit').length, 1)
+  } finally { await h.cleanup() }
+})
+
+test('labelSync 关闭时完全不碰标签', async () => {
+  const calls = []
+  const gh = async (args) => {
+    calls.push(args)
+    if (args[0] === 'issue' && args[1] === 'list') return { stdout: '[]' }
+    if (args[1] === 'repos/o/r/issues' && args.includes('POST')) return { stdout: JSON.stringify({ number: 7 }) }
+    if (args[1] === 'repos/o/r/issues/7' && args.includes('PATCH')) return { stdout: '{"state":"open"}' }
+    throw new Error('unexpected gh ' + args.join(' '))
+  }
+  const h = await tempSync({ gh, repoStore: switchesOf({ labelSync: false }) })
+  try {
+    await h.sync.enqueue('o/r', 'T1')
+    await h.sync.flush()
+    assert.equal(calls.filter((args) => args[0] === 'label' || (args[0] === 'issue' && args[1] === 'view')).length, 0)
+  } finally { await h.cleanup() }
+})
+
+test('mapIssues：父票 wayfinder:map、子票 wayfinder:task，正文 tasklist 降级并补上子票号', async () => {
+  const snapshot = {
+    T1: { id: 'T1', title: '地图', state: 'live', isMap: true, children: ['T2'], dependsOn: [], parentId: undefined },
+    T2: { id: 'T2', title: '子票', state: 'open', isMap: false, children: [], dependsOn: ['T3'], parentId: 'T1' }
+  }
+  const issues = new Map()
+  let next = 7
+  const calls = []
+  const field = (args, name) => {
+    const hit = args.find((arg) => typeof arg === 'string' && arg.startsWith(`${name}=`))
+    return hit === undefined ? undefined : hit.slice(name.length + 1)
+  }
+  const gh = async (args) => {
+    calls.push(args)
+    if (args[0] === 'issue' && args[1] === 'list') return { stdout: '[]' }
+    if (args[0] === 'label' && args[1] === 'list') return { stdout: '[]' }
+    if (args[0] === 'label' && args[1] === 'create') return { stdout: '{}' }
+    if (args[0] === 'issue' && args[1] === 'view') return { stdout: JSON.stringify({ labels: [] }) }
+    if (args[0] === 'issue' && args[1] === 'edit') return { stdout: '{}' }
+    if (args[0] === 'api') {
+      const path = args[1]
+      if (path === 'repos/o/r/issues' && args.includes('POST')) {
+        const number = next++
+        issues.set(number, { number, title: field(args, 'title'), body: field(args, 'body'), state: 'open' })
+        return { stdout: JSON.stringify({ number, html_url: `https://github.com/o/r/issues/${number}`, state: 'open' }) }
+      }
+      const one = /^repos\/o\/r\/issues\/(\d+)$/.exec(path)
+      if (one !== null && args.includes('PATCH')) {
+        const number = Number(one[1])
+        const item = issues.get(number) ?? { number, state: 'open' }
+        if (args.includes('state=closed')) item.state = 'closed'
+        else {
+          if (field(args, 'title') !== undefined) item.title = field(args, 'title')
+          if (field(args, 'body') !== undefined) item.body = field(args, 'body')
+        }
+        issues.set(number, item)
+        return { stdout: JSON.stringify({ state: item.state }) }
+      }
+      if (/^repos\/o\/r\/issues\/\d+\/comments$/.test(path)) return { stdout: '{}' }
+    }
+    throw new Error('unexpected gh ' + args.join(' '))
+  }
+  const h = await tempSync({
+    gh,
+    repoStore: switchesOf({ mapIssues: true }),
+    readTask: async ({ taskId }) => snapshot[taskId]
+  })
+  try {
+    await h.sync.enqueue('o/r', 'T1', { reason: 'map' })
+    await h.sync.enqueue('o/r', 'T2', { reason: 'map' })
+    await h.sync.flush()
+    const byTitle = (part) => [...issues.values()].find((item) => String(item.title ?? '').includes(part))
+    const parent = byTitle('[relay T1]')
+    const child = byTitle('[relay T2]')
+    assert.ok(parent && child, '父票和子票都建了')
+    assert.match(parent.body, /- 地图：是/)
+    assert.match(parent.body, /- \[ \] #\d+/, '父票正文 tasklist 补上子票号')
+    assert.match(child.body, /- 父任务：#\d+/)
+    assert.match(child.body, /- 依赖：T3/, '依赖没有 issue 时写任务号，不假装建好边')
+    const createdLabels = calls.filter((args) => args[0] === 'label' && args[1] === 'create').map((args) => args[2])
+    assert.ok(createdLabels.includes('wayfinder:map'))
+    assert.ok(createdLabels.includes('wayfinder:task'))
+    const edits = calls.filter((args) => args[0] === 'issue' && args[1] === 'edit')
+    assert.ok(edits.some((args) => args.includes('wayfinder:map') || args.join(' ').includes('wayfinder:map')))
+    assert.ok(edits.some((args) => args.join(' ').includes('wayfinder:task')))
+  } finally { await h.cleanup() }
+})
+
+test('mapIssues 关闭时不加 wayfinder 标签、正文也不写地图结构', async () => {
+  const calls = []
+  const gh = async (args) => {
+    calls.push(args)
+    if (args[0] === 'issue' && args[1] === 'list') return { stdout: '[]' }
+    if (args[1] === 'repos/o/r/issues' && args.includes('POST')) return { stdout: JSON.stringify({ number: 7 }) }
+    if (args[1] === 'repos/o/r/issues/7' && args.includes('PATCH')) return { stdout: '{"state":"open"}' }
+    throw new Error('unexpected gh ' + args.join(' '))
+  }
+  const h = await tempSync({
+    gh,
+    repoStore: switchesOf({ mapIssues: false }),
+    readTask: async () => ({ id: 'T1', title: '地图', state: 'live', isMap: true, children: ['T2'], dependsOn: [] })
+  })
+  try {
+    await h.sync.enqueue('o/r', 'T1')
+    await h.sync.flush()
+    assert.equal(calls.filter((args) => args[0] === 'label').length, 0)
+    const create = calls.find((args) => args[1] === 'repos/o/r/issues' && args.includes('POST'))
+    assert.ok(create !== undefined)
+    assert.doesNotMatch(create.join(' '), /wayfinder/)
+  } finally { await h.cleanup() }
+})
