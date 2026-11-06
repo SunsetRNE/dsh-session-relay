@@ -556,7 +556,7 @@ test('任务看板：点条目进详情，打开持有会话、复制任务号�
   const tree = React.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), entries: [{ sessionId: 'session-w1aaaaaa', summary: '跑了真机，等合并' }], act: async () => ({}), busy: false, onCopied: () => {} })
   const text = textOf(tree)
   for (const part of ['sideTaskBack', 'T3', 'tasksHolder', '@w1', 'sideTaskWorktree', 'fix/t3', 'sideTaskStatus', 'sideTaskDepends', 'sideTaskLatest', '跑了真机，等合并', 'tasksOpenHolder', 'sideTaskCopyId', 'sideTaskCopyDispatch']) assert.ok(text.includes(part), '详情缺少 ' + part)
-  assert.ok(!text.includes('sideTaskSummary'), '详情页不显示分组计数')
+  assert.ok(JSON.stringify(tree).includes('dshaSv_split'), '宽屏主从布局：列表与详情同时渲染')
   await findButton(tree, (label) => label === 'tasksOpenHolder').props.onClick()
   assert.deepEqual(opened, ['session-w1aaaaaa'])
   await findButton(tree, (label) => label === 'sideTaskCopyId').props.onClick()
