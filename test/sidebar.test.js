@@ -615,14 +615,12 @@ test('任务详情：projectStatus 开关打开时显示 Projects 状态读取�
   assert.ok(text.includes('projectStatusTitle') && text.includes('projectStatusLoading'))
 })
 
-test('任务看板：可接任务进详情后复制认领指令；拉起认领会话要确认，成功直接打开新会话', async () => {
-  const { kit, opened, copied } = taskKit()
+test('任务看板：可接任务进详情后拉起认领会话，成功直接打开新会话', async () => {
+  const { kit, opened } = taskKit()
   const React = fakeReact(['T1'])
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), act: async () => ({}), busy: false })
-  await findButton(tree, (label) => label === 'sideTaskCopyClaim').props.onClick()
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  assert.deepEqual(copied, ['/relay task claim T1'])
+  assert.ok(!textOf(tree).includes('sideTaskCopyClaim'), '复制认领指令已并进「拉起认领」一个入口')
 
   const posted = []
   const select = fakeReact(['T1', undefined, 'T1', ''])
@@ -850,7 +848,16 @@ test('交接页：草稿、接手方与二次确认；确认以用户身份发�
   const tree3 = React3.createElement(mod3.RelaySidebar, { kit, sessionId: 'session-self' })
   const text3 = textOf(tree3)
   assert.ok(!findNode(tree3, (node) => node.type === 'textarea'), '没有草稿时不铺空编辑器')
-  for (const part of ['hoAsk', 'hoAuto', 'hoWrite']) assert.ok(text3.includes(part), '缺少起草入口 ' + part)
+  for (const part of ['hoAsk', 'hoWrite']) assert.ok(text3.includes(part), '缺少起草入口 ' + part)
+  assert.ok(!text3.includes('hoAuto'), '主会话正常时不再单列「插件整理草稿」')
+  // 主会话上一轮失败（如上下文超限）：同一个按钮改成插件整理
+  const failed = { ...handoff, draft: null, coordinatorFailure: { text: '上下文超限' } }
+  const React4 = fakeReact(states({ ...sampleBoard(), handoff: failed }, { tab: 'handoff' }))
+  const mod4 = (await load('client.sidebar.js', React4)).mod
+  const tree4 = React4.createElement(mod4.RelaySidebar, { kit, sessionId: 'session-self' })
+  const text4 = textOf(tree4)
+  assert.ok(text4.includes('hoAuto') && text4.includes('hoFailed'), '失败时给插件整理入口和失败原因')
+  assert.ok(!text4.includes('hoAsk'), '失败时不再让主会话起草')
 })
 
 test('交接页：新主会话可指定模型；说明上限与面板一致为 2000 字', async () => {
