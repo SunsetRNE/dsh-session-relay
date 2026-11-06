@@ -827,9 +827,12 @@ test('动态页：已登录显示地图任务树、关联 PR、仓库与同步�
   }
   const React = fakeReact(states({ ...sampleBoard(), github, repo, sync, taskBoard }, { tab: 'activity' }))
   const { mod } = await load('client.sidebar.js', React)
-  const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const text = textOf(tree)
   for (const part of ['sideMapTitle', 'sideMapHint', 'sideMapGroups', 'T10', '父任务', 'T10.1', '子任务一', 'sideMapDepends', '#12', 'sideMapNoTicket', 'OPEN', 'sideMapMore',
-    'sideTicketTitle', '#9', 'sideRepoInSettings', 'sidePrTitle', 'PR #7 · OPEN · 可合并', 'repoTitle', 'o/r', 'syncTitle']) assert.ok(text.includes(part), '缺少 ' + part)
+    'sideTicketTitle', '#9', 'sideRepoInSettings', 'sidePrTitle', 'PR #7 · OPEN · 可合并', 'repoTitle', 'repoProbeOk', 'syncTitle']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(!text.includes('o/r'), '仓库名收进 title，不再占可见文字')
+  assert.ok(findNode(tree, (node) => node.type === 'p' && node.props?.title === 'o/r') !== undefined, '仓库名在 title 里可悬停查看')
   assert.ok(!text.includes('sideMapPending'), '不再显示「待接入」占位')
   assert.ok(!text.includes('repoRefresh'), '仓库开关不再重复放动态页')
   assert.ok(!text.includes('ghStateMissing') && !text.includes('ghCode'), '已登录不再显示登录卡')
@@ -1084,12 +1087,22 @@ test('任务看板：GitHub 同步一行状态，可展开链接票列表', asyn
   const { kit } = taskKit()
   const collapsed = fakeReact([])
   const mod = (await load('client.sidebar.js', collapsed)).mod
-  const collapsedText = textOf(collapsed.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), sync, act: async () => ({}), busy: false }))
+  const collapsedTree = collapsed.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), sync, act: async () => ({}), busy: false })
+  const collapsedText = textOf(collapsedTree)
   assert.match(collapsedText, /syncTitle/)
-  assert.match(collapsedText, /o\/r/)
   assert.match(collapsedText, /syncQueue/)
   assert.match(collapsedText, /syncUnknown/)
+  assert.ok(!collapsedText.includes('o/r'), '仓库名收进 title，不再占可见文字')
+  const syncLine = findNode(collapsedTree, (node) => node.type === 'button' && String(node.props?.className ?? '').includes('dshaSv_syncLine'))
+  assert.match(syncLine.props.title, /o\/r/)
   assert.ok(!collapsedText.includes('#7'), '默认收起不展开列表')
+
+  const idleSync = { available: true, repo: 'o/r', paused: false, queue: 0, switches: { issues: true }, links: [] }
+  const idle = fakeReact([])
+  const modIdle = (await load('client.sidebar.js', idle)).mod
+  const idleText = textOf(idle.createElement(modIdle.TaskBoard, { kit, tasks: tasksFixture(), sync: idleSync, act: async () => ({}), busy: false }))
+  assert.match(idleText, /syncIdle/)
+  assert.ok(!idleText.includes('syncQueue'), '队列为 0 时不显示队列数字')
 
   const expanded = fakeReact([undefined, {}, undefined, '', undefined, true])
   const mod2 = (await load('client.sidebar.js', expanded)).mod
