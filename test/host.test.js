@@ -2736,6 +2736,16 @@ test('看板版本：内容不变两次版本相同，带 since 只回 notModifi
     const changed = await get('view=board&session=' + h.caller.id + '&since=' + first.version)
     assert.notEqual(changed.version, first.version)
     assert.ok(Array.isArray(changed.entries))
+    // 任务页只用 tasks=1 的轻量快照补任务板，不触发完整快照里的 repo/声明远端校验
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 状态 |\n|---|---|---|---|\n| T1 | P1 | 做点事 | 待认领 |\n')
+    const light = await get('view=board&session=' + h.caller.id + '&light=1')
+    assert.equal(light.partial, true)
+    assert.equal(light.taskBoard, null, '默认轻量快照不带任务板')
+    const lightTasks = await get('view=board&session=' + h.caller.id + '&light=1&tasks=1')
+    assert.equal(lightTasks.partial, true)
+    assert.equal(lightTasks.declarations, null, '带任务板也不做声明/远端校验')
+    assert.ok(lightTasks.taskBoard !== null && typeof lightTasks.taskBoard === 'object', 'tasks=1 轻量快照带任务板')
   } finally { await h.cleanup() }
 })
 
