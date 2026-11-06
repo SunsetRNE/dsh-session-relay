@@ -12,7 +12,8 @@
 - 审计结论见 `docs/backlog-limits-audit.md`：邮箱/核验/提问/同步队列/发送限流已有上限；尚待补汇报批与邮箱的每目标上限、`ask_user` 催办。
 - 事件回执：目标会话处理到消息时 DSH 会落 `user/message`（带消息 id），插件按 id 直接回执发送方并销账；汇报批投递后也把批消息 id 挂到各 `peer_report question/blocked` 记录上，主会话收到即回执工作会话。队列轮询/空闲兜底只作为后备，避免误报。
 - 支持明确「不用回复」：`peer_send expect_reply:false` / `/relay <目标> --no-reply` 只回执、不设超时，适合「保持待命」这类通知；宿主看不到待收队列时，非 queue 消息在目标空闲 5 秒后兜底回执，避免误报超时。
-- 测试 311 → 318。
+- 强制插队：`peer_send priority:"urgent"` / `/relay <目标> --urgent` 在目标运行中直接 `steer` 插进当前轮，不再排到本轮之后；普通 followup 排队超过 60 秒仍未取走时，自动从队列移出并升级为 steer，同时给发送方回执，避免工作会话继续按旧目标白干。
+- 测试 311 → 319。
 
 ## 未发布：平级通知回执时限
 

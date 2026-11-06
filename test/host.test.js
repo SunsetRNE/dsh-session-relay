@@ -3141,3 +3141,35 @@ test('汇报接收回执：主会话处理到汇报批后，按批消息 id 回�
     assert.equal((await h.relay.sweepDeadlines()).length, 0, '已回执的不再超时提醒')
   } finally { await h.cleanup() }
 })
+
+test('紧急插队：priority=urgent 在目标运行中直接 steer；排队超时自动升级', async () => {
+  let now = 6_000_000
+  const h = await setup({ deadlineNow: () => now })
+  try {
+    const sent = await h.call('peer_send', { target: h.peer.id, message: '先停，方向不对', priority: 'urgent' }, h.caller)
+    assert.match(sent, /紧急插队/)
+    const last = h.peer.inbox.at(-1)
+    assert.equal(last[0], 'steer', 'urgent 不排到本轮之后')
+    assert.match(last[1].content[0].text, /先停/)
+
+    // 普通 followup 排队超过阈值：自动从队列取出并 steer，不再等满 3 分钟
+    now += 120_000
+    const message = { id: 'pending-1', content: [{ type: 'text', text: '纠正：先停' }], source: { kind: 'agent-message' } }
+    let removed = false
+    const agent = {
+      status: 'running',
+      session: h.peer.session,
+      inbox: { remove: (id) => { if (id === 'pending-1') { removed = true; return true } return false } },
+      steer: (item) => h.peer.inbox.push(['steer', item])
+    }
+    h.relay.pendingFor = async () => ({ agent, pending: [{ id: 'pending-1', senderId: h.caller.id, message }] })
+    await h.relay.deadlines.add({
+      id: 'pending-1', from: h.caller.id, to: h.peer.id, at: now - 120_000, deadlineAt: now + 60_000,
+      timeoutMs: 180_000, mode: 'followup', kind: 'send', preview: '纠正：先停', deliveredAt: now - 120_000, receiptPending: true
+    })
+    const escalated = await h.relay.sweepEscalations()
+    assert.deepEqual(escalated, ['pending-1'])
+    assert.equal(removed, true, '从原队列移出')
+    assert.ok(h.peer.inbox.some(([mode, item]) => mode === 'steer' && item === message), '改为 steer 插进当前轮')
+  } finally { await h.cleanup() }
+})
