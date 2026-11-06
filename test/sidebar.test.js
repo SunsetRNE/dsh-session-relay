@@ -454,8 +454,8 @@ test('正文 chunk：卡片主操作随状态——待答复回复、可合并�
   const posted = []
   const kit = kitFor()
   // 父组件 13 个 useState（见 states 的注释）；extra 从第 14 个开始。
-  // 会话页顶部的「找会话」先占 5 个（展开、关键词、结果、错误、搜索中），之后才轮到卡片
-  const sidebarStates = (board, cardStates, quietOpen = false) => states(board, { quietOpen, extra: [false, '', undefined, undefined, undefined, ...cardStates] })
+  // 会话页顶部的「找会话」先占 7 个（展开、关键词、结果、错误、搜索中、模式、全文结果），之后才轮到卡片
+  const sidebarStates = (board, cardStates, quietOpen = false) => states(board, { quietOpen, extra: [false, '', undefined, undefined, undefined, 'session', undefined, ...cardStates] })
   const q = sampleBoard().entries[0]
   let React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [q] }, ['reply', '先做 A', false]))
   let m = (await load('client.sidebar.js', React)).mod
@@ -933,6 +933,53 @@ test('找会话：按关键词问服务端，结果可直接打开，未加入�
   assert.equal(asked.at(-1).method, 'GET')
   assert.equal(asked.at(-1).params.view, 'find')
   assert.equal(asked.at(-1).params.session, 'session-self')
+})
+
+test('搜内容：切到全文模式后按 view=search 查询，结果按会话分组可打开', async () => {
+  const asked = []
+  const kit = { ...kitFor(), request: async (method, body, params) => { asked.push({ method, params }); return {} } }
+  const search = {
+    scanned: 3, total: 2, skipped: 0,
+    groups: [{ sessionId: 'session-x1', title: '目标会话', hits: [{ seq: 5, turn: 2, kind: 'output', label: '助手回复', snippet: '…命中片段…' }] }]
+  }
+  // SessionSearch useState：展开、关键词、找会话结果、错误、搜索中、模式、全文结果
+  const React = fakeReact([true, '关键词', undefined, undefined, false, 'content', search])
+  const mod = (await load('client.sidebar.js', React)).mod
+  const opened = []
+  const tree = React.createElement(mod.SessionSearch, { kit, board: { workspace: { id: 'ws1' } }, sessionId: 'session-self', openSession: (id) => opened.push(id) })
+  const text = textOf(tree)
+  assert.ok(text.includes('contentMode') && text.includes('searchHint'), '全文模式与说明')
+  assert.ok(text.includes('目标会话') && text.includes('seq 5') && text.includes('命中片段'), '分组和命中行')
+  assert.ok(text.includes('searchStats') && text.includes('searchOpen'), '统计与打开按钮')
+  await findButton(tree, (label) => label === 'searchOpen').props.onClick()
+  assert.deepEqual(opened, ['session-x1'])
+  const form = findNode(tree, (node) => node.type === 'form')
+  form.props.onSubmit({ preventDefault() {} })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(asked.at(-1).params.view, 'search')
+  assert.equal(asked.at(-1).params.fromSession, 'session-self')
+})
+
+test('模板：列表可删除（二次确认），新建可保存到同一存储', async () => {
+  const posted = []
+  const act = async (body) => { posted.push(body); return { result: {} } }
+  const data = { templates: [{ name: 'claim', text: '认领任务…', updatedAt: 1 }], limits: { text: 16000 } }
+  // TemplateBox useState：数据、错误、编辑中、删除确认
+  let React = fakeReact([data, undefined, undefined, 'claim'])
+  let mod = (await load('client.sidebar.js', React)).mod
+  let tree = React.createElement(mod.TemplateBox, { kit: kitFor(), act, busy: false })
+  let text = textOf(tree)
+  for (const part of ['tplTitle', 'tplHint', 'claim', 'copyUse', 'edit', 'confirmRemove']) assert.ok(text.includes(part), '缺少 ' + part)
+  await findButton(tree, (label) => label === 'confirmRemove').props.onClick()
+  assert.deepEqual(posted.at(-1), { action: 'remove', name: 'claim' })
+  // 新建：编辑器的名称/正文状态接在 TemplateBox 的 4 个状态之后
+  React = fakeReact([data, undefined, 'new', undefined, 'newtpl', '正文'])
+  mod = (await load('client.sidebar.js', React)).mod
+  tree = React.createElement(mod.TemplateBox, { kit: kitFor(), act, busy: false })
+  const area = findNode(tree, (node) => node.type === 'textarea')
+  assert.equal(area.props.maxLength, 16000)
+  await findButton(tree, (label) => label === 'save').props.onClick()
+  assert.deepEqual(posted.at(-1), { action: 'save', name: 'newtpl', text: '正文', previousName: null, overwrite: false })
 })
 
 test('邮箱：显示未读与全文入口；标已读 / 归档以用户身份提交', async () => {
