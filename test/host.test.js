@@ -1294,6 +1294,23 @@ test('拉起认领会话：首条消息写明身份、看板与认领方式；�
   } finally { await h.cleanup() }
 })
 
+test('拉起认领别名：默认 t<任务号>；被占用时沿用变体 t5b 并写进首条消息', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 状态 |\n|---|---|---|---|\n| T5 | P1 | 别名任务 | 待认领 |\n')
+    await h.relay.store.set('t5', h.peer.id)
+    const done = await h.run('claim T5')
+    assert.equal(done.kind, 'success', done.text)
+    const claimer = [...h.agents.values()].find((agent) => agent.id.startsWith('dddddddd'))
+    assert.ok(claimer)
+    assert.equal(h.relay.store.snapshot().t5b, claimer.id)
+    assert.match(claimer.inbox[0][1].content[0].text, /@t5b/)
+  } finally { await h.cleanup() }
+})
+
 test('推送链提醒：首次只记基线；末行变成 STOP / DONE 才提醒主会话一次', async () => {
   const h = await setup()
   try {
