@@ -16,6 +16,7 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - 模型工具（14 个）：`peer_list`、`peer_report`、`peer_send`、`peer_spawn`、`peer_alias`、`peer_inspect`、`peer_tasks`、`peer_task`、`peer_mail`，主会话另有 `peer_line`、`peer_assign`、`peer_handoff`、`peer_ask_user`、`peer_watch`。`peer_send` 的 `mode=interrupt`（主会话专用，`stop:true` 用「停止并汇报」信封）取代了 1.4.0 的独立工具 `peer_interrupt`。`peer_list` 默认只列本工作区（`scope=workspace`）；`scope=host` 看本机全部会话需要开发者模式（只读、审计）；主会话用 `declarations=true` 对照工作树声明（原 `peer_workspace` 已并入）。DSH 侧栏归档的会话在工具面按归档处理：`peer_list` 不列，`peer_inspect` / 工作区搜索默认拒绝或跳过，`peer_send` 明确报已归档；要读加 `include_archived=true`。
 - 协作邮箱（1.5.0）：核验成功这类公共通知只写进工作区邮箱（插件数据目录 `mailbox.json`），同一会话 5 分钟窗口内的多条通知合并成一条短通知（带最新 id）；需要细节时用 `peer_mail` read，主会话可用 `send`/`force` 推送。用户可用 `/relay mail` 看未读、读全文、归档和查看最近 7 天「短通知 / 全文」统计。失败/超时仍直接送达并响手机。
 - 协作面板（Web 客户端）：看板、交接预览、会话唤醒、等你决定的提问、自动置顶、开发者模式开关。
+- 右侧边栏「协作」标签（懒加载）：先拉轻量快照出首屏，任务看板/声明/仓库/同步等重字段后台补水；轮询只拉轻量，重字段合并保留，完整快照 5 分钟或手动刷新时补一次。
 - 右侧边栏「协作」标签：本工作区的主会话、版本线、看板卡片（按分组筛选、点开看详情）和任务看板（可接 / 进行中 / 已结束分组，点开看持有者、工作树与动作）；正文第一次打开标签才加载，只在标签可见时刷新。
 - 会话在哪个 checkout：卡片自动显示每个会话的目录、分支、是否在 git 工作树里、从哪个分支哪个提交分叉（worker 没汇报也能看到；官方「更改请求与工作树」新建的会话尤其需要）。只读，按目录缓存 60 秒。
 - `/relay wt <会话> [--from <基分支|提交>] [--name <名字>]`：用官方工作树服务给会话建分支与新目录并切过去，不用手动 `git worktree add`；宿主没启用该功能时明确报错。

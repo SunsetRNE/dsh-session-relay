@@ -2977,8 +2977,8 @@ test('R1 issue 投影接线：issues 开关打开后任务变化会排队建票�
     assert.equal(board.sync.switches.issues, true)
     assert.ok(board.sync.links.some((link) => link.id === 'T1' && link.issue === 7 && link.state === 'synced'))
     const light = await h.relay.board(undefined, { workspaceId: 'ws-sync', lightweight: true })
-    assert.equal(light.sync.repo, 'o/r')
-    assert.ok(light.sync.links.some((link) => link.id === 'T1'))
+    assert.equal(light.partial, true)
+    assert.equal(light.sync, null, '同步摘要随完整快照补水，轻量首屏不查')
     // 模型没有同步入口
     assert.ok(!h.tools.has('peer_sync'))
     await assert.rejects(h.call('peer_task', { action: 'sync-dispatch' }), /must be one of|不认识的动作/)

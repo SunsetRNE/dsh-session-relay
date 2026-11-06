@@ -750,3 +750,41 @@ test('任务看板：GitHub 同步一行状态，可展开链接票列表', asyn
   assert.match(expandedText, /syncStateUnknown/)
   assert.match(expandedText, /T2/)
 })
+
+test('侧栏：先拉 light 首屏，再后台补完整快照；缺失的重字段由完整快照补上', async () => {
+  const React = fakeReact()
+  const effects = []
+  React.useEffect = (fn) => { effects.push(fn) }
+  const sets = []
+  React.useState = (initial) => [typeof initial === 'function' ? initial() : initial, (value) => sets.push(value)]
+  const calls = []
+  const kit = {
+    ...kitFor(),
+    request: async (method, body, query) => {
+      calls.push(query)
+      if (query.light === 1) {
+        return { partial: true, version: 'light1', entries: sampleBoard().entries, taskBoard: null, declarations: null, github: null, repo: null, sync: null }
+      }
+      return { partial: false, version: 'full1', entries: sampleBoard().entries, taskBoard: { open: [{ id: 'T9', title: '完整任务' }], claimed: 0 }, declarations: { mismatches: 0 }, github: { state: 'ready', login: 'u', match: 'ok' }, repo: { available: true, repo: 'o/r' }, sync: { available: true, repo: 'o/r', queue: 0, links: [] } }
+    }
+  }
+  const saved = globalThis.document
+  globalThis.document = { visibilityState: 'visible', addEventListener() {}, removeEventListener() {}, querySelector: () => null, createElement: () => ({ dataset: {}, remove() {} }), head: { appendChild() {} } }
+  const cleanups = []
+  const boardUpdates = () => sets.map((value) => (typeof value === 'function' ? value({ board: undefined }) : value)).filter((value) => value && typeof value === 'object' && 'board' in value && value.board)
+  try {
+    const { mod } = await load('client.sidebar.js', React)
+    React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-lazy', useTabInfo: () => ({ tab: { visible: true } }) })
+    cleanups.push(...effects.map((fn) => fn()))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    assert.ok(calls.some((query) => query.light === 1), '先拉轻量')
+    assert.ok(calls.some((query) => query.light === undefined), '再补完整')
+    const boards = boardUpdates().map((value) => value.board)
+    assert.ok(boards.length >= 2, '先轻量、后完整至少两次看板状态')
+    assert.equal(boards.at(-1).taskBoard.open[0].id, 'T9', '完整快照补上任务看板')
+    assert.equal(boards.at(-1).sync.repo, 'o/r')
+  } finally {
+    for (const cleanup of cleanups) if (typeof cleanup === 'function') cleanup()
+    globalThis.document = saved
+  }
+})
