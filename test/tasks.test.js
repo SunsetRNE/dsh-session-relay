@@ -247,3 +247,21 @@ test('上下文预算：默认按 1M 窗口，配置可改并保持 hint ≤ hea
   assert.deepEqual(resolveContextBudget({ hint: 100_000, heavy: 'x', handoff: -1 }), { hint: 100_000, heavy: CONTEXT_BUDGET.heavy, handoff: CONTEXT_BUDGET.handoff })
   assert.deepEqual(resolveContextBudget({ hint: 700_000, heavy: 200_000, handoff: 300_000 }), { hint: 700_000, heavy: 700_000, handoff: 700_000 })
 })
+
+test('任务详情：关联 PR 只读一行（带 URL），不混进阶段/审批', () => {
+  const detail = renderTaskDetail({
+    id: 'T1', title: '做点事', state: 'live', why: '', notes: [], commits: [], voided: [],
+    row: { status: '进行中' },
+    pr: {
+      number: 7, url: 'https://github.com/o/r/pull/7', repo: 'o/r', source: 'ok', probedAt: 1,
+      status: {
+        state: 'OPEN', draft: false, mergeable: 'MERGEABLE', reviewDecision: 'REVIEW_REQUIRED',
+        checks: { total: 2, passing: 1, pending: 1, failing: 0, state: 'pending' }
+      }
+    }
+  })
+  assert.match(detail, /PR：PR #7 · OPEN · 可合并 · 待审批 · checks 1\/2 通过 · 进行中 1/)
+  assert.match(detail, /https:\/\/github\.com\/o\/r\/pull\/7/)
+  assert.doesNotMatch(detail, /阶段：/)
+  assert.doesNotMatch(detail, /审批：/)
+})

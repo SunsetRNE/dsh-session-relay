@@ -531,6 +531,19 @@ test('任务看板：点条目进详情，打开持有会话、复制任务号�
   assert.deepEqual(copied, ['T3', '/relay task dispatch T3'])
 })
 
+test('任务看板：详情显示关联 PR 的只读状态', async () => {
+  const { kit } = taskKit()
+  const React = fakeReact(['T3'])
+  const { mod } = await load('client.sidebar.js', React)
+  const tasks = tasksFixture()
+  tasks.claimedRows = [{
+    ...tasks.claimedRows[0],
+    pr: { number: 7, url: 'https://github.com/o/r/pull/7', repo: 'o/r', source: 'ok', label: 'PR #7 · OPEN · 可合并 · checks 1/1 通过' }
+  }]
+  const tree = React.createElement(mod.TaskBoard, { kit, tasks, act: async () => ({}), busy: false })
+  assert.match(textOf(tree), /PR #7 · OPEN · 可合并 · checks 1\/1 通过/)
+})
+
 test('任务看板：可接任务进详情后复制认领指令；拉起认领会话要确认，成功直接打开新会话', async () => {
   const { kit, opened, copied } = taskKit()
   const React = fakeReact(['T1'])

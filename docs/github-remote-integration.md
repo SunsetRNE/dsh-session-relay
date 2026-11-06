@@ -114,6 +114,8 @@ task.pr = { number, url, headSha, base, state, draft, reviewDecision, checks: { 
 ```
 
 - 只读缓存 + 事件表 `prs.json`；每 60–120 秒轮询（标签可见时），失败记 unknown，不阻断本地。
+  - 2.0.0 R0 实际实现先按需探测：用户 `/relay task pr <任务号> <号|URL>` 关联时读一次，之后查看任务详情时缓存超过 2 分钟才重读；`refresh` 强制、`clear` 解除。不做后台轮询（轮询留到 S1）。读取用 `gh pr view --json …`（只读 GraphQL），不写 GitHub。
+  - 只给 PR 号时用当前目录的 GitHub origin 推断 `owner/repo`；给 URL 时以 URL 为准。
 - 一个任务默认只关联一个 PR；重开 PR 以最新为准，旧号记历史。
 - PR 不反推任务状态：PR merged 只作为 `approval` + 提交在 main 的证据，本地仍按 4A.9 顺序。
 

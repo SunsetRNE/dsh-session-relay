@@ -8,6 +8,7 @@ import { apply } from '../lib/index.js'
 import { parseRelayCommand } from '../lib/core.js'
 import { fileURLToPath } from 'node:url'
 import { after } from 'node:test'
+import { execFileSync } from 'node:child_process'
 import { sampleEvents } from './fixtures/inspect-events.js'
 import { fixture as taskFixture } from './fixtures/task-board.js'
 import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises'
@@ -2781,5 +2782,107 @@ test('任务阶段与审批：认领自动 doing，update stage 只给主会话�
     const detail = await h.call('peer_tasks', { id: 'T1' })
     assert.match(detail, /阶段：进行中/)
     assert.match(detail, /审批：已打回/)
+  } finally { await h.cleanup() }
+})
+
+test('任务 PR 只读关联：用户命令关联、缓存查看、刷新、解除；模型没有入口', async () => {
+  const calls = []
+  const info = {
+    url: 'https://github.com/o/r/pull/7',
+    state: 'OPEN',
+    isDraft: false,
+    mergeable: 'MERGEABLE',
+    reviewDecision: 'REVIEW_REQUIRED',
+    mergedAt: null,
+    headRefOid: 'abcdef1234567890',
+    baseRefName: 'main',
+    statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }]
+  }
+  const h = await setup({ prGh: async (args) => { calls.push(args); return { stdout: JSON.stringify(info) } } })
+  try {
+    h.workspaces.push({ id: 'ws-pr', title: 'PR', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 状态 |\n|---|---|---|---|\n| T1 | P1 | 做点事 | 待认领 |\n')
+    const linked = await h.run('task pr T1 https://github.com/o/r/pull/7')
+    assert.match(linked.text, /已关联 T1 → PR #7（o\/r）/)
+    assert.match(linked.text, /可合并/)
+    assert.match(linked.text, /待审批/)
+    assert.match(linked.text, /不代开 PR/)
+    assert.equal(calls.length, 1)
+    assert.deepEqual(calls[0], ['pr', 'view', '7', '--repo', 'o/r', '--json', 'url,state,isDraft,mergeable,reviewDecision,statusCheckRollup,mergedAt,headRefOid,baseRefName'])
+    const found = await h.relay.taskBoardFor({ sessionId: h.caller.id })
+    const state = await h.relay.ensureTaskState(found.board.storeRoot)
+    assert.equal(state.get('T1').pr.number, 7)
+    assert.equal(state.get('T1').pr.repo, 'o/r')
+    assert.equal(state.get('T1').pr.source, 'ok')
+    assert.equal(state.get('T1').pr.status.state, 'OPEN')
+    assert.equal(state.get('T1').stage, undefined, '关联 PR 不改任务阶段')
+    assert.equal(state.get('T1').approval, undefined, '关联 PR 不改审批')
+    const detail = await h.call('peer_tasks', { id: 'T1' })
+    assert.match(detail, /PR：PR #7 · OPEN · 可合并 · 待审批 · checks 1\/1 通过/)
+    // 缓存未过期：只看不重查
+    const shown = await h.run('task pr T1')
+    assert.equal(calls.length, 1)
+    assert.match(shown.text, /PR #7（o\/r）/)
+    // 强制刷新
+    await h.run('task pr T1 refresh')
+    assert.equal(calls.length, 2)
+    // 面板快照带 PR 摘要
+    const panel = await h.relay.tasksPanel(h.caller.id)
+    const item = panel.groups.flatMap((group) => group.items).find((row) => row.id === 'T1')
+    assert.equal(item.pr.label, 'PR #7 · OPEN · 可合并 · 待审批 · checks 1/1 通过')
+    // 解除关联，不动阶段/审批
+    const cleared = await h.run('task pr T1 clear')
+    assert.match(cleared.text, /已解除 T1 与 PR #7 的关联/)
+    assert.equal(state.get('T1').pr, undefined)
+    // 模型没有关联入口（工具参数枚举直接拒绝）
+    await assert.rejects(h.call('peer_task', { action: 'pr', id: 'T1', target: '7' }), /must be one of|不认识的动作/)
+  } finally { await h.cleanup() }
+})
+
+test('任务 PR 关联：只给号时按当前目录的 GitHub origin 推断仓库', async () => {
+  const h = await setup({
+    prGh: async () => ({
+      stdout: JSON.stringify({
+        url: 'https://github.com/o2/r2/pull/9', state: 'OPEN', isDraft: false, mergeable: 'UNKNOWN', reviewDecision: '',
+        mergedAt: null, headRefOid: 'ffff', baseRefName: 'main', statusCheckRollup: []
+      })
+    })
+  })
+  try {
+    h.workspaces.push({ id: 'ws-pr2', title: 'PR2', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    execFileSync('git', ['-C', h.dir, 'init', '-q'])
+    execFileSync('git', ['-C', h.dir, 'remote', 'add', 'origin', 'https://github.com/o2/r2.git'])
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 状态 |\n|---|---|---|---|\n| T2 | P1 | 做点事 | 待认领 |\n')
+    const linked = await h.run('task pr T2 9')
+    assert.match(linked.text, /已关联 T2 → PR #9（o2\/r2）/)
+    const found = await h.relay.taskBoardFor({ sessionId: h.caller.id })
+    const state = await h.relay.ensureTaskState(found.board.storeRoot)
+    assert.equal(state.get('T2').pr.repo, 'o2/r2')
+    assert.equal(state.get('T2').pr.url, 'https://github.com/o2/r2/pull/9')
+  } finally { await h.cleanup() }
+})
+
+test('任务 PR 关联：探测失败记 unknown、保留关联，详情给出原因', async () => {
+  const h = await setup({
+    prGh: async () => { const error = new Error('boom'); error.stderr = 'HTTP 500: server error\n'; throw error }
+  })
+  try {
+    h.workspaces.push({ id: 'ws-pr3', title: 'PR3', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 状态 |\n|---|---|---|---|\n| T3 | P1 | 做点事 | 待认领 |\n')
+    const linked = await h.run('task pr T3 https://github.com/o/r/pull/8')
+    assert.match(linked.text, /已关联 T3 → PR #8/)
+    assert.match(linked.text, /状态：未知（HTTP 500: server error）/)
+    const found = await h.relay.taskBoardFor({ sessionId: h.caller.id })
+    const state = await h.relay.ensureTaskState(found.board.storeRoot)
+    assert.equal(state.get('T3').pr.source, 'unknown')
+    assert.equal(state.get('T3').pr.number, 8)
+    const detail = await h.call('peer_tasks', { id: 'T3' })
+    assert.match(detail, /PR：PR #8 · 状态未知/)
   } finally { await h.cleanup() }
 })

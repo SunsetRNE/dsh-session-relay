@@ -17,7 +17,8 @@
 - 修 `/relay reload` 把旧 `GitHubIdentity` 对象整个接管的问题（会导致新的 tier/refresh/resetLogin 全不生效）；reload 只继承已探测身份，旧登录流程取消。
 - R0 任务本地阶段：新增 `stage`（triage/ready/doing/review/hold/dropped）与 `approval`（pending/approved/rejected）。认领自动置 doing；其它阶段只由用户或本工作区主会话改（`peer_task action=update stage=…` / `/relay task update T1 --stage review`）；审批只能由用户命令 `/relay approve|reject <任务号> [说明]` 记录，模型没有审批工具；`peer_tasks id=` 与看板任务区显示阶段/审批。
 - R0 远端接入第一块：`/relay repo` 只读探测 origin 仓库能力（issues/projects/合并方式/分支保护/labels/sub-issues），结果缓存 10 分钟；仓库开关按 `owner/repo` 存、只由用户 `/relay repo on|off <开关>` 改，模型没有写入口，依赖不满足时拒绝开启并说明原因。当前只存本地，不写 GitHub。
-- 测试 248 → 261。
+- R0 远端接入第二块：任务关联 PR（只读）。`/relay task pr <任务号> <PR 号|URL>` 关联并读一次 state / 可合并性 / 审批决定 / checks（`gh pr view`，不写 GitHub）；状态缓存在本地任务库，2 分钟后查看时自动刷新，`refresh` 强制重查、`clear` 解除关联。查询失败记 unknown 并保留上次状态，不阻断本地。relay 不代开 PR、不代合并，PR 状态不会自动改任务阶段/审批。`/relay tasks <号>`、`peer_tasks id=`、侧栏任务详情与协作面板都能看到 PR 行。
+- 测试 248 → 288。
 
 需要 `/relay reload` 后生效（侧栏本身刷新即可）。
 
