@@ -2990,7 +2990,7 @@ test('平级通知回执时限：超时提醒发送方；对方回复即销账',
   try {
     const sent = await h.call('peer_send', { target: h.peer.id, message: '请确认 A', timeout: '10s' }, h.caller)
     assert.match(sent, /10 秒/)
-    assert.match(sent, /没有回执/)
+    assert.match(sent, /自动回执|没收到/)
     assert.equal((await h.relay.deadlines.due(now + 10_000)).length, 1)
     now += 10_000
     const swept = await h.relay.sweepDeadlines()
@@ -3063,4 +3063,29 @@ test('看板快照：活跃会话带待收队列，落后时标 lagging', async 
     assert.equal(entry.pending.count, 4)
     assert.equal(entry.pending.level, 'lagging')
   } finally { await h.cleanup() }
+})
+
+test('接收即自动回执：空闲目标收到后通知发送方；运行中目标取走队列后回执', async () => {
+  let now = 3_000_000
+  const h = await setup({ deadlineNow: () => now })
+  try {
+    h.peer.status = 'idle'
+    const sent = await h.call('peer_send', { target: h.peer.id, message: '请确认', timeout: '10s' }, h.caller)
+    assert.match(sent, /自动回执/)
+    const receipt = h.caller.inbox.find(([, message]) => message.content?.[0]?.text?.includes('<relay-receipt>'))
+    assert.ok(receipt, '发送方收到自动回执')
+    assert.match(receipt[1].content[0].text, /已接收/)
+    now += 10_000
+    assert.equal((await h.relay.sweepDeadlines()).length, 0, '回执后不再超时提醒')
+  } finally { await h.cleanup() }
+
+  const h2 = await setup({ deadlineNow: () => now })
+  try {
+    await h2.call('peer_send', { target: h2.peer.id, message: '排队中', timeout: '10s' }, h2.caller)
+    h2.relay.pendingFor = async () => ({ agent: h2.peer, pending: [] })
+    await h2.relay.sweepDeadlines()
+    const receipt = h2.caller.inbox.find(([, message]) => message.content?.[0]?.text?.includes('<relay-receipt>'))
+    assert.ok(receipt, '队列消失后补发回执')
+    assert.match(receipt[1].content[0].text, /排队中/)
+  } finally { await h2.cleanup() }
 })
