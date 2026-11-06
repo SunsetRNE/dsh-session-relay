@@ -830,12 +830,33 @@ test('动态页：已登录显示地图任务树、关联 PR、仓库与同步�
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['sideMapTitle', 'sideMapHint', 'sideMapGroups', 'T10', '父任务', 'T10.1', '子任务一', 'sideMapDepends', '#12', 'sideMapNoTicket', 'OPEN', 'sideMapMore',
-    'sideTicketTitle', '#9', 'sideRepoInSettings', 'sidePrTitle', 'PR #7 · OPEN · 可合并', 'repoTitle', 'repoProbeOk', 'syncTitle']) assert.ok(text.includes(part), '缺少 ' + part)
+    'sideTicketTitle', '#9', 'sideRepoInSettings', 'sidePrTitle', 'sidePrAdd', 'PR #7 · OPEN · 可合并', 'repoTitle', 'repoProbeOk', 'syncTitle']) assert.ok(text.includes(part), '缺少 ' + part)
   assert.ok(!text.includes('o/r'), '仓库名收进 title，不再占可见文字')
   assert.ok(findNode(tree, (node) => node.type === 'p' && node.props?.title === 'o/r') !== undefined, '仓库名在 title 里可悬停查看')
   assert.ok(!text.includes('sideMapPending'), '不再显示「待接入」占位')
   assert.ok(!text.includes('repoRefresh'), '仓库开关不再重复放动态页')
   assert.ok(!text.includes('ghStateMissing') && !text.includes('ghCode'), '已登录不再显示登录卡')
+})
+
+test('动态页：关联 PR 表单以用户身份提交 task-pr', async () => {
+  const posted = []
+  const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
+  const github = { state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 }, scopes: ['repo'], loginFlow: null, error: null }
+  const repo = { available: true, source: 'ok', repo: 'o/r' }
+  const sync = { available: true, repo: 'o/r', paused: false, queue: 0, switches: { issues: true }, links: [] }
+  const taskBoard = { open: [{ id: 'T3', title: '跑真机' }], claimed: 0, claimedRows: [], endedRows: [], map: [{ id: 'T3', title: '跑真机', kind: 'open', childTotal: 0, children: [] }] }
+  // ActivityTab 的 7 个 useState：拆分子任务 4 个 + 关联 PR 3 个
+  const React = fakeReact(states({ ...sampleBoard(), github, repo, sync, taskBoard }, { tab: 'activity', extra: [false, '', '', false, true, 'T3', 'https://github.com/o/r/pull/9'] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const text = textOf(tree)
+  for (const part of ['sidePrAdd', 'sidePrLink']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(findNode(tree, (node) => node.type === 'input' && node.props?.placeholder === 'sidePrTask') !== undefined, '任务号输入框带占位说明')
+  const form = findNode(tree, (node) => node.type === 'form' && typeof node.props?.onSubmit === 'function')
+  assert.ok(form !== undefined, '关联 PR 表单可提交')
+  form.props.onSubmit({ preventDefault() {} })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(posted.at(-1), { action: 'task-pr', task: 'T3', pr: 'https://github.com/o/r/pull/9', fromSession: 'session-self' })
 })
 
 test('动态页：没有拆分任务时给出创建入口，不再显示待接入占位', async () => {

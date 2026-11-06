@@ -2862,6 +2862,11 @@ test('任务 PR 只读关联：用户命令关联、缓存查看、刷新、解�
     const cleared = await h.run('task pr T1 clear')
     assert.match(cleared.text, /已解除 T1 与 PR #7 的关联/)
     assert.equal(state.get('T1').pr, undefined)
+    // 面板「关联 PR」走用户路由，和命令同一份任务库
+    const { perform } = await import('../lib/settings-route.js')
+    const viaPanel = await perform(h.relay, { action: 'task-pr', fromSession: h.caller.id, task: 'T1', pr: 'https://github.com/o/r/pull/9' })
+    assert.match(viaPanel.result.text, /已关联 T1 → PR #9/)
+    assert.equal(state.get('T1').pr.number, 9)
     // 模型没有关联入口（工具参数枚举直接拒绝）
     await assert.rejects(h.call('peer_task', { action: 'pr', id: 'T1', target: '7' }), /must be one of|不认识的动作/)
   } finally { await h.cleanup() }
