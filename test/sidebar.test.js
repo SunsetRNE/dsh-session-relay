@@ -908,7 +908,7 @@ test('交接页：草稿、接手方与二次确认；确认以用户身份发�
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
-  for (const part of ['hoTitle', 'hoDraftBy', 'hoTargetNew', 'hoQueue', 'hoConfirmAgain', 'hoHideSnapshot', 'hoHistory', 'hoHint', 'chars', 'modelLabel', 'modelLoading']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['hoTitle', 'hoByModel', 'hoSettings', 'hoTargetNew', 'hoQueue', 'hoConfirmAgain', 'hoSnapshotAttach', 'hoHideSnapshot', 'hoHistory', 'hoHint', 'chars', 'modelLabel', 'modelLoading']) assert.ok(text.includes(part), '缺少 ' + part)
   const box = findNode(tree, (node) => node.type === 'textarea')
   assert.equal(box.props.value, '下一步：合并 #1', '草稿正文填进输入框')
   await findButton(tree, (label) => label.includes('hoConfirmAgain')).props.onClick()
