@@ -604,6 +604,15 @@ test('任务详情：待审核任务给通过 / 打回入口，以用户身份�
   ])
 })
 
+test('任务详情：projectStatus 开关打开时显示 Projects 状态读取行', async () => {
+  const sync = { available: true, repo: 'o/r', switches: { projectStatus: true }, links: [] }
+  const React = fakeReact(['T1'])
+  const { mod } = await load('client.sidebar.js', React)
+  const { kit } = taskKit()
+  const text = textOf(React.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), sync, busy: false, sessionId: 'session-self', act: async () => ({}) }))
+  assert.ok(text.includes('projectStatusTitle') && text.includes('projectStatusLoading'))
+})
+
 test('任务看板：可接任务进详情后复制认领指令；拉起认领会话要确认，成功直接打开新会话', async () => {
   const { kit, opened, copied } = taskKit()
   const React = fakeReact(['T1'])

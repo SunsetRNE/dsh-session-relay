@@ -876,6 +876,24 @@ test('面板仓库动作：repo-switch / repo-refresh 走用户动作，返回�
   assert.deepEqual(calls[1], ['refresh', { sessionId: undefined, workspaceId: 'ws-a' }])
 })
 
+test('项目状态只读接口：按会话与任务读，缺少会话报错', async () => {
+  const seen = []
+  const relay = {
+    async ready() {},
+    async projectStatusFor(args) { seen.push(args); return { available: true, state: 'ok', status: 'In Progress', project: '路线图' } }
+  }
+  const handler = createHandler({ requestRejection: () => undefined }, relay)
+  const res = fakeRes()
+  await handler(Object.assign(fakeReq('GET'), { url: '/api/dsha-session-relay?view=project-status&session=s1&task=t3' }), res)
+  assert.equal(res.status, 200)
+  assert.equal(res.body.ok, true)
+  assert.deepEqual(res.body.projectStatus, { available: true, state: 'ok', status: 'In Progress', project: '路线图' })
+  assert.deepEqual(seen[0], { sessionId: 's1', taskId: 't3' })
+  const miss = fakeRes()
+  await handler(Object.assign(fakeReq('GET'), { url: '/api/dsha-session-relay?view=project-status&task=t3' }), miss)
+  assert.equal(miss.status >= 400, true)
+})
+
 test('面板任务审批：task-approval 走用户动作，返回新看板', async () => {
   const calls = []
   const relay = {

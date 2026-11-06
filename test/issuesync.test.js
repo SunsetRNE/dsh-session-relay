@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  BACKOFF_MS, IssueSync, SYNC_FILE, classifyGhFailure, describeIssueSync, issueBody, issueTitle, shouldCloseIssue, terminalComment
+  BACKOFF_MS, IssueSync, PROJECT_STATUS_TTL_MS, SYNC_FILE, classifyGhFailure, describeIssueSync, issueBody, issueTitle, parseProjectStatus, shouldCloseIssue, terminalComment
 } from '../lib/issuesync.js'
 
 const task = (over = {}) => ({
@@ -50,6 +50,42 @@ test('文案：标题带任务号，正文带 marker，终态评论与关票条�
   assert.equal(shouldCloseIssue({ ...task(), state: 'merged', approval: 'approved', done: 'abc' }, { closeOnTerminal: false }), false)
   assert.equal(shouldCloseIssue({ ...task(), state: 'merged', approval: 'approved', done: 'abc' }, { closeOnTerminal: true }), true)
   assert.equal(shouldCloseIssue({ ...task(), state: 'abandoned' }, { closeOnTerminal: true }), true)
+})
+
+test('Projects 状态只读：读 Status、2 分钟缓存、没链接或读失败都不猜', async () => {
+  const payload = JSON.stringify({ data: { repository: { issue: { number: 7, projectItems: { nodes: [{ project: { title: '路线图' }, fieldValues: { nodes: [{ __typename: 'ProjectV2ItemFieldSingleSelectValue', name: 'In Progress', field: { name: 'Status' } }] } }] } } } } })
+  const { gh, calls } = fakeGh(async (args) => {
+    if (args[0] === 'api' && args[1] === 'graphql') return { stdout: payload }
+    throw new Error('unexpected gh ' + args.join(' '))
+  })
+  const h = await tempSync({ gh })
+  try {
+    await h.sync.enqueue('o/r', 'T1')
+    h.sync.state.repos['o/r'].links.T1 = { issue: 7, state: 'synced' }
+    const first = await h.sync.projectStatus('o/r', 'T1')
+    assert.equal(first.state, 'ok')
+    assert.equal(first.status, 'In Progress')
+    assert.equal(first.project, '路线图')
+    assert.equal(calls.length, 1)
+    const second = await h.sync.projectStatus('o/r', 'T1')
+    assert.equal(second.cached, true)
+    assert.equal(calls.length, 1, '2 分钟内用缓存')
+    h.advance(PROJECT_STATUS_TTL_MS)
+    await h.sync.projectStatus('o/r', 'T1')
+    assert.equal(calls.length, 2)
+    assert.equal((await h.sync.projectStatus('o/r', 'T9')).state, 'none', '没链接 issue 不猜')
+    assert.deepEqual(parseProjectStatus({ data: { repository: { issue: { projectItems: { nodes: [] } } } } }), { state: 'none', reason: 'issue 还没有加入 Project' })
+  } finally { await h.cleanup() }
+
+  const fail = fakeGh(async () => { throw Object.assign(new Error('boom'), { stderr: 'missing project scope' }) })
+  const h2 = await tempSync({ gh: fail.gh })
+  try {
+    await h2.sync.enqueue('o/r', 'T1')
+    h2.sync.state.repos['o/r'].links.T1 = { issue: 8, state: 'synced' }
+    const out = await h2.sync.projectStatus('o/r', 'T1')
+    assert.equal(out.state, 'unknown')
+    assert.match(out.reason, /project scope/)
+  } finally { await h2.cleanup() }
 })
 
 test('建票：先按 marker 搜，没有才 create；重复触发不再建第二张', async () => {
