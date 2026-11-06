@@ -876,6 +876,22 @@ test('面板仓库动作：repo-switch / repo-refresh 走用户动作，返回�
   assert.deepEqual(calls[1], ['refresh', { sessionId: undefined, workspaceId: 'ws-a' }])
 })
 
+test('面板任务审批：task-approval 走用户动作，返回新看板', async () => {
+  const calls = []
+  const relay = {
+    async ready() {},
+    async taskApproval(session, args) { calls.push([session, args]); return 'ok' },
+    async board() { return { entries: [] } }
+  }
+  await perform(relay, { action: 'task-approval', id: 't3', approved: true, note: '可以合', fromSession: 's1' })
+  await perform(relay, { action: 'task-approval', id: 'T3', approved: false, fromSession: 's1' })
+  assert.deepEqual(calls, [
+    ['s1', { id: 'T3', approved: true, note: '可以合' }],
+    ['s1', { id: 'T3', approved: false, note: undefined }]
+  ])
+  await assert.rejects(perform(relay, { action: 'task-approval', id: 'T3', approved: true }), /需要会话视角/)
+})
+
 test('面板同步队列动作：flush / backfill / pause / retry / detach 走用户动作，返回新看板', async () => {
   const calls = []
   let boards = 0

@@ -580,6 +580,30 @@ test('任务看板：详情显示关联 PR 的只读状态', async () => {
   assert.match(textOf(tree), /PR #7 · OPEN · 可合并 · checks 1\/1 通过/)
 })
 
+test('任务详情：待审核任务给通过 / 打回入口，以用户身份提交', async () => {
+  const posted = []
+  const tasks = tasksFixture()
+  tasks.open = [{ ...tasks.open[0], stage: 'review', approval: 'pending', stageLabel: '待审查', approvalLabel: '待审批' }]
+  // TaskBoard 4 个 useState 之后：ApprovalBox 的说明输入框
+  const React = fakeReact(['T1', {}, undefined, '', ''])
+  const { mod } = await load('client.sidebar.js', React)
+  const { kit } = taskKit()
+  const tree = React.createElement(mod.TaskBoard, {
+    kit, tasks, busy: false,
+    act: async (body) => { posted.push(body); return {} }
+  })
+  const text = textOf(tree)
+  for (const part of ['taskApprove', 'taskReject', 'taskApprovalHint']) assert.ok(text.includes(part), '缺少 ' + part)
+  const noteBox = findNode(tree, (node) => node.type === 'input' && node.props?.placeholder === 'taskApprovalNote')
+  assert.ok(noteBox !== undefined, '审批说明输入框在')
+  await findButton(tree, (label) => label === 'taskApprove').props.onClick()
+  await findButton(tree, (label) => label === 'taskReject').props.onClick()
+  assert.deepEqual(posted, [
+    { action: 'task-approval', id: 'T1', approved: true },
+    { action: 'task-approval', id: 'T1', approved: false }
+  ])
+})
+
 test('任务看板：可接任务进详情后复制认领指令；拉起认领会话要确认，成功直接打开新会话', async () => {
   const { kit, opened, copied } = taskKit()
   const React = fakeReact(['T1'])
