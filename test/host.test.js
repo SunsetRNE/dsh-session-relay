@@ -2930,3 +2930,45 @@ test('面板仓库：board 带能力探测与开关，用户动作改开关并�
     await assert.rejects(h.call('peer_task', { action: 'repo-switch', key: 'issues', enabled: true }), /must be one of|不认识的动作/)
   } finally { await h.cleanup(); await rm(baseDir, { recursive: true, force: true }) }
 })
+
+test('R1 issue 投影接线：issues 开关打开后任务变化会排队建票；模型没有同步入口', async () => {
+  const baseDir = await mkdtemp(join(tmpdir(), 'relay-issue-sync-'))
+  const ghCalls = []
+  const gh = async (args) => {
+    ghCalls.push(args.join(' '))
+    if (args[0] === 'issue' && args[1] === 'list') return { stdout: '[]' }
+    if (args[1] === 'repos/o/r/issues' && args.includes('POST')) return { stdout: JSON.stringify({ number: 7, html_url: 'https://github.com/o/r/issues/7' }) }
+    if (args[1] === 'repos/o/r/issues/7' && args.includes('PATCH')) return { stdout: '{"state":"open"}' }
+    throw new Error('unexpected gh ' + args.join(' '))
+  }
+  const repoStore = {
+    async switches() { return { issues: true, closeOnTerminal: false, labelSync: false, mapIssues: false, prLink: false, approvalGate: true, projectStatus: false } },
+    async probe() { return { probe: { source: 'ok', repo: {}, labels: [], labelsState: 'ok', subIssues: 'unknown' }, switches: {} } }
+  }
+  const h = await setup({
+    taskStoreBase: join(baseDir, 'tasks'),
+    repoStore,
+    issueSyncOptions: { gh, readTask: async ({ taskId }) => ({ id: taskId, title: '做点事', state: 'live', priority: 'P1', statusText: '进行中', holderLabel: '@t1' }) }
+  })
+  try {
+    h.workspaces.push({ id: 'ws-sync', title: 'S', path: h.dir, sessionIds: [h.caller.id] })
+    await h.run('main here')
+    execFileSync('git', ['-C', h.dir, 'init', '-q'])
+    execFileSync('git', ['-C', h.dir, 'remote', 'add', 'origin', 'https://github.com/o/r.git'])
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 状态 |\n|---|---|---|---|\n')
+    await h.call('peer_task', { action: 'new', id: 'T1', title: '做点事', detail: '用户要求' })
+    const found = await h.relay.taskBoardFor({ sessionId: h.caller.id })
+    const sync = h.relay.issueSyncFor(found.board.storeRoot)
+    await sync.flush()
+    assert.equal(sync.getLink('o/r', 'T1').issue, 7)
+    assert.equal(sync.getLink('o/r', 'T1').state, 'synced')
+    assert.ok(ghCalls.some((call) => call.includes('relay-task:T1')))
+    const status = await h.run('sync status')
+    assert.match(status.text, /GitHub 同步：o\/r/)
+    assert.match(status.text, /T1 · #7 · synced/)
+    // 模型没有同步入口
+    assert.ok(!h.tools.has('peer_sync'))
+    await assert.rejects(h.call('peer_task', { action: 'sync-dispatch' }), /must be one of|不认识的动作/)
+  } finally { await h.cleanup(); await rm(baseDir, { recursive: true, force: true }) }
+})

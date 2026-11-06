@@ -1,6 +1,6 @@
 # GitHub 地图票与 issue 多流程态接入评估
 
-状态：评估稿修订（2026-11-06，按用户本地为准/未知态方向），未提交；本轮不改代码、不建票、不安装任何插件。
+状态：评估稿修订（2026-11-06，按用户本地为准/未知态方向）。2026-11-06 晚：R1 第一块 `issues` 单向投影已落地（`lib/issuesync.js` + `/relay sync`，默认开关关、测试用 mock、未实际写 GitHub）；`labelSync` / `mapIssues` / `projectStatus` 仍待做。
 
 范围：为 relay 后续接入两类能力做决策准备——(1) GitHub 上的「地图票」（map issue + 子票 + 依赖边）；(2) issue 的多种流程态（triage / ready / doing / done 等）。本文按用户 2026-11-06 的决策修订：**relay 任务库为唯一事实源/校准点，GitHub 只做投影；因 IP 访问 GitHub 不稳，同步必须支持未知态、自动重试和主会话接管。** 本文只评估，不把 GitHub 变任务库事实源，也不恢复上游 Deck。
 

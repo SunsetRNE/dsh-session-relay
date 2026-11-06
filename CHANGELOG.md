@@ -1,5 +1,16 @@
 # Changelog
 
+## 未发布：R1 issue 投影（版本号待定）
+
+GitHub issue 单向投影（本地为准，开关默认关）。
+
+- `issues` 开关打开后，任务新建 / 认领 / 转交 / 完成 / 放弃 / 阶段或审批变化会排队投影成 GitHub issue：标题 `[relay T12] …`，正文带 `<!-- relay-task:T12 -->` marker；重复触发先按 marker 搜索，不重复建票。
+- 出站按仓库串行，状态持久在任务库的 `sync.json`；超时 / 断网 / gh 回执不明记 `unknown`（不当作成功），按 30s→1h 指数退避重试；401/403/404/422 记 `failed`。DSH 重启后从已有 `sync.json` 继续，队列不丢。
+- `closeOnTerminal` 打开时：已放弃且有放弃原因、或已合并且审批通过并写了合并结论，才关票；待审批的合并票保持 open、不评论。默认只投影、不关票；审批门与 `/relay approve` 的本地记录联动。
+- 用户命令 `/relay sync [status|flush|backfill|retry <任务号>|detach <任务号>|on|off]`：看队列、立刻刷新、回填现有任务、重试（先核对 marker）、断链接、暂停出站；模型没有同步入口。`backfill` 要求 `issues` 开关已开。
+- 默认开关仍关；本次没有实际写任何 GitHub issue（测试全用 mock）。`labelSync` / `mapIssues` / `projectStatus` 还没接。
+- 测试 291 → 301。
+
 ## 2.0.0 - 未发布
 
 右侧边栏的任务看板改成参考 Deck 的「列表 + 详情 + 动作」。
