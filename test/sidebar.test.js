@@ -453,8 +453,9 @@ test('正文 chunk：卡片主操作随状态——待答复回复、可合并�
   const button = (label) => (node) => node.type === 'button' && textOf(node.children) === label
   const posted = []
   const kit = kitFor()
-  // 父组件 13 个 useState（见 states 的注释）；extra 从第 14 个开始，之后才轮到卡片
-  const sidebarStates = (board, cardStates, quietOpen = false) => states(board, { quietOpen, extra: cardStates })
+  // 父组件 13 个 useState（见 states 的注释）；extra 从第 14 个开始。
+  // 会话页顶部的「找会话」先占 5 个（展开、关键词、结果、错误、搜索中），之后才轮到卡片
+  const sidebarStates = (board, cardStates, quietOpen = false) => states(board, { quietOpen, extra: [false, '', undefined, undefined, undefined, ...cardStates] })
   const q = sampleBoard().entries[0]
   let React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [q] }, ['reply', '先做 A', false]))
   let m = (await load('client.sidebar.js', React)).mod
@@ -828,7 +829,7 @@ test('交接页：草稿、接手方与二次确认；确认以用户身份发�
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
-  for (const part of ['hoTitle', 'hoDraftBy', 'hoTargetNew', 'hoQueue', 'hoConfirmAgain', 'hoShowSnapshot', 'hoHistory']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['hoTitle', 'hoDraftBy', 'hoTargetNew', 'hoQueue', 'hoConfirmAgain', 'hoHideSnapshot', 'hoHistory', 'hoHint', 'chars', 'modelLabel', 'modelLoading']) assert.ok(text.includes(part), '缺少 ' + part)
   const box = findNode(tree, (node) => node.type === 'textarea')
   assert.equal(box.props.value, '下一步：合并 #1', '草稿正文填进输入框')
   await findButton(tree, (label) => label.includes('hoConfirmAgain')).props.onClick()
@@ -839,6 +840,117 @@ test('交接页：草稿、接手方与二次确认；确认以用户身份发�
   const tree2 = React2.createElement(mod2.RelaySidebar, { kit, sessionId: 'session-self' })
   assert.ok(textOf(tree2).includes('sideHandoffSaveFirst'))
   assert.equal(findButton(tree2, (label) => label === 'hoConfirm').props.disabled, true)
+})
+
+test('交接页：新主会话可指定模型；说明上限与面板一致为 2000 字', async () => {
+  const posted = []
+  const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
+  const handoff = { coordinator: 'session-main1234', coordinatorFailure: null, draft: { notes: '说明', by: 'model', updatedAt: Date.now() }, snapshot: 'S', history: [] }
+  // 交接页 useState：notes、dirty、target、alias、queue、ask、snapOpen、histOpen、模型目录、模型
+  const React = fakeReact(states({ ...sampleBoard(), handoff }, { tab: 'handoff', extra: ['说明', false, 'new', '', false, true, true, false, undefined, 'default'] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const box = findNode(tree, (node) => node.type === 'textarea')
+  assert.equal(box.props.maxLength, 2000, '交接说明上限与后端 NOTES_LIMIT 一致')
+  await findButton(tree, (label) => label.includes('hoConfirmAgain')).props.onClick()
+  assert.equal(posted.at(-1).model, 'default', '新主会话模型随确认一起提交')
+})
+
+test('设置页：版本线草稿保存带 workspaceId，字数上限 1500', async () => {
+  const posted = []
+  const act = async (body) => { posted.push(body); return {} }
+  const React = fakeReact(['新版本线'])
+  const { mod } = await load('client.sidebar.js', React)
+  const board = { ...sampleBoard(), workspace: { id: 'ws1', title: 'w', path: '/p' }, line: { text: '旧版本线', setAt: 1, setBy: 'user' } }
+  const tree = React.createElement(mod.LineBox, { kit: kitFor(), board, act, busy: false })
+  const text = textOf(tree)
+  assert.ok(text.includes('lineTitle') && text.includes('lineHint') && text.includes('lineSetBy'), '版本线标题/说明/设定人')
+  const area = findNode(tree, (node) => node.type === 'textarea')
+  assert.equal(area.props.maxLength, 1500)
+  await findButton(tree, (label) => label === 'save').props.onClick()
+  assert.deepEqual(posted.at(-1), { action: 'line', text: '新版本线', workspaceId: 'ws1' })
+})
+
+test('设置页：模型角色保存为具体模型；常设授权、置顶、开发者模式、重启区块都在', async () => {
+  const posted = []
+  const act = async (body) => { posted.push(body); return {} }
+  const modelsData = {
+    supported: true,
+    catalog: { default: { provider: 'p', model: 'm' }, groups: [{ id: 'g', name: 'G', models: [{ id: 'm', name: 'M' }] }] },
+    roles: { main: { provider: 'p', model: 'm' }, worker: null },
+    labels: { main: 'p/m', worker: null, default: 'p/m' }
+  }
+  // RoleModelsBox：nonce、模型目录；两行各自的选择值
+  const React = fakeReact([0, modelsData, { provider: 'g', model: 'm' }, 'default'])
+  const mod = (await load('client.sidebar.js', React)).mod
+  const tree = React.createElement(mod.RoleModelsBox, { kit: kitFor(), board: sampleBoard(), act, busy: false, sessionId: 'session-self' })
+  const text = textOf(tree)
+  assert.ok(text.includes('modelRolesTitle') && text.includes('modelRoleMain') && text.includes('modelRoleWorker'), '两组角色模型都在')
+  await findButton(tree, (label) => label === 'save').props.onClick()
+  assert.deepEqual(posted.at(-1), { action: 'role-model', role: 'main', model: { provider: 'g', model: 'm' } })
+
+  const settingsBoard = {
+    ...sampleBoard(),
+    workspace: { id: 'ws1', title: 'w', path: '/p' },
+    delegation: { text: '旧授权', setAt: 1 }, delegationDefault: '默认授权', delegationLimit: 600,
+    autoPin: { enabled: false, available: true, owned: 0 },
+    devMode: { enabled: false, defaultHours: 2, maxHours: 24, until: null },
+    restart: { phase: 'idle', text: '空闲后会重启' }
+  }
+  const React2 = fakeReact(states(settingsBoard, { settingsOpen: true }))
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const text2 = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  for (const part of ['delegTitle', 'pinTitle', 'devTitle', 'restartTitle', 'lineTitle', 'modelRolesTitle']) assert.ok(text2.includes(part), '设置页缺少 ' + part)
+})
+
+test('找会话：按关键词问服务端，结果可直接打开，未加入的会标出来', async () => {
+  const asked = []
+  const kit = {
+    ...kitFor(),
+    request: async (method, body, params) => { asked.push({ method, body, params }); return {} }
+  }
+  const found = {
+    total: 2,
+    results: [
+      { kind: 'board', entry: { sessionId: 'session-w1aaaaaa', label: '@w1', title: '看板会话' } },
+      { kind: 'session', session: { sessionId: 'session-x1bbbbbb', title: '另一个会话' } }
+    ]
+  }
+  // SessionSearch useState：展开、关键词、结果、错误、搜索中
+  const React = fakeReact([true, 'abc', found, undefined, false])
+  const mod = (await load('client.sidebar.js', React)).mod
+  const opened = []
+  const tree = React.createElement(mod.SessionSearch, { kit, board: { workspace: { id: 'ws1' } }, sessionId: 'session-self', openSession: (id) => opened.push(id) })
+  const text = textOf(tree)
+  assert.ok(text.includes('findTitle') && text.includes('@w1') && text.includes('看板会话') && text.includes('另一个会话'), '结果行都在')
+  assert.ok(text.includes('findNotJoined'), '未加入协作的会话标出来')
+  await findButton(tree, (label) => label === 'openSession').props.onClick()
+  assert.deepEqual(opened, ['session-w1aaaaaa'])
+  // 提交表单：按 view=find 带会话视角请求
+  const form = findNode(tree, (node) => node.type === 'form')
+  form.props.onSubmit({ preventDefault() {} })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(asked.at(-1).method, 'GET')
+  assert.equal(asked.at(-1).params.view, 'find')
+  assert.equal(asked.at(-1).params.session, 'session-self')
+})
+
+test('邮箱：显示未读与全文入口；标已读 / 归档以用户身份提交', async () => {
+  const posted = []
+  const kit = { ...kitFor(), request: async (method, body) => { if (method === 'POST') posted.push(body); return {} } }
+  const data = { mailbox: { unread: 1 }, items: [{ id: 'm1', subject: '发版公告', body: '正文', kind: 'notice', at: 1, readBy: {} }] }
+  // MailBox useState：数据、错误、busy
+  const React = fakeReact([data, undefined, false])
+  const mod = (await load('client.sidebar.js', React)).mod
+  const tree = React.createElement(mod.MailBox, { kit, sessionId: 'session-self' })
+  const text = textOf(tree)
+  assert.ok(text.includes('pageMail') && text.includes('发版公告') && text.includes('正文') && text.includes('mailUnread'), '邮件正文和未读状态')
+  await findButton(tree, (label) => label === 'mailMarkRead').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(posted.at(-1), { action: 'mail-read', fromSession: 'session-self', ids: ['m1'] })
+  await findButton(tree, (label) => label === 'mailArchive').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(posted.at(-1), { action: 'mail-mark', fromSession: 'session-self', ids: ['m1'], state: 'archived' })
 })
 
 test('任务看板：GitHub 同步一行状态，可展开链接票列表', async () => {
