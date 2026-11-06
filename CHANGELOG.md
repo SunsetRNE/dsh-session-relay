@@ -1,5 +1,15 @@
 # Changelog
 
+## 未发布：成功回执不再唤醒发送方；超时改为提示强制通知
+
+修「通知成功、插件还回一条回执，发送方白跑一轮」的问题：真机上主会话被两条 `<relay-receipt>` 唤醒，只能回一句「回执收到」。
+
+- 对方取走消息只销账，不再给发送方发 `<relay-receipt>` 消息；发送方从 `peer_send` 的工具结果已经知道是送达、排队还是插队。
+- 立即送达的消息不再登记「取走时限」；只有排队 / 可能没被取走的才登记，超时才提醒。
+- 超时提醒改成「仍没被取走」，并写明下一步是**强制通知**：用 `peer_send priority:"urgent"` 重发（插进对方当前轮），或 `action=withdraw` 撤回；不要反复普通重发。
+- `peer_send` / `peer_report` 的说明、README 与回执相关测试同步更新；`peer_report question/blocked` 的回复时限语义不变。
+- 串行测试 324 全过。
+
 ## 未发布：右侧边栏视觉对齐 Deck
 
 参考 FeatherHunter/dsh-mattpocock-skills-deck 的右侧面板（列表 / 详情）重做侧栏视觉，只动前端样式与结构，不动数据和权限。

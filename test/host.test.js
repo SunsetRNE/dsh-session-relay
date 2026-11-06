@@ -2991,7 +2991,7 @@ test('平级通知回执时限：超时提醒发送方；对方回复即销账',
   try {
     const sent = await h.call('peer_send', { target: h.peer.id, message: '请确认 A', timeout: '10s' }, h.caller)
     assert.match(sent, /10 秒/)
-    assert.match(sent, /自动回执|没收到/)
+    assert.match(sent, /没被取走|强制通知/)
     assert.equal((await h.relay.deadlines.due(now + 10_000)).length, 1)
     now += 10_000
     const swept = await h.relay.sweepDeadlines()
@@ -3066,63 +3066,59 @@ test('看板快照：活跃会话带待收队列，落后时标 lagging', async 
   } finally { await h.cleanup() }
 })
 
-test('接收即自动回执：空闲目标收到后通知发送方；运行中目标取走队列后回执', async () => {
+test('收到即销账：成功取走不再给发送方发回执消息；只有一直没被取走才提醒', async () => {
   let now = 3_000_000
   const h = await setup({ deadlineNow: () => now })
   try {
     h.peer.status = 'idle'
-    const sent = await h.call('peer_send', { target: h.peer.id, message: '请确认', timeout: '10s' }, h.caller)
-    assert.match(sent, /自动回执/)
-    const receipt = h.caller.inbox.find(([, message]) => message.content?.[0]?.text?.includes('<relay-receipt>'))
-    assert.ok(receipt, '发送方收到自动回执')
-    assert.match(receipt[1].content[0].text, /已接收/)
+    await h.call('peer_send', { target: h.peer.id, message: '请确认', timeout: '10s' }, h.caller)
+    assert.ok(!h.caller.inbox.some(([, message]) => message.content?.[0]?.text?.includes('<relay-receipt>')), '成功不发回执消息')
     now += 10_000
-    assert.equal((await h.relay.sweepDeadlines()).length, 0, '回执后不再超时提醒')
+    assert.equal((await h.relay.sweepDeadlines()).length, 0, '已取走的不再提醒')
   } finally { await h.cleanup() }
 
   const h2 = await setup({ deadlineNow: () => now })
   try {
-    await h2.call('peer_send', { target: h2.peer.id, message: '排队中', timeout: '10s' }, h2.caller)
+    const sent = await h2.call('peer_send', { target: h2.peer.id, message: '排队中', timeout: '10s' }, h2.caller)
+    assert.match(sent, /不再单独发回执/)
     h2.relay.pendingFor = async () => ({ agent: h2.peer, pending: [] })
-    await h2.relay.sweepDeadlines()
-    const receipt = h2.caller.inbox.find(([, message]) => message.content?.[0]?.text?.includes('<relay-receipt>'))
-    assert.ok(receipt, '队列消失后补发回执')
-    assert.match(receipt[1].content[0].text, /排队中/)
+    const received = await h2.relay.sweepReceipts()
+    assert.equal(received.length, 1, '队列消失视为已取走')
+    assert.ok(!h2.caller.inbox.some(([, message]) => message.content?.[0]?.text?.includes('<relay-receipt>')), '补发也只销账，不发消息')
   } finally { await h2.cleanup() }
 })
 
-test('expect_reply=false：待命消息不因没回复触发超时；空闲兜底仍回执', async () => {
+test('expect_reply=false：待命消息不因没回复触发超时；取走也只销账', async () => {
   let now = 4_000_000
   const h = await setup({ deadlineNow: () => now })
   try {
-    const sent = await h.call('peer_send', { target: h.peer.id, message: '收到，保持待命', timeout: '10s', expect_reply: false }, h.caller)
-    assert.match(sent, /自动回执/)
+    await h.call('peer_send', { target: h.peer.id, message: '收到，保持待命', timeout: '10s', expect_reply: false }, h.caller)
     now += 11_000
     assert.equal((await h.relay.sweepDeadlines()).length, 0, '明确不用回复就不超时提醒')
     h.peer.status = 'idle'
     const received = await h.relay.sweepReceipts()
-    assert.equal(received.length, 1, '宿主看不到队列时，空闲目标兜底回执')
-    assert.ok(h.caller.inbox.some(([, message]) => message.content?.[0]?.text?.includes('<relay-receipt>')))
+    assert.equal(received.length, 1, '宿主看不到队列时，空闲兜底算取走')
+    assert.ok(!h.caller.inbox.some(([, message]) => message.content?.[0]?.text?.includes('<relay-receipt>')))
   } finally { await h.cleanup() }
 })
 
-test('事件回执：目标会话处理到这条消息时按 id 自动回执', async () => {
+test('事件销账：目标会话处理到这条消息时按 id 清掉时限，不发回执消息', async () => {
   const h = await setup()
   try {
-    await h.call('peer_send', { target: h.peer.id, message: '事件回执测试' }, h.caller)
-    const delivered = h.peer.inbox.find(([, message]) => Array.isArray(message?.content) && String(message.content[0]?.text ?? '').includes('事件回执测试'))
+    await h.call('peer_send', { target: h.peer.id, message: '事件销账测试', timeout: '10s' }, h.caller)
+    const delivered = h.peer.inbox.find(([, message]) => Array.isArray(message?.content) && String(message.content[0]?.text ?? '').includes('事件销账测试'))
     assert.ok(delivered !== undefined)
     const message = delivered[1]
     assert.equal(typeof message.id, 'string')
+    assert.equal((await h.relay.deadlines.all()).filter((record) => record.id === message.id).length, 1, '取走前有时限')
     h.listeners['session/event'](h.peer.session, { type: 'user/message', data: { message } })
     await new Promise((resolve) => setTimeout(resolve, 30))
-    const receipt = h.caller.inbox.find(([, item]) => item.content?.[0]?.text?.includes('<relay-receipt>'))
-    assert.ok(receipt, '目标处理消息后发送方收到回执')
-    assert.match(receipt[1].content[0].text, /事件回执测试/)
+    assert.equal((await h.relay.deadlines.all()).filter((record) => record.id === message.id).length, 0, '处理到就销账')
+    assert.ok(!h.caller.inbox.some(([, item]) => item.content?.[0]?.text?.includes('<relay-receipt>')), '不发回执消息')
   } finally { await h.cleanup() }
 })
 
-test('汇报接收回执：主会话处理到汇报批后，按批消息 id 回执工作会话', async () => {
+test('汇报收到即销账：主会话处理到汇报批后清掉时限，不发回执消息', async () => {
   let now = 5_000_000
   const h = await setup({ deadlineNow: () => now })
   try {
@@ -3134,11 +3130,9 @@ test('汇报接收回执：主会话处理到汇报批后，按批消息 id 回�
     assert.equal(typeof batch.id, 'string')
     h.listeners['session/event'](h.caller.session, { type: 'user/message', data: { message: batch } })
     await new Promise((resolve) => setTimeout(resolve, 30))
-    const receipt = h.peer.inbox.map(([, message]) => message).find((message) => String(message?.content?.[0]?.text ?? '').includes('<relay-receipt>'))
-    assert.ok(receipt, '工作会话收到主会话已接收汇报的回执')
-    assert.match(receipt.content[0].text, /已接收/)
+    assert.ok(!h.peer.inbox.some(([, message]) => String(message?.content?.[0]?.text ?? '').includes('<relay-receipt>')), '不发回执消息')
     now += 11_000
-    assert.equal((await h.relay.sweepDeadlines()).length, 0, '已回执的不再超时提醒')
+    assert.equal((await h.relay.sweepDeadlines()).length, 0, '已销账的不再超时提醒')
   } finally { await h.cleanup() }
 })
 
