@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  BACKOFF_MS, IssueSync, PROJECT_STATUS_TTL_MS, SYNC_FILE, classifyGhFailure, describeIssueSync, issueBody, issueTitle, parseProjectStatus, shouldCloseIssue, terminalComment
+  BACKOFF_MS, IssueSync, PROJECT_STATUS_TTL_MS, SYNC_FILE, classifyGhFailure, describeIssueSync, issueBody, issueTitle, matchStatusOption, parseProjectItem, parseProjectStatus, projectStageOf, shouldCloseIssue, terminalComment
 } from '../lib/issuesync.js'
 
 const task = (over = {}) => ({
@@ -86,6 +86,39 @@ test('Projects 状态只读：读 Status、2 分钟缓存、没链接或读失�
     assert.equal(out.state, 'unknown')
     assert.match(out.reason, /project scope/)
   } finally { await h2.cleanup() }
+})
+
+test('Projects 写回：按 stage 匹配 Status 选项并更新；匹配不到只报选项、不发 mutation', async () => {
+  const itemPayload = JSON.stringify({ data: { repository: { issue: { projectItems: { nodes: [{
+    id: 'ITEM1',
+    project: { id: 'P1', title: '路线图' },
+    fieldValues: { nodes: [{ __typename: 'ProjectV2ItemFieldSingleSelectValue', name: 'In Progress', field: { id: 'F1', name: 'Status', options: [{ id: 'O1', name: 'Todo' }, { id: 'O2', name: 'In Progress' }, { id: 'O3', name: 'Done' }] } }] }
+  }] } } } } })
+  const calls = []
+  const gh = async (args) => {
+    calls.push(args)
+    const query = args.find((item) => typeof item === 'string' && item.startsWith('query='))
+    if (query?.includes('mutation(')) return { stdout: '{"data":{}}' }
+    if (query !== undefined) return { stdout: itemPayload }
+    throw new Error('unexpected gh ' + args.join(' '))
+  }
+  const h = await tempSync({ gh })
+  try {
+    await h.sync.enqueue('o/r', 'T1')
+    h.sync.state.repos['o/r'].links.T1 = { issue: 7, state: 'synced' }
+    const ok = await h.sync.writeProjectStatus('o/r', { id: 'T1', stage: 'doing' })
+    assert.equal(ok.ok, true)
+    assert.equal(ok.status, 'In Progress')
+    const mutation = calls.find((args) => args.some((item) => typeof item === 'string' && item.includes('mutation(')))
+    assert.ok(mutation !== undefined, '发出了 mutation')
+    assert.ok(mutation.includes('option=O2'), '写的是匹配到的选项')
+    const noMatch = await h.sync.writeProjectStatus('o/r', { id: 'T1', stage: 'hold' })
+    assert.equal(noMatch.ok, false)
+    assert.match(noMatch.reason, /Todo、In Progress、Done/)
+  } finally { await h.cleanup() }
+  assert.equal(parseProjectItem(JSON.parse(itemPayload)).current, 'In Progress')
+  assert.equal(projectStageOf({ state: 'merged' }), 'done')
+  assert.equal(matchStatusOption('review', [{ id: 'x', name: 'In Review' }]).id, 'x')
 })
 
 test('建票：先按 marker 搜，没有才 create；重复触发不再建第二张', async () => {

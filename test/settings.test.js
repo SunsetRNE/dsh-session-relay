@@ -876,6 +876,19 @@ test('面板仓库动作：repo-switch / repo-refresh 走用户动作，返回�
   assert.deepEqual(calls[1], ['refresh', { sessionId: undefined, workspaceId: 'ws-a' }])
 })
 
+test('面板写回 Projects：project-status-write 走用户动作', async () => {
+  const calls = []
+  const relay = {
+    async ready() {},
+    async writeProjectStatus(args) { calls.push(args); return { ok: true, status: 'In Progress' } },
+    async board() { return { entries: [] } }
+  }
+  const out = await perform(relay, { action: 'project-status-write', task: 't3', fromSession: 's1' })
+  assert.deepEqual(calls[0], { sessionId: 's1', taskId: 't3' })
+  assert.deepEqual(out.result, { ok: true, status: 'In Progress' })
+  await assert.rejects(perform(relay, { action: 'project-status-write', task: 't3' }), /需要会话视角/)
+})
+
 test('项目状态只读接口：按会话与任务读，缺少会话报错', async () => {
   const seen = []
   const relay = {

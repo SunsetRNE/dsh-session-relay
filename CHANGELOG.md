@@ -1,5 +1,12 @@
 # Changelog
 
+## 未发布：Projects Status 写回（B）
+
+- 任务详情在 `projectStatus` 开关打开、且读到项目 Status 选项后出现「写回 Projects」：二次确认，只由用户点。
+- 按本地阶段（triage/ready/doing/review/done/hold/dropped）关键词匹配项目 Status 选项，写 `updateProjectV2ItemFieldValue`；匹配不到就报错并列出可用选项，不硬写。
+- 只写 Status 字段，不改其它字段、不关票、不合并 PR；无链接 issue / 无阶段 / 开关关 / 权限不足都明确报错，模型仍没有写入口。
+- 测试 331 → 333。
+
 ## 未发布：任务页宽屏主从布局
 
 - 容器 ≥720px：任务页左边列表、右边详情同时显示；点一行只换右侧详情，不再把列表挤掉。
