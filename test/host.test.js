@@ -3017,6 +3017,11 @@ test('R1 issue 投影默认接线：不注入 readTask 也能读到任务并建�
     assert.ok(ghCalls.some((call) => call.includes('relay-task:T1')))
     const onDisk = JSON.parse(await readFile(join(found.board.storeRoot, 'sync.json'), 'utf8'))
     assert.deepEqual(onDisk.repos['o/r'].queue, [], '队列处理完要落盘清空，不能留在 sync.json')
+    // 认领后投影正文要带持有者事实（之前 syncTaskSnapshot 不传 holders，票里写「0d246872：查不到」）
+    await h.call('peer_task', { action: 'claim', id: 'T1' })
+    await sync.flush()
+    assert.ok(!ghCalls.join(' ').includes('查不到'), '认领后写入 issue 的正文不能出现「查不到」')
+    assert.ok(ghCalls.join(' ').includes('：空闲') || ghCalls.join(' ').includes('：运行中'), '正文应带持有者状态')
   } finally { await h.cleanup(); await rm(baseDir, { recursive: true, force: true }) }
 })
 
