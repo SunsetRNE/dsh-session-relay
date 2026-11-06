@@ -550,17 +550,18 @@ test('任务看板：可接 / 进行中 / 已结束分组，进行中显示持�
   assert.ok(open.includes('T0') && open.includes('sideTaskDone'), '展开后列出已结束任务和结论')
 })
 
-test('任务看板：点条目进详情，打开持有会话、复制任务号和派发指令', async () => {
+test('任务看板：点条目进详情，持有会话/任务号可点、派发指令可复制', async () => {
   const { kit, opened, copied } = taskKit()
   const React = fakeReact(['T3'])
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), entries: [{ sessionId: 'session-w1aaaaaa', summary: '跑了真机，等合并' }], act: async () => ({}), busy: false, onCopied: () => {} })
   const text = textOf(tree)
-  for (const part of ['sideTaskBack', 'T3', 'tasksHolder', '@w1', 'sideTaskWorktree', 'fix/t3', 'sideTaskStatus', 'sideTaskDepends', 'sideTaskLatest', '跑了真机，等合并', 'tasksOpenHolder', 'sideTaskCopyId', 'sideTaskCopyDispatch']) assert.ok(text.includes(part), '详情缺少 ' + part)
+  for (const part of ['sideTaskBack', 'T3', 'tasksHolder', '@w1', 'sideTaskWorktree', 'fix/t3', 'sideTaskStatus', 'sideTaskDepends', 'sideTaskLatest', '跑了真机，等合并', 'sideTaskCopyDispatch']) assert.ok(text.includes(part), '详情缺少 ' + part)
+  assert.ok(!text.includes('tasksOpenHolder') && !text.includes('sideTaskCopyId'), '打开会话/复制任务号已并进持有者行和任务号胶囊')
   assert.ok(JSON.stringify(tree).includes('dshaSv_split'), '宽屏主从布局：列表与详情同时渲染')
-  await findButton(tree, (label) => label === 'tasksOpenHolder').props.onClick()
+  await findButton(tree, (label) => label.includes('tasksHolder')).props.onClick()
   assert.deepEqual(opened, ['session-w1aaaaaa'])
-  await findButton(tree, (label) => label === 'sideTaskCopyId').props.onClick()
+  await findButton(tree, (label) => label === 'T3').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(copied, ['T3'])
   await findButton(tree, (label) => label === 'sideTaskCopyDispatch').props.onClick()
@@ -835,12 +836,21 @@ test('交接页：草稿、接手方与二次确认；确认以用户身份发�
   assert.equal(box.props.value, '下一步：合并 #1', '草稿正文填进输入框')
   await findButton(tree, (label) => label.includes('hoConfirmAgain')).props.onClick()
   assert.deepEqual(posted.at(-1), { action: 'handoff-confirm', to: 'new', alias: 'build281', mode: 'followup', fromSession: 'session-self' })
-  // 草稿有未保存改动时不给确认，提示先保存
-  const React2 = fakeReact(states({ ...sampleBoard(), handoff }, { tab: 'handoff', extra: ['改过的说明', true, 'new', '', false, false] }))
+  // 有未保存改动时确认仍然可用：确认会先把说明存进草稿（与协作面板一致）
+  const React2 = fakeReact(states({ ...sampleBoard(), handoff }, { tab: 'handoff', extra: ['改过的说明', true, 'new', '', false, true] }))
   const mod2 = (await load('client.sidebar.js', React2)).mod
   const tree2 = React2.createElement(mod2.RelaySidebar, { kit, sessionId: 'session-self' })
-  assert.ok(textOf(tree2).includes('sideHandoffSaveFirst'))
-  assert.equal(findButton(tree2, (label) => label === 'hoConfirm').props.disabled, true)
+  assert.ok(!textOf(tree2).includes('sideHandoffSaveFirst'), '不再要求先保存草稿')
+  await findButton(tree2, (label) => label.includes('hoConfirmAgain')).props.onClick()
+  assert.equal(posted.at(-1).notes, '改过的说明', '未保存的说明随确认一起保存')
+  // 没有草稿、也没在写：编辑器收起，只给起草入口
+  const noDraft = { ...handoff, draft: null }
+  const React3 = fakeReact(states({ ...sampleBoard(), handoff: noDraft }, { tab: 'handoff' }))
+  const mod3 = (await load('client.sidebar.js', React3)).mod
+  const tree3 = React3.createElement(mod3.RelaySidebar, { kit, sessionId: 'session-self' })
+  const text3 = textOf(tree3)
+  assert.ok(!findNode(tree3, (node) => node.type === 'textarea'), '没有草稿时不铺空编辑器')
+  for (const part of ['hoAsk', 'hoAuto', 'hoWrite']) assert.ok(text3.includes(part), '缺少起草入口 ' + part)
 })
 
 test('交接页：新主会话可指定模型；说明上限与面板一致为 2000 字', async () => {
