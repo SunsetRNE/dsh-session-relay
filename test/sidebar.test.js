@@ -592,7 +592,7 @@ test('任务详情：待审核任务给通过 / 打回入口，以用户身份�
   const tasks = tasksFixture()
   tasks.open = [{ ...tasks.open[0], stage: 'review', approval: 'pending', stageLabel: '待审查', approvalLabel: '待审批' }]
   // TaskBoard 4 个 useState 之后：ApprovalBox 的说明输入框
-  const React = fakeReact(['T1', {}, undefined, '', ''])
+  const React = fakeReact(['T1', {}, undefined, '', undefined, ''])
   const { mod } = await load('client.sidebar.js', React)
   const { kit } = taskKit()
   const tree = React.createElement(mod.TaskBoard, {
@@ -1041,7 +1041,7 @@ test('任务看板：GitHub 同步一行状态，可展开链接票列表', asyn
   assert.match(collapsedText, /syncUnknown/)
   assert.ok(!collapsedText.includes('#7'), '默认收起不展开列表')
 
-  const expanded = fakeReact([undefined, {}, undefined, '', true])
+  const expanded = fakeReact([undefined, {}, undefined, '', undefined, true])
   const mod2 = (await load('client.sidebar.js', expanded)).mod
   const expandedText = textOf(expanded.createElement(mod2.TaskBoard, { kit, tasks: tasksFixture(), sync, act: async () => ({}), busy: false }))
   assert.match(expandedText, /syncStateSynced/)
@@ -1063,7 +1063,7 @@ test('任务看板：同步队列动作按钮（刷新/回填/暂停/重试/解�
   }
   const { kit } = taskKit()
   // TaskBoard 4 个 useState 之后：SyncStatus 的展开态、解除确认态
-  const React = fakeReact([undefined, {}, undefined, '', true, 'T2'])
+  const React = fakeReact([undefined, {}, undefined, '', undefined, true, 'T2'])
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), sync, act, busy: false })
   await findButton(tree, (label) => label === 'syncFlush').props.onClick()
