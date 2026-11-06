@@ -23,6 +23,7 @@ test('解析发送与模式', () => {
   assert.deepEqual(parseRelayCommand('release 先跑 lint'), { kind: 'send', target: 'release', mode: 'followup', text: '先跑 lint', timeoutMs: 180_000 })
   assert.deepEqual(parseRelayCommand('@x --steer 停一下'), { kind: 'send', target: '@x', mode: 'steer', text: '停一下', timeoutMs: 180_000 })
   assert.deepEqual(parseRelayCommand('@x --timeout 90s 停一下'), { kind: 'send', target: '@x', mode: 'followup', text: '停一下', timeoutMs: 90_000 })
+  assert.deepEqual(parseRelayCommand('@x --no-reply 待命'), { kind: 'send', target: '@x', mode: 'followup', text: '待命', timeoutMs: 180_000, expectReply: false })
   assert.equal(parseRelayCommand('@x --timeout nope 停一下').kind, 'invalid')
   assert.equal(parseRelayCommand('09cef708 --queue 稍后看').mode, 'queue')
   assert.equal(parseRelayCommand('x --steer --queue a').kind, 'invalid')

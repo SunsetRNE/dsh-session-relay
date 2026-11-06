@@ -3089,3 +3089,18 @@ test('接收即自动回执：空闲目标收到后通知发送方；运行中�
     assert.match(receipt[1].content[0].text, /排队中/)
   } finally { await h2.cleanup() }
 })
+
+test('expect_reply=false：待命消息不因没回复触发超时；空闲兜底仍回执', async () => {
+  let now = 4_000_000
+  const h = await setup({ deadlineNow: () => now })
+  try {
+    const sent = await h.call('peer_send', { target: h.peer.id, message: '收到，保持待命', timeout: '10s', expect_reply: false }, h.caller)
+    assert.match(sent, /自动回执/)
+    now += 11_000
+    assert.equal((await h.relay.sweepDeadlines()).length, 0, '明确不用回复就不超时提醒')
+    h.peer.status = 'idle'
+    const received = await h.relay.sweepReceipts()
+    assert.equal(received.length, 1, '宿主看不到队列时，空闲目标兜底回执')
+    assert.ok(h.caller.inbox.some(([, message]) => message.content?.[0]?.text?.includes('<relay-receipt>')))
+  } finally { await h.cleanup() }
+})
