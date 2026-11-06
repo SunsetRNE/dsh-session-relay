@@ -1994,6 +1994,18 @@ test('任务库：超过 taskStoreMaxActive 时先把最老的终态任务归档
   } finally { await h.cleanup() }
 })
 
+test('tasksPanel：面板任务状态返回结构化分组，不含 <task-status> 原始文本', async () => {
+  const h = await setup()
+  try {
+    await taskFixture(h.dir)
+    const panel = await h.relay.tasksPanel(h.caller.id)
+    assert.ok(panel.total > 0)
+    assert.ok(Array.isArray(panel.groups) && panel.groups.length > 0)
+    assert.ok(panel.groups.every((group) => typeof group.label === 'string' && Array.isArray(group.items) && group.items.length > 0))
+    assert.ok(!JSON.stringify(panel).includes('<task-status'))
+  } finally { await h.cleanup() }
+})
+
 test('任务树：split 父子/串行依赖、dispatch dry_run、子任务完成后父任务自动完成', async () => {
   const h = await setup()
   try {
