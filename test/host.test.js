@@ -2755,3 +2755,31 @@ test('reload：换新的 GitHub 身份实例，旧方法不会残留（tier/refr
     assert.equal(child.killed, true)
   } finally { await h.cleanup() }
 })
+
+test('任务阶段与审批：认领自动 doing，update stage 只给主会话，审批只走用户命令', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-stage', title: 'S', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 状态 |\n|---|---|---|---|\n| T1 | P1 | 做点事 | 待认领 |\n')
+    await h.call('peer_task', { action: 'claim', id: 'T1' })
+    const found = await h.relay.taskBoardFor({ sessionId: h.caller.id })
+    const state = await h.relay.ensureTaskState(found.board.storeRoot)
+    assert.equal(state.get('T1').stage, 'doing', '认领自动置 doing')
+    await h.call('peer_task', { action: 'update', id: 'T1', stage: 'review' })
+    assert.equal(state.get('T1').stage, 'review')
+    assert.equal(state.get('T1').approval, 'pending', '进 review 自动 pending')
+    await assert.rejects(h.call('peer_task', { action: 'update', id: 'T1', stage: 'hold' }, h.peer), /只给用户或本工作区主会话/)
+    const approved = await h.run('approve T1 看过提交了')
+    assert.match(approved.text, /已记录 T1 的审批：通过/)
+    assert.equal(state.get('T1').approval, 'approved')
+    assert.equal(state.get('T1').approvalNote, '看过提交了')
+    await h.run('reject T1 还要改')
+    assert.equal(state.get('T1').stage, 'doing')
+    assert.equal(state.get('T1').approval, 'rejected')
+    const detail = await h.call('peer_tasks', { id: 'T1' })
+    assert.match(detail, /阶段：进行中/)
+    assert.match(detail, /审批：已打回/)
+  } finally { await h.cleanup() }
+})

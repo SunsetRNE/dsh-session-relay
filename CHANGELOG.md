@@ -15,6 +15,7 @@
 - 登录后核对实际 scope：按 `repo`/`admin:*` 的隐含闭包展开后再比，GitHub 归一化掉的低级 scope 不再误报「缺权限」；真缺的仍会列出并提示「退出后重新登录」。
 - 当前档位已完整授予时，按钮变成不可点的「✓ 已补足『档位』」，档位胶囊带 ✓；未补足才显示「补足到…」。每档 scope 清单由服务端带给前端。
 - 修 `/relay reload` 把旧 `GitHubIdentity` 对象整个接管的问题（会导致新的 tier/refresh/resetLogin 全不生效）；reload 只继承已探测身份，旧登录流程取消。
+- R0 任务本地阶段：新增 `stage`（triage/ready/doing/review/hold/dropped）与 `approval`（pending/approved/rejected）。认领自动置 doing；其它阶段只由用户或本工作区主会话改（`peer_task action=update stage=…` / `/relay task update T1 --stage review`）；审批只能由用户命令 `/relay approve|reject <任务号> [说明]` 记录，模型没有审批工具；`peer_tasks id=` 与看板任务区显示阶段/审批。
 - R0 远端接入第一块：`/relay repo` 只读探测 origin 仓库能力（issues/projects/合并方式/分支保护/labels/sub-issues），结果缓存 10 分钟；仓库开关按 `owner/repo` 存、只由用户 `/relay repo on|off <开关>` 改，模型没有写入口，依赖不满足时拒绝开启并说明原因。当前只存本地，不写 GitHub。
 - 测试 248 → 261。
 
