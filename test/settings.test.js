@@ -221,6 +221,30 @@ test('面板概览：给出快速交接入口（主会话先整理快照再交�
   assert.match(source, /handoff-auto['"][\s\S]{0,160}handoff-confirm/)
 })
 
+test('面板概览：版本线用胶囊摘要 + 两行预览，全文按需展开', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => `${key}`
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const line = 'Version line：基线 origin/main=bb5bcee（v1.11.6）；60 个检查点；HEAD 7902dfe；串行测试 346 全过；未推送/未打 tag/未发 Release。后面是很长很长的说明。'.repeat(4)
+  const board = {
+    scope: 'workspace', workspace: null, hiddenByScope: 0, entries: [], others: [], othersTotal: 0,
+    coordinator: { sessionId: 'session-a', label: '@a', exists: true, state: 'idle', model: 'm' },
+    line: { text: line }, restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a'
+  }
+  const original = React.useState
+  let calls = 0
+  React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+  const text = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'overview' }))
+  React.useState = original
+  for (const part of ['lineTitle', 'lineMainChip', 'lineHeadChip', 'lineCheckpoints', 'lineTests', 'lineUnreleased', 'lineExpand']) {
+    assert.match(text, new RegExp(part), '缺少 ' + part)
+  }
+  assert.match(text, /bb5bcee/)
+  assert.match(text, /7902dfe/)
+  assert.doesNotMatch(text, /后面是很长很长的说明。\n?后面/, '预览截断，不铺满整段')
+})
+
 test('面板看板：合并队列按队列号列出待合并会话与已分配构建号', async () => {
   const { React } = fakeReact()
   const mod = await loadClient(React)
