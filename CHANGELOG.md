@@ -10,8 +10,9 @@ GitHub issue 单向投影（本地为准，开关默认关）。
 - 用户命令 `/relay sync [status|flush|backfill|retry <任务号>|detach <任务号>|on|off]`：看队列、立刻刷新、回填现有任务、重试（先核对 marker）、断链接、暂停出站；模型没有同步入口。`backfill` 要求 `issues` 开关已开。
 - `labelSync` 打开后维护 issue 上的 `relay:managed` / `relay:open|in-progress|review|merged|abandoned` / `relay:stage:*` 标签：缺失的标签自动创建（24 小时缓存），过期的 relay:* 标签移除，非 relay 标签不动。
 - `mapIssues` 打开后：有子任务的父任务标 `wayfinder:map`，挂在父任务下的子任务标 `wayfinder:task`；父票正文写子任务 tasklist，子票正文写父任务与依赖（依赖只写在正文，不假装建原生 blocked_by）。sub-issues 不支持/未知时开关仍可开，面板和 `/relay repo` 标注「降级为正文 tasklist」。
-- 默认开关仍关；本次没有实际写任何 GitHub issue/标签（测试全用 mock）。`projectStatus` 还没接。
-- 测试 291 → 305。
+- 只读同步状态进界面：`relay.board()` 快照带 `sync` 摘要（仓库、暂停、队列、开关、每条链接票），复用现有看板轮询、不新增 gh 轮询；右侧边栏任务区一行「GitHub 同步 · 仓库 · 队列/未启用 · unknown/失败」，可展开链接票列表；协作面板「交接与核验 → GitHub 仓库」下显示只读队列（任务号、issue 链接、状态、错误）。动作按钮和 `projectStatus` 还没接。
+- 默认开关仍关；本次没有实际写任何 GitHub issue/标签（测试全用 mock）。
+- 测试 291 → 307。
 
 ## 2.0.0 - 未发布
 

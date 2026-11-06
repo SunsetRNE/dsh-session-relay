@@ -722,3 +722,31 @@ test('GitHub 登录卡：档位已补足时显示「已补足」状态，档位�
   const status = findNode(tree, (node) => node.props?.['aria-disabled'] === true && textOf(node).includes('ghTierCovered'))
   assert.ok(status !== undefined, '状态是不可点的一行')
 })
+
+test('任务看板：GitHub 同步一行状态，可展开链接票列表', async () => {
+  const sync = {
+    available: true, repo: 'o/r', paused: false, queue: 2, switches: { issues: true },
+    links: [
+      { id: 'T1', issue: 7, url: 'https://github.com/o/r/issues/7', state: 'synced' },
+      { id: 'T2', issue: null, url: null, state: 'unknown', lastError: 'dial tcp: i/o timeout' }
+    ]
+  }
+  const { kit } = taskKit()
+  const collapsed = fakeReact([])
+  const mod = (await load('client.sidebar.js', collapsed)).mod
+  const collapsedText = textOf(collapsed.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), sync, act: async () => ({}), busy: false }))
+  assert.match(collapsedText, /syncTitle/)
+  assert.match(collapsedText, /o\/r/)
+  assert.match(collapsedText, /syncQueue/)
+  assert.match(collapsedText, /syncUnknown/)
+  assert.ok(!collapsedText.includes('#7'), '默认收起不展开列表')
+
+  const expanded = fakeReact([undefined, {}, undefined, '', true])
+  const mod2 = (await load('client.sidebar.js', expanded)).mod
+  const expandedText = textOf(expanded.createElement(mod2.TaskBoard, { kit, tasks: tasksFixture(), sync, act: async () => ({}), busy: false }))
+  assert.match(expandedText, /syncStateSynced/)
+  assert.match(expandedText, /T1/)
+  assert.match(expandedText, /#7/)
+  assert.match(expandedText, /syncStateUnknown/)
+  assert.match(expandedText, /T2/)
+})

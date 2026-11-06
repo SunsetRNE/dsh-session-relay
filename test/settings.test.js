@@ -910,3 +910,35 @@ test('面板 GitHub 仓库：显示能力探测与开关，不可用开关带原
   assert.match(missing, /repoNoRepo/)
   assert.match(missing, /这个目录没有 origin/)
 })
+
+test('协作面板 GitHub 仓库：同步队列只读展示', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => key
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const board = {
+    scope: 'workspace', workspace: { id: 'ws-a', title: 'A', path: '/a' }, hiddenByScope: 0, coordinator: null, line: null,
+    others: [], othersTotal: 0, entries: [], restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a',
+    repo: {
+      available: true, repo: 'o/r', source: 'ok', probedAt: 1,
+      repoInfo: { hasIssues: true, hasProjects: true, merge: { merge: true } }, protection: { state: 'none' }, labels: 0, labelsState: 'ok', subIssues: 'unknown',
+      switches: [{ key: 'issues', label: 'issue 投影', enabled: true, available: true }]
+    },
+    sync: {
+      available: true, repo: 'o/r', paused: false, queue: 1, switches: { issues: true },
+      links: [{ id: 'T1', issue: 7, url: 'https://github.com/o/r/issues/7', state: 'synced' }, { id: 'T2', issue: null, url: null, state: 'unknown', lastError: 'timeout' }]
+    }
+  }
+  const original = React.useState
+  let calls = 0
+  React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+  globalThis.window = { localStorage: { getItem: (key) => (key === 'dshaSr.fold.v1' ? JSON.stringify({ repo: true }) : null), setItem() {}, removeItem() {} } }
+  let text
+  try { text = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' })) } finally { React.useState = original; delete globalThis.window }
+  assert.match(text, /syncTitle/)
+  assert.match(text, /T1/)
+  assert.match(text, /#7/)
+  assert.match(text, /syncStateSynced/)
+  assert.match(text, /T2/)
+  assert.match(text, /syncStateUnknown/)
+})

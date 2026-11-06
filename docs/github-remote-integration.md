@@ -166,7 +166,7 @@ task.pr = { number, url, headSha, base, state, draft, reviewDecision, checks: { 
 
 - **R0（放进 2.0.0，本地，不写远端）**：仓库能力探测（只读）、开关面板（只存本地）、任务 `stage`/`pr` 字段、审批记录、PR/review/checks 只读展示、地图降级探测。
 - **R1（2.0.0 之后 S1）**：issue/label/评论单向投影 + unknown/重试 + 关票。
-  - 2.0.0 未发布前已提前落地：`issues` 投影（建票/评论/关票）、`labelSync`（relay:* 标签，缺失自动创建）、`mapIssues`（地图父票/子票，sub-issues 不可用时正文 tasklist 降级）；`lib/issuesync.js` + `/relay sync`，默认开关关、测试用 mock，未实际写 GitHub；`projectStatus` 待做。
+  - 2.0.0 未发布前已提前落地：`issues` 投影（建票/评论/关票）、`labelSync`（relay:* 标签，缺失自动创建）、`mapIssues`（地图父票/子票，sub-issues 不可用时正文 tasklist 降级）；`lib/issuesync.js` + `/relay sync`，默认开关关、测试用 mock，未实际写 GitHub。右侧边栏与协作面板已有只读同步队列（快照 `sync`，不新增 gh 轮询）；动作按钮和 `projectStatus` 待做。
 - **R2**：PR review/merge 事件、地图 sub-issues/blocked_by 投影（能力支持时）。
 - **R3（可选）**：Projects Status、组织级设置（需 org owner，当前 DSH-APP 是 member，不做）。
 
