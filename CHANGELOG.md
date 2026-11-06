@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.11.0 - 2026-11-06
+
+`peer_list` 收口：工具 15 → 14，跨工作区列表进开发者模式。
+
+- `peer_list` 默认 `scope=workspace`：只列本工作区（含没加入协作的会话），不再默认把其它工作区的会话标题 / 目录暴露给模型。
+- `scope=host` 仍可看本机全部会话，但需要开发者模式（只读、写 `devmode-audit.jsonl`）；模型不能自己开。
+- 主会话可用 `peer_list declarations=true` 对照工作树声明；原 `peer_workspace` 删除，能力并入 `peer_list`（工具 15 → 14）。
+- 用户侧 `/relay list`、`/relay ws`、`/relay decl` 不变；`peer_inspect` 的单会话摘要与 dev 模式门槛不变。
+- 上下文、handoff、dev 提示与 README 同步；测试 243 → 244。
+
+需要 `/relay reload` 后生效。
+
+**要求 DSH 0.2.2-rc.1 及以上**。安装：插件管理器 → 从 Release 安装，或直接下载下面的 `dsh-session-relay-1.11.0.tgz`。
+
 ## 1.10.0 - 2026-11-06
 
 任务库清理：导入/导出命令、活动库上限与归档冷存。

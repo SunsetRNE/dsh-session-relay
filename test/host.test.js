@@ -110,7 +110,7 @@ test('注册了 /relay 与四个 peer 工具', async () => {
   try {
     assert.ok(h.commands.has('relay'))
     assert.equal(h.routes[0].path, '/api/dsha-session-relay')
-    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_ask_user', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_line', 'peer_list', 'peer_mail', 'peer_report', 'peer_send', 'peer_spawn', 'peer_task', 'peer_tasks', 'peer_watch', 'peer_workspace'])
+    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_ask_user', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_line', 'peer_list', 'peer_mail', 'peer_report', 'peer_send', 'peer_spawn', 'peer_task', 'peer_tasks', 'peer_watch'])
   } finally { await h.cleanup() }
 })
 
@@ -901,7 +901,7 @@ test('按工作区分组：每个工作区各有主会话和版本线；未加�
     // 主会话上下文：本工作区计数 + 检索提示
     const mainContext = h.contextFor(h.caller)
     assert.match(mainContext, /Workspace A.*1 sidebar sessions, 1 not joined/)
-    assert.match(mainContext, /peer_workspace/)
+    assert.match(mainContext, /peer_list/)
     assert.doesNotMatch(mainContext, /build900/)
     // main 指本工作区的主会话
     assert.match((await h.run('main', loner)).text, /工作区 B · 主会话：eeeeeeee/)
@@ -942,16 +942,41 @@ test('登记工作区之前设的主会话 / 版本线，工作区出现后自�
   } finally { await h.cleanup() }
 })
 
-test('peer_workspace：只给主会话并列出工作区全部会话；单会话摘要走 peer_inspect digest', async () => {
+test('peer_list：默认只列本工作区；scope=host 需开发者模式并写审计；声明核对只给主会话', async () => {
   const h = await setup()
   try {
     h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
-    await assert.rejects(h.call('peer_workspace', {}, h.peer), /只给本工作区的主会话/)
+    h.workspaces.push({ id: 'ws-b', title: 'B', path: '/z', sessionIds: [] })
+    const outsider = h.makeAgent('99999999-0000-0000-0000-000000000009', { cwd: '/z' })
+    h.agents.set(outsider.id, outsider)
+    h.workspaces[1].sessionIds.push(outsider.id)
     await h.run('main here')
-    const list = await h.call('peer_workspace', {})
-    assert.match(list, /侧栏登记 2 个会话/)
-    assert.match(list, /bbbbbbbb · 运行中 · 未加入/)
-    assert.match(list, /aaaaaaaa.*← 当前/)
+    // 默认工作区：只有本工作区的会话，看不到别的工作区
+    const scoped = await h.call('peer_list', {})
+    assert.match(scoped, /工作区 A/)
+    assert.match(scoped, /bbbbbbbb.*运行中/)
+    assert.match(scoped, /aaaaaaaa.*← 当前/)
+    assert.doesNotMatch(scoped, /99999999/)
+    // 全机列表要开发者模式
+    await assert.rejects(h.call('peer_list', { scope: 'host' }), /开发者模式/)
+    await h.relay.devMode.enable(1)
+    const host = await h.call('peer_list', { scope: 'host' })
+    assert.match(host, /99999999/)
+    await h.relay.devMode.chain
+    const audit = await readFile(join(h.dir, 'devmode-audit.jsonl'), 'utf8').catch(() => '')
+    assert.match(audit, /"event":"list"/)
+    // 声明核对：只给本工作区主会话
+    await assert.rejects(h.call('peer_list', { declarations: true }, h.peer), /只给本工作区的主会话/)
+    assert.match(await h.call('peer_list', { declarations: true }), /工作树声明/)
+    // 用户命令 /relay ws 仍然可用
+    assert.match((await h.run('ws')).text, /侧栏登记 2 个会话/)
+  } finally { await h.cleanup() }
+})
+
+test('peer_inspect digest：只读最近几轮，读别的工作区要开发者模式', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
     const text = (t) => [{ type: 'text', text: t }]
     h.services.sessionQuery = {
       readSurface: async (id) => {
@@ -975,8 +1000,13 @@ test('peer_workspace：只给主会话并列出工作区全部会话；单会话
     const outsider = h.makeAgent('99999999-0000-0000-0000-000000000009', { cwd: '/z' })
     h.agents.set(outsider.id, outsider)
     await assert.rejects(h.call('peer_inspect', { session: outsider.id, view: 'digest' }), /不在本工作区/)
-    // 用户命令同样可用
-    assert.match((await h.run('ws')).text, /侧栏登记 2 个会话/)
+    // 开发者模式可读别的工作区并审计
+    await h.relay.devMode.enable(1)
+    h.services.sessionQuery.readSurface = async () => ({ events: [] })
+    assert.match(await h.call('peer_inspect', { session: outsider.id, view: 'digest' }), /另一个工作区/)
+    await h.relay.devMode.chain
+    const audit = await readFile(join(h.dir, 'devmode-audit.jsonl'), 'utf8').catch(() => '')
+    assert.match(audit, /"event":"read"/)
   } finally { await h.cleanup() }
 })
 
@@ -1117,7 +1147,7 @@ test('工作树声明：主会话上下文摘要、/relay decl、worker 提醒�
     assert.equal(decl.kind, 'success')
     assert.match(decl.text, /看板与声明不一致】1/)
     assert.match(decl.text, /可合并待排号.*】1\n- \.agents\/worktrees\/fix\/old/)
-    assert.match(await h.call('peer_workspace', { declarations: true }), /工作树声明/)
+    assert.match(await h.call('peer_list', { declarations: true }), /工作树声明/)
     // 上下文（同步，读缓存）
     const mainCtx = h.contextFor(h.caller)
     assert.match(mainCtx, /工作树声明：活跃 1 · 可合并待排号 1/)
