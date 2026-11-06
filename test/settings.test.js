@@ -876,6 +876,31 @@ test('面板仓库动作：repo-switch / repo-refresh 走用户动作，返回�
   assert.deepEqual(calls[1], ['refresh', { sessionId: undefined, workspaceId: 'ws-a' }])
 })
 
+test('面板同步队列动作：flush / backfill / pause / retry / detach 走用户动作，返回新看板', async () => {
+  const calls = []
+  let boards = 0
+  const relay = {
+    async ready() {},
+    async syncAction(session, command) { calls.push([session, command]); return 'ok' },
+    async board() { boards += 1; return { entries: [] } }
+  }
+  await perform(relay, { action: 'sync-flush', fromSession: 's1' })
+  await perform(relay, { action: 'sync-backfill', fromSession: 's1' })
+  await perform(relay, { action: 'sync-pause', paused: true, fromSession: 's1' })
+  await perform(relay, { action: 'sync-retry', id: 't3', fromSession: 's1' })
+  await perform(relay, { action: 'sync-detach', id: 'T3', fromSession: 's1' })
+  assert.deepEqual(calls, [
+    ['s1', { kind: 'sync-flush' }],
+    ['s1', { kind: 'sync-backfill' }],
+    ['s1', { kind: 'sync-pause', paused: true }],
+    ['s1', { kind: 'sync-retry', id: 'T3' }],
+    ['s1', { kind: 'sync-detach', id: 'T3' }]
+  ])
+  assert.equal(boards, 5, '每个动作后返回新看板')
+  await assert.rejects(perform(relay, { action: 'sync-retry', id: 'x', fromSession: 's1' }), /任务号无效/)
+  await assert.rejects(perform(relay, { action: 'sync-flush' }), /需要会话视角/)
+})
+
 test('面板 GitHub 仓库：显示能力探测与开关，不可用开关带原因', async () => {
   const { React } = fakeReact()
   const mod = await loadClient(React)

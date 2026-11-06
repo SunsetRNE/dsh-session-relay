@@ -836,6 +836,35 @@ test('任务看板：GitHub 同步一行状态，可展开链接票列表', asyn
   assert.match(expandedText, /T2/)
 })
 
+test('任务看板：同步队列动作按钮（刷新/回填/暂停/重试/解除）以用户身份提交', async () => {
+  const posted = []
+  const act = async (body) => { posted.push(body); return {} }
+  const sync = {
+    available: true, repo: 'o/r', paused: false, queue: 2, switches: { issues: true },
+    links: [
+      { id: 'T1', issue: 7, url: 'https://github.com/o/r/issues/7', state: 'synced' },
+      { id: 'T2', issue: null, url: null, state: 'unknown', lastError: 'dial tcp: i/o timeout' }
+    ]
+  }
+  const { kit } = taskKit()
+  // TaskBoard 4 个 useState 之后：SyncStatus 的展开态、解除确认态
+  const React = fakeReact([undefined, {}, undefined, '', true, 'T2'])
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), sync, act, busy: false })
+  await findButton(tree, (label) => label === 'syncFlush').props.onClick()
+  await findButton(tree, (label) => label === 'syncBackfill').props.onClick()
+  await findButton(tree, (label) => label === 'syncPause').props.onClick()
+  await findButton(tree, (label) => label === 'syncRetry').props.onClick()
+  await findButton(tree, (label) => label === 'syncDetachAsk').props.onClick()
+  assert.deepEqual(posted, [
+    { action: 'sync-flush' },
+    { action: 'sync-backfill' },
+    { action: 'sync-pause', paused: true },
+    { action: 'sync-retry', id: 'T2' },
+    { action: 'sync-detach', id: 'T2' }
+  ])
+})
+
 test('侧栏：先拉 light 首屏，再后台补完整快照；缺失的重字段由完整快照补上', async () => {
   const React = fakeReact()
   const effects = []
