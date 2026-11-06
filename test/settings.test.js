@@ -859,3 +859,54 @@ test('Client：模型下拉（跟随 / 全局默认 / 按服务商分组 / 推�
   assert.match(text, /modelUnsupported/)
   // 不支持时以「一行说明」为准；渲染树里可能还留着上一轮的节点，不按节点数量断言
 })
+
+test('面板仓库动作：repo-switch / repo-refresh 走用户动作，返回新看板', async () => {
+  const calls = []
+  const relay = {
+    async ready() {},
+    async setRepoSwitch(args) { calls.push(['switch', args]); return { repo: 'o/r', key: 'issues', enabled: true, changed: true } },
+    async refreshRepo(args) { calls.push(['refresh', args]); return { available: true, repo: 'o/r' } },
+    async board() { return { entries: [] } }
+  }
+  const out = await perform(relay, { action: 'repo-switch', key: 'issues', enabled: true, workspaceId: 'ws-a' })
+  assert.deepEqual(out.result, { repo: 'o/r', key: 'issues', enabled: true, changed: true })
+  assert.deepEqual(calls[0], ['switch', { sessionId: undefined, workspaceId: 'ws-a', key: 'issues', enabled: true }])
+  const refreshed = await perform(relay, { action: 'repo-refresh', workspaceId: 'ws-a' })
+  assert.deepEqual(refreshed.result.repo, { available: true, repo: 'o/r' })
+  assert.deepEqual(calls[1], ['refresh', { sessionId: undefined, workspaceId: 'ws-a' }])
+})
+
+test('面板 GitHub 仓库：显示能力探测与开关，不可用开关带原因', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => key
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const base = {
+    scope: 'workspace', workspace: { id: 'ws-a', title: 'A', path: '/a' }, hiddenByScope: 0, coordinator: null, line: null,
+    others: [], othersTotal: 0, entries: [], restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a'
+  }
+  const render = (repo) => {
+    const board = { ...base, repo }
+    const original = React.useState
+    let calls = 0
+    React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+    globalThis.window = { localStorage: { getItem: (key) => (key === 'dshaSr.fold.v1' ? JSON.stringify({ repo: true }) : null), setItem() {}, removeItem() {} } }
+    try { return textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' })) } finally { React.useState = original; delete globalThis.window }
+  }
+  const ok = render({
+    available: true, repo: 'o/r', source: 'ok', probedAt: 1_700_000_000_000,
+    repoInfo: { hasIssues: true, hasProjects: true, merge: { merge: true, squash: false, rebase: true } },
+    protection: { state: 'none', requiredReviews: 0, requiredChecks: [] }, labels: ['bug', 'help'], labelsState: 'ok', subIssues: 'unsupported',
+    switches: [
+      { key: 'issues', label: 'issue 投影', hint: '按任务建票', enabled: false, available: true },
+      { key: 'mapIssues', label: '地图票', hint: '子票', enabled: false, available: false, reason: '仓库/gh 不支持 sub-issues' }
+    ]
+  })
+  for (const part of ['repoTitle', 'o/r', 'repoProbeOk', 'repoCapIssues', 'repoCapIssues repoOn', 'repoCapMerge', 'repoRefresh', 'issue 投影', 'repoUnavailable', '仓库/gh 不支持 sub-issues']) {
+    assert.ok(ok.includes(part), '缺少 ' + part)
+  }
+  const missing = render({ available: false, reason: '这个目录没有 origin' })
+  assert.match(missing, /repoTitle/)
+  assert.match(missing, /repoNoRepo/)
+  assert.match(missing, /这个目录没有 origin/)
+})

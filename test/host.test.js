@@ -2886,3 +2886,47 @@ test('任务 PR 关联：探测失败记 unknown、保留关联，详情给出�
     assert.match(detail, /PR：PR #8 · 状态未知/)
   } finally { await h.cleanup() }
 })
+
+test('面板仓库：board 带能力探测与开关，用户动作改开关并记审计，模型没有写入口', async () => {
+  const baseDir = await mkdtemp(join(tmpdir(), 'relay-repo-panel-'))
+  const calls = []
+  const repoGh = async (args) => {
+    calls.push(args.join(' '))
+    const path = args[1]
+    if (path === 'repos/o/r') return { stdout: JSON.stringify({ has_issues: true, has_projects: true, default_branch: 'main', allow_merge_commit: true, allow_squash_merge: true, allow_rebase_merge: false, delete_branch_on_merge: false, permissions: { admin: true, push: true } }) }
+    if (path === 'repos/o/r/branches/main/protection') throw Object.assign(new Error('exit 1'), { stderr: 'Branch not protected (HTTP 404)' })
+    if (path.startsWith('repos/o/r/labels')) return { stdout: '[]' }
+    if (path === 'repos/o/r/issues?state=all&per_page=1') return { stdout: JSON.stringify([{ number: 7 }]) }
+    if (path === 'repos/o/r/issues/7/sub_issues') throw Object.assign(new Error('exit 1'), { stderr: 'Not Found (HTTP 404)' })
+    throw new Error('unexpected gh ' + path)
+  }
+  const h = await setup({ repoGh, taskStoreBase: join(baseDir, 'tasks') })
+  try {
+    h.workspaces.push({ id: 'ws-repo', title: 'R', path: h.dir, sessionIds: [h.caller.id] })
+    await h.run('main here')
+    execFileSync('git', ['-C', h.dir, 'init', '-q'])
+    execFileSync('git', ['-C', h.dir, 'remote', 'add', 'origin', 'https://github.com/o/r.git'])
+    const board = await h.relay.board(undefined, { workspaceId: 'ws-repo' })
+    assert.equal(board.repo.available, true)
+    assert.equal(board.repo.repo, 'o/r')
+    assert.equal(board.repo.source, 'ok')
+    assert.equal(board.repo.repoInfo.hasIssues, true)
+    assert.equal(board.repo.protection.state, 'none')
+    assert.equal(board.repo.switches.find((item) => item.key === 'issues').available, true)
+    assert.equal(board.repo.switches.find((item) => item.key === 'mapIssues').available, false, 'sub-issues 不支持时地图票开关不可用')
+    const done = await h.relay.setRepoSwitch({ workspaceId: 'ws-repo', key: 'issues', enabled: true })
+    assert.equal(done.changed, true)
+    const stored = await h.relay.repoStore.probe('o/r')
+    assert.equal(stored.switches.issues, true)
+    const audit = await readFile(join(baseDir, 'tasks', 'repos', 'switch-audit.jsonl'), 'utf8')
+    assert.match(audit, /"repo":"o\/r","key":"issues","from":false,"to":true,"by":"user"/)
+    await assert.rejects(h.relay.setRepoSwitch({ workspaceId: 'ws-repo', key: 'mapIssues', enabled: true }), /不支持 sub-issues/)
+    // 强制重新探测会再读一次 gh
+    const before = calls.length
+    const refreshed = await h.relay.refreshRepo({ workspaceId: 'ws-repo' })
+    assert.equal(refreshed.source, 'ok')
+    assert.ok(calls.length > before, 'force 绕过缓存')
+    // 模型工具不接受仓库开关动作
+    await assert.rejects(h.call('peer_task', { action: 'repo-switch', key: 'issues', enabled: true }), /must be one of|不认识的动作/)
+  } finally { await h.cleanup(); await rm(baseDir, { recursive: true, force: true }) }
+})

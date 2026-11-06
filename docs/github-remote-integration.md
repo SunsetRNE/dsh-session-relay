@@ -38,7 +38,7 @@ relay 现有缺口：任务没有 `stage`（只有推导 state）、没有 `pr` 
 每个工作区 origin 解析出 `owner/repo` 后，探测结果缓存在插件数据目录：
 
 ```
-repos/<工作区>/<owner>__<repo>.json
+repos/<owner>__<repo>.json
 {
   "probedAt": 0,
   "repo": { "hasIssues": true, "hasProjects": true, "defaultBranch": "main",
@@ -55,20 +55,25 @@ repos/<工作区>/<owner>__<repo>.json
 
 ## 3. 仓库开关（人开）
 
-存插件数据目录，按工作区 + 仓库：
+存插件数据目录，按仓库（`owner/repo`；同仓库多工作区共享）：
 
 ```
-repos/<工作区>/switches.json
+repos/<owner>__<repo>.json
 {
   "version": 1,
-  "owner/repo": {
+  "repo": "owner/repo",
+  "probedAt": 0,
+  "probe": { ... },
+  "switches": {
     "issues": false, "mapIssues": false, "prLink": false,
     "approvalGate": true, "closeOnTerminal": false,
-    "labelSync": false, "projectStatus": false, "autoMerge": false,
-    "updatedAt": 0, "updatedBy": "user"
-  }
+    "labelSync": false, "projectStatus": false
+  },
+  "switchesUpdatedAt": 0, "switchesUpdatedBy": "user"
 }
 ```
+
+`autoMerge` 不提供：relay 永不自动合并。
 
 | 开关 | 默认 | 作用 | 依赖 |
 |---|---|---|---|
@@ -84,6 +89,7 @@ repos/<工作区>/switches.json
 规则：
 - 只有用户在面板里能改；模型只能读（`peer_task`/看板展示），改开关的接口不注册为模型工具。
 - 每次开关变更写一条审计（谁、何时、旧值→新值）并刷新探测。
+- 2.0.0 R0 落地：协作面板「交接与核验 → GitHub 仓库」展示探测结果与开关，只有用户能点；改动追加到插件数据目录 `repos/switch-audit.jsonl`（字段 at / repo / key / from / to / by）。
 - 依赖不满足时开关置灰并显示原因（例：「仓库没有开分支保护，PR 审核门只在 relay 本地生效」）。
 - 工作区换仓库：开关按 `owner/repo` 独立，不继承。
 
