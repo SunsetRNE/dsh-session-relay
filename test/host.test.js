@@ -3080,6 +3080,57 @@ test('平级通知回执时限：超时提醒发送方；对方回复即销账',
   } finally { await h.cleanup() }
 })
 
+test('通知到期：对方正在运行就自动插队，不再提醒发送方', async () => {
+  let now = 7_000_000
+  const h = await setup({ deadlineNow: () => now })
+  try {
+    h.peer.status = 'running'
+    await h.call('peer_send', { target: h.peer.id, message: '超时插队', timeout: '10s' }, h.caller)
+    const sent = h.peer.inbox.find(([, message]) => Array.isArray(message?.content) && String(message.content[0]?.text ?? '').includes('超时插队'))
+    assert.ok(sent !== undefined)
+    const message = sent[1]
+    let removed = false
+    const agent = {
+      status: 'running', session: h.peer.session,
+      inbox: { remove: (id) => { if (id === message.id) { removed = true; return true } return false } },
+      steer: (item) => h.peer.inbox.push(['steer', item])
+    }
+    h.relay.pendingFor = async () => ({ agent, pending: [{ id: message.id, senderId: h.caller.id, message }] })
+    now += 10_000
+    const swept = await h.relay.sweepDeadlines()
+    assert.equal(swept.length, 1)
+    assert.equal(swept[0].forced, true)
+    assert.equal(removed, true, '从原队列移出')
+    assert.ok(h.peer.inbox.some(([mode, item]) => mode === 'steer' && item === message), '原消息插进当前轮')
+    assert.ok(!h.caller.inbox.some(([, item]) => item.content?.[0]?.text?.includes('<relay-deadline>')), '不再提醒发送方')
+  } finally { await h.cleanup() }
+})
+
+test('汇报 question 到期且主会话运行中：自动插队，不再提醒工作会话', async () => {
+  let now = 8_000_000
+  const h = await setup({ deadlineNow: () => now })
+  try {
+    const batch = { id: 'batch-1', content: [{ type: 'text', text: '要决定 A/B' }], source: { kind: 'agent-message' } }
+    let removed = false
+    const agent = {
+      status: 'running', session: h.caller.session,
+      inbox: { remove: (id) => { if (id === 'batch-1') { removed = true; return true } return false } },
+      steer: (item) => h.caller.inbox.push(['steer', item])
+    }
+    h.relay.pendingFor = async () => ({ agent, pending: [{ id: 'batch-1', senderId: h.peer.id, message: batch }] })
+    await h.relay.deadlines.add({ id: 'report-1', from: h.peer.id, to: h.caller.id, at: now, deadlineAt: now + 10_000, timeoutMs: 10_000, mode: 'report', kind: 'report', preview: '要决定', deliveryId: 'batch-1' })
+    now += 10_000
+    const swept = await h.relay.sweepDeadlines()
+    assert.equal(swept.length, 1)
+    assert.equal(swept[0].forced, true)
+    assert.equal(removed, true)
+    assert.ok(h.caller.inbox.some(([mode, item]) => mode === 'steer' && item === batch))
+    assert.ok(!h.peer.inbox.some(([, item]) => item.content?.[0]?.text?.includes('<relay-deadline>')))
+    const record = await h.relay.deadlines.get('report-1')
+    assert.ok(record === undefined || record.forcedAt > 0)
+  } finally { await h.cleanup() }
+})
+
 test('汇报 question 也有回执时限；主会话回复即销账', async () => {
   let now = 2_000_000
   const h = await setup({ deadlineNow: () => now })
