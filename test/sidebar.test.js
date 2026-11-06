@@ -223,7 +223,12 @@ test('正文 chunk：样式随标签注入，不在入口里；不用 backdrop-f
   assert.ok(!entry.includes('.dshaSv_'), '入口不带侧边栏样式')
   const cssText = chunk.slice(chunk.indexOf('const css = ['), chunk.indexOf("].join('')"))
   assert.ok(cssText.length > 100)
-  assert.ok(!/backdrop-filter|@keyframes|animation:/.test(cssText))
+  assert.ok(!/backdrop-filter/.test(cssText))
+  // 允许状态切换的短动画（toast / 折叠 / 下拉），但不要常驻无限动画
+  // 允许刷新按钮在忙碌时转圈（只在 data-busy 时出现），其余不要常驻无限动画
+  const withoutBusy = cssText.replace(/\.dshaSv_icon\[data-busy\][^}]*}/g, '')
+  assert.ok(!/animation:[^;}]*infinite/.test(withoutBusy), '不要常驻动画')
+  assert.ok(/@keyframes dshaSv_fadeIn/.test(cssText), '状态切换有短动画')
 })
 
 test('正文 chunk：空白会话按服务端分类显示「空白」，不算进行中；没有待领任务给提示；不用黑色 brand-primary', async () => {
@@ -340,7 +345,7 @@ test('正文 chunk：读取中给同高占位；数据旧了顶栏变色；已�
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const json = JSON.stringify(tree)
-  assert.ok(json.includes('"data-tone":"error"') && textOf(tree).includes('sideMinAgo'), '超过 30 分钟标红')
+  assert.ok(json.includes('"data-tone":"error"') && json.includes('sideMinAgo'), '超过 30 分钟：新鲜度圆点标红（时间在 title 里）')
   assert.ok(textOf(tree).includes('sideDoneN') && !textOf(tree).includes('@d1'), '已结束默认收起')
   const React2 = fakeReact([...old.slice(0, 10), true])
   const { mod: mod2 } = await load('client.sidebar.js', React2)
