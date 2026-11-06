@@ -138,21 +138,46 @@ function kitFor(opened = []) {
 }
 
 // useState 顺序：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note
-const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false } = {}) => [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined]
+// 父组件 13 个 useState：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note、doneOpen、tab、settingsOpen
+// extra 接在父组件之后，给卡片 / 交接页等子组件用
+const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, extra = [] } = {}) =>
+  [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, ...extra]
 
-test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；列表有顶栏、计数、主会话、版本线、卡片与任务', async () => {
+test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；会话页有顶栏、4 个页签、计数、主会话、版本线与卡片', async () => {
   const React = fakeReact(states(sampleBoard()))
   const { mod, chunk } = await load('client.sidebar.js', React)
   assert.equal(chunk, 'client.sidebar.js')
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) }))
-  for (const part of ['dsha-session-relay', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'sideTaskSummary', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
-    '@w1', 'why_question', '要不要改', 'feat/side', 'abcdef1', '⚠ 1', '@w2', 'queueNo', 'sideTaskBoard', 'sideTaskSummary', 'sideDoneMore', 'T1', 'P1', '侧边栏', 'openSession']) {
+  for (const part of ['dsha-session-relay', 'sideTabSessions', 'sideTabTasks', 'sideTabHandoff', 'sideTabActivity', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
+    '@w1', 'why_question', '要不要改', 'feat/side', 'abcdef1', '⚠ 1', '@w2', 'queueNo', 'openSession']) {
     assert.ok(text.includes(part), '缺少 ' + part)
   }
+  // 页签懒挂载：默认只渲染会话，任务看板 / 交接 / 动态都不在树里
+  assert.ok(!text.includes('sideTaskBoard') && !text.includes('T1'), '任务页签未挂载')
+  assert.ok(!text.includes('hoTitle') && !text.includes('sideMapTitle'), '交接 / 动态页签未挂载')
   // 空白会话合成一行，不单独列卡片；计数本身就是筛选
   assert.ok(text.includes('catBlank 1'))
   assert.ok(!text.includes('@w3'))
   assert.ok(!text.includes('sideFAll'), '没有单独的「全部」筛选')
+})
+
+test('正文 chunk：任务页签渲染任务看板（懒挂载）；交接 / 动态页签各自的正文', async () => {
+  const React = fakeReact(states(sampleBoard(), { tab: 'tasks' }))
+  const { mod } = await load('client.sidebar.js', React)
+  const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  for (const part of ['sideTaskBoard', 'sideTaskSummary', 'T1', 'P1', '侧边栏', 'sideTaskOpen']) assert.ok(text.includes(part), '任务页缺少 ' + part)
+  assert.ok(!text.includes('lineTitle'), '会话内容不在任务页')
+  // 交接页：没有交接数据时给读取中（重字段由完整快照补）
+  const ReactH = fakeReact(states({ ...sampleBoard(), handoff: undefined }, { tab: 'handoff' }))
+  const modH = (await load('client.sidebar.js', ReactH)).mod
+  const handoff = textOf(ReactH.createElement(modH.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  assert.ok(handoff.includes('loadingDetails'))
+  // 动态页：未登录 GitHub 时只给登录卡，不出现地图 / PR 空态
+  const ReactA = fakeReact(states({ ...sampleBoard(), github: { state: 'missing', match: 'missing', login: null, pinned: null, scopes: [], loginFlow: null } }, { tab: 'activity' }))
+  const modA = (await load('client.sidebar.js', ReactA)).mod
+  const activity = textOf(ReactA.createElement(modA.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  assert.ok(activity.includes('ghStateMissing') && activity.includes('ghLogin'))
+  assert.ok(!activity.includes('sideMapTitle') && !activity.includes('sidePrTitle'), '未登录不渲染 GitHub 段')
 })
 
 test('正文 chunk：筛选「可合并」只留 ready 的卡片；空分组不占一行提示', async () => {
@@ -207,7 +232,10 @@ test('正文 chunk：空白会话按服务端分类显示「空白」，不算�
   const { mod } = await load('client.sidebar.js', React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(text.includes('catBlank 1'), '合成一行显示分组名')
-  assert.ok(text.includes('sideNoOpenTasks'))
+  // 没有待领任务给提示：任务在任务页
+  const ReactT = fakeReact(states(board, { tab: 'tasks' }))
+  const modT = (await load('client.sidebar.js', ReactT)).mod
+  assert.ok(textOf(ReactT.createElement(modT.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })).includes('sideNoOpenTasks'))
   // 展开后列卡片：胶囊显示分组名，不显示过时的汇报状态
   const React2 = fakeReact(states(board, { quietOpen: true }))
   const { mod: mod2 } = await load('client.sidebar.js', React2)
@@ -218,16 +246,19 @@ test('正文 chunk：空白会话按服务端分类显示「空白」，不算�
   assert.ok(!chunk.includes('brand-primary'), '强调色用链接蓝，不用主题里接近黑白的 brand-primary')
 })
 
-test('正文 chunk：顶栏 GitHub 身份胶囊；换号标红，未登录提示，读不到就不显示', async () => {
+test('正文 chunk：顶栏 GitHub 胶囊只在已登录时出现；换号标红，未登录/读不到不占位置', async () => {
   const pill = async (github) => {
     const React = fakeReact(states({ ...sampleBoard(), github }))
     const { mod } = await load('client.sidebar.js', React)
     return textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   }
-  assert.ok((await pill({ state: 'ready', match: 'ok', login: 'alice', pinned: { login: 'alice' } })).includes('@alice'))
+  const ok = await pill({ state: 'ready', match: 'ok', login: 'alice', pinned: { login: 'alice' } })
+  assert.ok(ok.includes('@alice'))
   const bad = await pill({ state: 'ready', match: 'mismatch', login: 'mallory', pinned: { login: 'alice' } })
   assert.ok(bad.includes('⚠ @mallory'))
-  assert.ok((await pill({ state: 'missing', match: 'missing', login: null, pinned: null })).includes('ghPillOut'))
+  // 未登录：顶栏不占位置，登录卡在「动态」页；读不到 GitHub 状态时同样不显示
+  const missing = await pill({ state: 'missing', match: 'missing', login: null, pinned: null })
+  assert.ok(!missing.includes('ghPill') && !missing.includes('@alice'))
   const none = await pill(undefined)
   assert.ok(!none.includes('ghPill') && !none.includes('@alice'))
 })
@@ -258,7 +289,7 @@ test('入口：设置页 / 协作标签 / 监督面板的正文在 client.panel.
   assert.equal(chunk.KIT_VERSION, second.mod.PANEL_KIT, '正文与入口的 kit 版本一致')
 })
 
-test('正文 chunk：等你决定直接点选项（以用户身份回答）；提醒条只在有事时出现；任务只列前 3 条', async () => {
+test('正文 chunk：等你决定直接点选项（以用户身份回答）；提醒条只在有事时出现；任务页只列前 3 条', async () => {
   const posted = []
   const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
   const board = {
@@ -273,8 +304,13 @@ test('正文 chunk：等你决定直接点选项（以用户身份回答）；�
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
-  for (const part of ['askTitle', 'build281 给谁', 'lint', 'adb', 'askDismiss', 'sideAlertWake', 'wakeResume', 'sideAlertDecl', 'CI 123 失败', 'sideWatching', 'T3 标题', 'sideMoreTasks']) assert.ok(text.includes(part), '缺少 ' + part)
-  assert.ok(!text.includes('T4 标题'))
+  for (const part of ['askTitle', 'build281 给谁', 'lint', 'adb', 'askDismiss', 'sideAlertWake', 'wakeResume', 'sideAlertDecl', 'CI 123 失败', 'sideWatching']) assert.ok(text.includes(part), '缺少 ' + part)
+  // 任务只在任务页；可接默认只露 3 条
+  const ReactT = fakeReact(states(board, { tab: 'tasks' }))
+  const modT = (await load('client.sidebar.js', ReactT)).mod
+  const tasksText = textOf(ReactT.createElement(modT.RelaySidebar, { kit, sessionId: 'session-self' }))
+  assert.ok(tasksText.includes('T3 标题') && tasksText.includes('sideMoreTasks'))
+  assert.ok(!tasksText.includes('T4 标题'))
   const find = (node, label) => {
     if (!node || typeof node !== 'object') return undefined
     if (Array.isArray(node)) { for (const child of node) { const hit = find(child, label); if (hit) return hit } return undefined }
@@ -417,8 +453,8 @@ test('正文 chunk：卡片主操作随状态——待答复回复、可合并�
   const button = (label) => (node) => node.type === 'button' && textOf(node.children) === label
   const posted = []
   const kit = kitFor()
-  // 父组件 12 个 useState：board、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note、doneOpen、ghLoginOpen；之后才轮到卡片
-  const sidebarStates = (board, cardStates, quietOpen = false) => [{ board, error: undefined, at: Date.now() }, 0, 'all', undefined, false, undefined, quietOpen, false, false, undefined, false, false, ...cardStates]
+  // 父组件 13 个 useState（见 states 的注释）；extra 从第 14 个开始，之后才轮到卡片
+  const sidebarStates = (board, cardStates, quietOpen = false) => states(board, { quietOpen, extra: cardStates })
   const q = sampleBoard().entries[0]
   let React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [q] }, ['reply', '先做 A', false]))
   let m = (await load('client.sidebar.js', React)).mod
@@ -576,46 +612,46 @@ test('任务看板：旧快照只有 open / claimed 计数时不崩，仍给待�
 })
 
 
-// GitHub 登录卡：点顶栏胶囊就地展开；登录/补权限/锁定都走设置页同一套 action
-test('GitHub 登录卡：点胶囊展开；未登录时发起登录，验证码卡可复制/取消', async () => {
-  const base = { ...sampleBoard(), taskBoard: { open: [], claimed: 0 } }
-  // 父组件 12 个 useState 之后是 GitHubCard 的 tier（usePersisted 的 useState）
-  const ghStates = (github, open = true, tier = 'repo') => [{ board: { ...base, github }, error: undefined, at: Date.now() }, 0, 'all', undefined, false, undefined, false, false, false, undefined, false, open, tier]
+// GitHub 登录卡：动态页未登录时给登录卡；登录/补权限/锁定都走设置页同一套 action。
+// 直接测 GitHubCard，避免和父组件页签状态的位置耦合。
+
+test('GitHub 登录卡：动态页未登录显示登录卡并可直接登录；验证码卡可复制/取消', async () => {
   const posted = []
   const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
   const missing = { state: 'missing', match: 'missing', login: null, accountId: null, pinned: null, scopes: [], loginFlow: null, error: null }
-  let React = fakeReact(ghStates(missing))
-  let { mod } = await load('client.sidebar.js', React)
-  let tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
-  assert.ok(textOf(tree).includes('ghStateMissing') && textOf(tree).includes('ghTier'))
-  const pill = findButton(tree, (label, node) => String(node.props.className).includes('dshaSv_pillBtn'))
-  assert.equal(pill.props['aria-expanded'], true, '胶囊标了展开状态')
+  const React = fakeReact(states({ ...sampleBoard(), github: missing }, { tab: 'activity', extra: ['repo'] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const text = textOf(tree)
+  assert.ok(text.includes('ghStateMissing') && text.includes('ghTier') && text.includes('ghLogin'))
+  assert.ok(!text.includes('sideMapTitle'), '未登录不渲染地图段')
   await findButton(tree, (label) => label === 'ghLogin').props.onClick()
   assert.deepEqual(posted, [{ action: 'github-login', tier: 'repo', fromSession: 'session-self' }])
 
   const pending = { ...missing, loginFlow: { state: 'pending', userCode: 'ABCD-1234', verificationUri: 'https://github.com/login/device', opened: true, startedAt: 1, expiresAt: 2 } }
   const copied = []
-  React = fakeReact(ghStates(pending))
-  mod = (await load('client.sidebar.js', React)).mod
-  tree = React.createElement(mod.RelaySidebar, { kit: { ...kit, copyText: async (text) => { copied.push(text); return true } }, sessionId: 'session-self' })
-  const text = textOf(tree)
-  for (const part of ['ABCD-1234', 'ghCode', 'ghCopyCode', 'ghCodeOpened', 'ghCancel']) assert.ok(text.includes(part), '缺少 ' + part)
-  await findButton(tree, (label) => label === 'ghCopyCode').props.onClick()
+  const React2 = fakeReact(['repo'])
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const card = React2.createElement(mod2.GitHubCard, {
+    kit: { ...kit, copyText: async (value) => { copied.push(value); return true } },
+    github: pending, busy: false, act: async (body) => { posted.push(body); return {} }
+  })
+  const pendingText = textOf(card)
+  for (const part of ['ABCD-1234', 'ghCode', 'ghCopyCode', 'ghCodeOpened', 'ghCancel']) assert.ok(pendingText.includes(part), '缺少 ' + part)
+  await findButton(card, (label) => label === 'ghCopyCode').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(copied, ['ABCD-1234'])
-  await findButton(tree, (label) => label === 'ghCancel').props.onClick()
+  await findButton(card, (label) => label === 'ghCancel').props.onClick()
   assert.equal(posted.at(-1).action, 'github-login-cancel')
 })
 
 test('GitHub 登录卡：已登录未锁定给「锁定」；锁错号给「重新锁定」；有「补足全部权限」', async () => {
-  const base = { ...sampleBoard(), taskBoard: { open: [], claimed: 0 } }
-  const ghStates = (github, tier = 'all') => [{ board: { ...base, github }, error: undefined, at: Date.now() }, 0, 'all', undefined, false, undefined, false, false, false, undefined, false, true, tier]
   const posted = []
   const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
   const ready = { state: 'ready', match: 'unpinned', login: 'alice', accountId: 1, pinned: null, scopes: ['repo', 'workflow'], loginFlow: null, error: null }
-  let React = fakeReact(ghStates(ready))
-  let mod = (await load('client.sidebar.js', React)).mod
-  let tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const React = fakeReact(['all'])
+  const mod = (await load('client.sidebar.js', React)).mod
+  const tree = React.createElement(mod.GitHubCard, { kit, github: ready, busy: false, act: async (body) => { posted.push(body); return {} } })
   assert.ok(textOf(tree).includes('ghPinUnpinned'))
   const chips = findScopeChips(tree)
   assert.deepEqual(chips.map((chip) => chip.props.title), ['repo', 'workflow'], '权限按 scope 逐颗显示')
@@ -626,48 +662,42 @@ test('GitHub 登录卡：已登录未锁定给「锁定」；锁错号给「重�
   assert.equal(posted.at(-1).action, 'github-relogin')
 
   const mismatch = { ...ready, match: 'mismatch', login: 'mallory', pinned: { login: 'alice', accountId: 1 } }
-  React = fakeReact(ghStates(mismatch))
-  mod = (await load('client.sidebar.js', React)).mod
-  tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
-  assert.ok(textOf(tree).includes('ghPinMismatch'))
-  await findButton(tree, (label) => label === 'ghRepin').props.onClick()
+  const React2 = fakeReact(['all'])
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const tree2 = React2.createElement(mod2.GitHubCard, { kit, github: mismatch, busy: false, act: async (body) => { posted.push(body); return {} } })
+  assert.ok(textOf(tree2).includes('ghPinMismatch'))
+  await findButton(tree2, (label) => label === 'ghRepin').props.onClick()
   assert.equal(posted.at(-1).action, 'github-pin')
 })
 
-
 test('GitHub 登录卡：三档权限胶囊可选，动作带上所选档位', async () => {
-  const base = { ...sampleBoard(), taskBoard: { open: [], claimed: 0 } }
-  const ghStates = (github, tier) => [{ board: { ...base, github }, error: undefined, at: Date.now() }, 0, 'all', undefined, false, undefined, false, false, false, undefined, false, true, tier]
   const posted = []
   const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
   const missing = { state: 'missing', match: 'missing', login: null, accountId: null, pinned: null, scopes: [], loginFlow: null, error: null }
-  let React = fakeReact(ghStates(missing, 'basic'))
-  let mod = (await load('client.sidebar.js', React)).mod
-  let tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const React = fakeReact(['basic'])
+  const mod = (await load('client.sidebar.js', React)).mod
+  const tree = React.createElement(mod.GitHubCard, { kit, github: missing, busy: false, act: async (body) => { posted.push(body); return {} } })
   const text = textOf(tree)
   for (const part of ['ghTier', 'ghTierBasic', 'ghTierRepo', 'ghTierAll', 'ghTierHintBasic', 'ghTierNote']) assert.ok(text.includes(part), '缺少 ' + part)
   const basic = findButton(tree, (label, node) => node.props['aria-pressed'] === true && label === 'ghTierBasic')
   assert.ok(basic !== undefined, '基础档按选中态渲染')
   await findButton(tree, (label) => label === 'ghLogin').props.onClick()
-  assert.deepEqual(posted, [{ action: 'github-login', tier: 'basic', fromSession: 'session-self' }])
+  assert.deepEqual(posted, [{ action: 'github-login', tier: 'basic' }])
 
   const ready = { state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 }, scopes: ['repo'], loginFlow: null, error: null }
-  React = fakeReact(ghStates(ready, 'repo'))
-  mod = (await load('client.sidebar.js', React)).mod
-  tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
-  await findButton(tree, (label) => label.includes('ghTierUpgrade')).props.onClick()
+  const React2 = fakeReact(['repo'])
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const tree2 = React2.createElement(mod2.GitHubCard, { kit, github: ready, busy: false, act: async (body) => { posted.push(body); return {} } })
+  await findButton(tree2, (label) => label.includes('ghTierUpgrade')).props.onClick()
   assert.equal(posted.at(-1).action, 'github-relogin')
   assert.equal(posted.at(-1).tier, 'repo')
 })
 
-
 test('GitHub 登录卡：当前权限显示为一颗颗小胶囊，不再出现 {v} 占位符', async () => {
-  const base = { ...sampleBoard(), taskBoard: { open: [], claimed: 0 } }
   const github = { state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 }, scopes: ['repo', 'workflow', 'gist', 'admin:repo_hook'], loginFlow: null, error: null }
-  const states = [{ board: { ...base, github }, error: undefined, at: Date.now() }, 0, 'all', undefined, false, undefined, false, false, false, undefined, false, true, 'repo']
-  const React = fakeReact(states)
+  const React = fakeReact(['repo'])
   const { mod } = await load('client.sidebar.js', React)
-  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const tree = React.createElement(mod.GitHubCard, { kit: kitFor(), github, busy: false, act: async () => ({}) })
   const text = textOf(tree)
   assert.ok(!text.includes('{v}'), '不再显示未替换的占位符')
   const chips = findScopeChips(tree)
@@ -675,30 +705,24 @@ test('GitHub 登录卡：当前权限显示为一颗颗小胶囊，不再出现 
   assert.deepEqual(chips.map((chip) => textOf(chip)), ['repo', 'workflow', 'gist', 'admin:repo_hook'], '测试字典里回退成原始 scope')
 })
 
-
 test('GitHub 登录卡：授权缺 scope 时明确告警，并提供「退出后重新登录」确认流', async () => {
-  const base = { ...sampleBoard(), taskBoard: { open: [], claimed: 0 } }
   const github = {
     state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 },
     scopes: ['repo', 'read:org', 'gist'], loginFlow: { state: 'done', missing: ['admin:org', 'delete_repo'], missingTotal: 2, userCode: null, verificationUri: null, opened: false },
     error: null
   }
-  // 父组件 12 个 + tier(13) + resetAsk(14)
-  const states = [{ board: { ...base, github }, error: undefined, at: Date.now() }, 0, 'all', undefined, false, undefined, false, false, false, undefined, false, true, 'repo', true]
   const posted = []
   const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
-  const React = fakeReact(states)
+  const React = fakeReact(['repo', true])
   const { mod } = await load('client.sidebar.js', React)
-  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const tree = React.createElement(mod.GitHubCard, { kit, github, busy: false, act: async (body) => { posted.push(body); return {} } })
   const text = textOf(tree)
   for (const part of ['ghGrantedMissing', 'admin:org', 'delete_repo', 'ghGrantedMissingHint', 'ghResetAsk', 'ghResetConfirm']) assert.ok(text.includes(part), '缺少 ' + part)
   await findButton(tree, (label) => label === 'ghResetConfirm').props.onClick()
-  assert.deepEqual(posted.at(-1), { action: 'github-reset-login', tier: 'repo', fromSession: 'session-self' })
+  assert.deepEqual(posted.at(-1), { action: 'github-reset-login', tier: 'repo' })
 })
 
-
 test('GitHub 登录卡：档位已补足时显示「已补足」状态，档位胶囊带 ✓', async () => {
-  const base = { ...sampleBoard(), taskBoard: { open: [], claimed: 0 } }
   const github = {
     state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 },
     scopes: ['repo', 'admin:org', 'admin:repo_hook', 'workflow'],
@@ -709,11 +733,10 @@ test('GitHub 登录卡：档位已补足时显示「已补足」状态，档位�
     },
     loginFlow: null, error: null
   }
-  const states = [{ board: { ...base, github }, error: undefined, at: Date.now() }, 0, 'all', undefined, false, undefined, false, false, false, undefined, false, true, 'all', false]
-  const React = fakeReact(states)
+  const React = fakeReact(['all', false])
   const kit = kitFor()
   const { mod } = await load('client.sidebar.js', React)
-  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const tree = React.createElement(mod.GitHubCard, { kit, github, busy: false, act: async () => ({}) })
   const text = textOf(tree)
   assert.ok(text.includes('ghTierCovered'), '显示已补足状态')
   assert.ok(!text.includes('ghTierUpgrade'), '已补足时不再给「补足到」按钮')
@@ -721,6 +744,68 @@ test('GitHub 登录卡：档位已补足时显示「已补足」状态，档位�
   assert.ok(!text.includes('ghTierBasic ✓'), '未覆盖的档位不带 ✓')
   const status = findNode(tree, (node) => node.props?.['aria-disabled'] === true && textOf(node).includes('ghTierCovered'))
   assert.ok(status !== undefined, '状态是不可点的一行')
+})
+
+test('设置页：GitHub 账号、仓库开关、同步与核验集中；返回页签；开关以用户身份提交', async () => {
+  const posted = []
+  const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
+  const github = { state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 }, scopes: ['repo'], loginFlow: null, error: null }
+  const repo = { available: true, source: 'ok', repo: 'o/r', switches: [{ key: 'issues', label: 'issues 投影', enabled: false, available: true, hint: '同步任务到 issue' }] }
+  const sync = { available: true, repo: 'o/r', paused: false, queue: 2, switches: { issues: false }, links: [{ id: 'T1', issue: 7, url: 'https://github.com/o/r/issues/7', state: 'queued' }] }
+  const board = {
+    ...sampleBoard(), workspace: { id: 'ws1', title: 'dsha-session-relay', path: '/root/dsha-session-relay' },
+    github, repo, sync, declarations: { active: 1, mismatches: 2, text: 'T3 声明不符：fix/t3' },
+    watches: [{ id: 'w1', state: 'failed', line: 'CI 9 失败', what: 'CI 9', checkedAt: Date.now() }]
+  }
+  const React = fakeReact(states(board, { settingsOpen: true, extra: ['repo'] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const text = textOf(tree)
+  for (const part of ['sideSettings', 'sideSettingsHint', 'ghTitle', 'repoTitle', 'issues 投影', 'syncTitle', 'sideVerifyTitle', 'sideVerifySum', 'T3 声明不符', 'CI 9 失败']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(!text.includes('sideTabTasks'), '设置打开时页签收起')
+  const toggle = findNode(tree, (node) => node.type === 'input' && node.props?.type === 'checkbox' && typeof node.props?.onChange === 'function')
+  assert.ok(toggle !== undefined, '仓库开关可点')
+  toggle.props.onChange({ target: { checked: true } })
+  assert.deepEqual(posted.at(-1), { action: 'repo-switch', key: 'issues', enabled: true, workspaceId: 'ws1', fromSession: 'session-self' })
+})
+
+test('动态页：已登录显示地图票、关联 PR、仓库与同步；不再出现登录卡', async () => {
+  const github = { state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 }, scopes: ['repo'], loginFlow: null, error: null }
+  const repo = { available: true, source: 'ok', repo: 'o/r' }
+  const sync = { available: true, repo: 'o/r', paused: false, queue: 1, switches: { issues: true }, links: [] }
+  const taskBoard = { open: [], claimed: 1, claimedRows: [{ id: 'T3', title: '跑真机', pr: { number: 7, url: 'https://github.com/o/r/pull/7', label: 'PR #7 · OPEN · 可合并' } }] }
+  const React = fakeReact(states({ ...sampleBoard(), github, repo, sync, taskBoard }, { tab: 'activity' }))
+  const { mod } = await load('client.sidebar.js', React)
+  const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  for (const part of ['sideMapTitle', 'sideMapPending', 'sideMapHint', 'sidePrTitle', 'PR #7 · OPEN · 可合并', 'repoTitle', 'o/r', 'syncTitle']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(!text.includes('ghStateMissing') && !text.includes('ghCode'), '已登录不再显示登录卡')
+})
+
+test('交接页：草稿、接手方与二次确认；确认以用户身份发出', async () => {
+  const posted = []
+  const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
+  const handoff = {
+    coordinator: 'session-main1234',
+    coordinatorFailure: null,
+    draft: { notes: '下一步：合并 #1', by: 'model', updatedAt: Date.now(), fromLabel: '@main' },
+    snapshot: '== 交接时快照 ==',
+    history: [{ id: 'h1', from: 'session-old1234', to: 'session-main1234', fromLabel: '@old', toLabel: '@main', at: Date.now() - 1000, notes: '' }]
+  }
+  const React = fakeReact(states({ ...sampleBoard(), handoff }, { tab: 'handoff', extra: ['下一步：合并 #1', false, 'new', 'build281', false, true] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const text = textOf(tree)
+  for (const part of ['hoTitle', 'hoDraftBy', 'hoTargetNew', 'hoQueue', 'hoConfirmAgain', 'hoShowSnapshot', 'hoHistory']) assert.ok(text.includes(part), '缺少 ' + part)
+  const box = findNode(tree, (node) => node.type === 'textarea')
+  assert.equal(box.props.value, '下一步：合并 #1', '草稿正文填进输入框')
+  await findButton(tree, (label) => label.includes('hoConfirmAgain')).props.onClick()
+  assert.deepEqual(posted.at(-1), { action: 'handoff-confirm', to: 'new', alias: 'build281', mode: 'followup', fromSession: 'session-self' })
+  // 草稿有未保存改动时不给确认，提示先保存
+  const React2 = fakeReact(states({ ...sampleBoard(), handoff }, { tab: 'handoff', extra: ['改过的说明', true, 'new', '', false, false] }))
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const tree2 = React2.createElement(mod2.RelaySidebar, { kit, sessionId: 'session-self' })
+  assert.ok(textOf(tree2).includes('sideHandoffSaveFirst'))
+  assert.equal(findButton(tree2, (label) => label === 'hoConfirm').props.disabled, true)
 })
 
 test('任务看板：GitHub 同步一行状态，可展开链接票列表', async () => {

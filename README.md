@@ -17,7 +17,7 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - 协作邮箱（1.5.0）：核验成功这类公共通知只写进工作区邮箱（插件数据目录 `mailbox.json`），同一会话 5 分钟窗口内的多条通知合并成一条短通知（带最新 id）；需要细节时用 `peer_mail` read，主会话可用 `send`/`force` 推送。用户可用 `/relay mail` 看未读、读全文、归档和查看最近 7 天「短通知 / 全文」统计。失败/超时仍直接送达并响手机。
 - 协作面板（Web 客户端）：看板、交接预览、会话唤醒、等你决定的提问、自动置顶、开发者模式开关。
 - 右侧边栏「协作」标签（懒加载）：先拉轻量快照出首屏，任务看板/声明/仓库/同步等重字段后台补水；轮询只拉轻量，重字段合并保留，完整快照 5 分钟或手动刷新时补一次。
-- 右侧边栏「协作」标签：本工作区的主会话、版本线、看板卡片（按分组筛选、点开看详情）和任务看板（可接 / 进行中 / 已结束分组，点开看持有者、工作树与动作）；正文第一次打开标签才加载，只在标签可见时刷新。
+- 右侧边栏「协作」标签：4 个主页签「会话 / 任务 / 交接 / 动态」，只渲染当前页签（懒挂载）。会话页是本工作区的主会话、版本线、筛选与看板卡片（点开看详情）；任务页是可接 / 进行中 / 已结束分组（点开看持有者、工作树与动作）；交接页起草、二次确认与历史；动态页在 GitHub 登录后放地图票、关联 PR、仓库与同步（PR / 同步只在宽侧栏出现）。顶栏只留工作区、已登录的 GitHub 胶囊、刷新与 ⚙ 设置；设置页集中 GitHub 账号、仓库开关、同步与核验。正文第一次打开标签才加载，只在标签可见时刷新。
 - 会话在哪个 checkout：卡片自动显示每个会话的目录、分支、是否在 git 工作树里、从哪个分支哪个提交分叉（worker 没汇报也能看到；官方「更改请求与工作树」新建的会话尤其需要）。只读，按目录缓存 60 秒。
 - `/relay wt <会话> [--from <基分支|提交>] [--name <名字>]`：用官方工作树服务给会话建分支与新目录并切过去，不用手动 `git worktree add`；宿主没启用该功能时明确报错。
 - 任务阶段与审批（2.0.0 R0）：本地 `stage`（待分诊/可认领/进行中/待审查/暂停/不做）与 `approval`，认领自动进入进行中；阶段只由用户或主会话改，审批只走用户命令 `/relay approve|reject`（模型无审批工具）。
@@ -26,7 +26,7 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - 平级通知接收回执：`peer_send` 默认 3 分钟接收时限（`timeout` 可自定义 90s/5m/2h，10 秒–24 小时）；对方实际处理到消息（DSH `user/message` 事件按 id 确认）会自动回执给发送方并销账，对方回复也销账；一直没收到才用插队消息提醒发送方。明确不用回复的待命通知用 `expect_reply:false` 或 `/relay --no-reply`，只回执、不超时。纠正方向用 `priority:"urgent"` / `--urgent` 直接插队；普通 followup 排队超过 60 秒仍未取走会自动升级为 steer。`peer_report question/blocked` 同样有时限；主会话收到汇报也会回执工作会话。`/relay all` 会跳过待收落后/卡住的会话并在结果里列出。
 - GitHub issue 投影（R1，本地为准）：`issues` 开关打开后，任务变化会单向投影成 GitHub issue（marker 幂等、unknown 退避重试、重启恢复）；`closeOnTerminal` 打开且合并已审批（或已放弃）才关票；`labelSync` 维护 `relay:*` 标签（缺失自动创建）；`mapIssues` 给父子任务建地图票/子票，sub-issues 不可用时降级为父票正文 tasklist。用户命令 `/relay sync status|flush|backfill|retry|detach|on|off`，模型没有写入口；右侧边栏任务区和协作面板显示只读同步状态（队列/链接票），不新增 gh 轮询。默认关、不写 GitHub。
 - 任务 PR 只读（2.0.0 R0）：`/relay task pr <任务号> <PR 号|URL>` 把任务关联到 PR，只读展示 state / 可合并性 / 审批决定 / checks；状态缓存在本地，2 分钟后查看自动刷新（`refresh` 强制、`clear` 解除）。只给号时按当前目录的 GitHub origin 推断仓库。relay 不代开 PR、不代合并，PR 状态不会自动改任务阶段/审批；模型没有关联入口。
-- GitHub 账号：侧栏顶部账号胶囊点开就地登录卡（登录/补权限/锁定/解除锁定），设置页仍有完整账号面板；登录权限分「基础 / 仓库管理 / 全部」三档，默认仓库管理，按档申请 scope；当前 scope 以小胶囊逐颗显示。换号或退出时标红、发一次通知，并暂停 relay 自己的 CI 核验。
+- GitHub 账号：未登录时「动态」页显示登录卡（登录 / 设备验证码 / 补权限），顶栏账号胶囊只在已登录时出现，点开进「设置」页管理锁定与权限；登录权限分「基础 / 仓库管理 / 全部」三档，默认仓库管理，按档申请 scope；当前 scope 以小胶囊逐颗显示。换号或退出时胶囊标红、发一次通知，并暂停 relay 自己的 CI 核验。
 - 开发者模式（`/relay dev on [小时]`，默认关闭、限时、记审计）：模型可只读查看所有工作区的会话。
 - 截图：`screenshots.json` 里列了三张（右侧边栏「协作」标签、概览页的快速交接、新建会话时的模型选择），都是用演示工作区 `/root/relay-demo` 截的、已裁掉无关界面；换图推仓库即可，不用提 PR。
 - 维护文档：[设计、已知坑与审阅边界](docs/maintenance-guide.md)；[上架 awesome-dsh-plugin 的公开约定](docs/awesome-dsh-plugin-submission.md)（条目格式、`dsh.bundle`、tarball 两种写法、peer 预发布陷阱、held 标签、本容器的 REST 配方）。
