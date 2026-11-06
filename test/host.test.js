@@ -94,7 +94,7 @@ async function setup(options = {}) {
     stageRoot: STAGE, identityForAll: false,
     notify: async (title, text) => { notified.push([title, text]) },
     restart: { intervalMs: 1_000_000, stableMs: 0 },
-    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), pinPath: join(dir, 'pins.json'), watchPath: join(dir, 'watches.json'), watch: false, autoPinIntervalMs: 0, titlePath: join(dir, 'titles.json'), autoTitleIntervalMs: 0, chainWatchIntervalMs: 0, remoteReleaseTags: false, maxHops: 2, githubAuto: false,
+    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), pinPath: join(dir, 'pins.json'), watchPath: join(dir, 'watches.json'), watch: false, autoPinIntervalMs: 0, titlePath: join(dir, 'titles.json'), autoTitleIntervalMs: 0, chainWatchIntervalMs: 0, deadlinePath: join(dir, 'deadlines.json'), deadlineTickMs: 0, remoteReleaseTags: false, maxHops: 2, githubAuto: false,
     ...options,
     setTimer: (fn) => { timers.push(fn); return timers.length }, clearTimer: () => {}
   })
@@ -2982,4 +2982,56 @@ test('R1 issue 投影接线：issues 开关打开后任务变化会排队建票�
     assert.ok(!h.tools.has('peer_sync'))
     await assert.rejects(h.call('peer_task', { action: 'sync-dispatch' }), /must be one of|不认识的动作/)
   } finally { await h.cleanup(); await rm(baseDir, { recursive: true, force: true }) }
+})
+
+test('平级通知回执时限：超时提醒发送方；对方回复即销账', async () => {
+  let now = 1_000_000
+  const h = await setup({ deadlineNow: () => now })
+  try {
+    const sent = await h.call('peer_send', { target: h.peer.id, message: '请确认 A', timeout: '10s' }, h.caller)
+    assert.match(sent, /10 秒/)
+    assert.match(sent, /没有回执/)
+    assert.equal((await h.relay.deadlines.due(now + 10_000)).length, 1)
+    now += 10_000
+    const swept = await h.relay.sweepDeadlines()
+    assert.equal(swept.length, 1)
+    assert.equal(swept[0].sent, true)
+    const reminder = h.caller.inbox.find(([, message]) => message.content?.[0]?.text?.includes('<relay-deadline>'))
+    assert.ok(reminder, '发送方收到插队提醒')
+    assert.match(reminder[1].content[0].text, /请确认 A/)
+    assert.match(reminder[1].content[0].text, /10 秒/)
+    // 只提醒一次
+    assert.equal((await h.relay.sweepDeadlines()).length, 0)
+
+    // 对方回消息：之前的待回执销账，不再提醒
+    const h2 = await setup({ deadlineNow: () => now })
+    try {
+      await h2.call('peer_send', { target: h2.peer.id, message: '再确认', timeout: '10s' }, h2.caller)
+      await h2.call('peer_send', { target: h2.caller.id, message: '收到' }, h2.peer)
+      now += 11_000
+      assert.equal((await h2.relay.sweepDeadlines()).length, 0)
+    } finally { await h2.cleanup() }
+  } finally { await h.cleanup() }
+})
+
+test('汇报 question 也有回执时限；主会话回复即销账', async () => {
+  let now = 2_000_000
+  const h = await setup({ deadlineNow: () => now })
+  try {
+    await h.run('main here')
+    await h.call('peer_report', { status: 'question', summary: '要决定', question: 'A 还是 B', timeout: '10s' }, h.peer)
+    now += 10_000
+    const swept = await h.relay.sweepDeadlines()
+    assert.equal(swept.length, 1)
+    assert.ok(h.peer.inbox.some(([, message]) => message.content?.[0]?.text?.includes('<relay-deadline>')))
+    // 主会话回复：销掉 worker 的待回执
+    const h2 = await setup({ deadlineNow: () => now })
+    try {
+      await h2.run('main here')
+      await h2.call('peer_report', { status: 'question', summary: '要决定', question: 'A 还是 B', timeout: '10s' }, h2.peer)
+      await h2.call('peer_send', { target: h2.peer.id, message: '选 A' }, h2.caller)
+      now += 11_000
+      assert.equal((await h2.relay.sweepDeadlines()).length, 0)
+    } finally { await h2.cleanup() }
+  } finally { await h.cleanup() }
 })

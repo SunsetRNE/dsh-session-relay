@@ -1,5 +1,16 @@
 # Changelog
 
+## 未发布：平级通知回执时限
+
+修「发给平级会话的通知没有时限，发送方可能无限期等」的问题。
+
+- `peer_send`（含 `mode=queue/steer/interrupt`）默认带 3 分钟回执时限；`timeout` 可自定义（`90s` / `5m` / `2h`，范围 10 秒–24 小时）。`/relay <目标> --timeout 5m` 也可显式设。
+- `peer_report question/blocked` 同样默认 3 分钟；主会话超时没回，会用插队提醒提醒汇报的工作会话。
+- 回执：对方用 `peer_send` / `peer_report` 回给发送方即自动销账；`withdraw` 或被 `supersede` 取代的消息也会清掉时限。
+- 超时提醒发给**原来的发送方**：运行中用 steer 插进当前轮，空闲时 followup 唤醒；只提醒一次，不替对方执行，也不改任务状态。提醒后保留到回执或 24 小时，存 `deadlines.json`，重启不丢。
+- 同类审计：`peer_mail` 已有未读时限（默认 5 分钟），`peer_watch` 已有 deadline；`peer_ask_user` 是问用户，暂不自动催（避免在用户离开时刷屏）；`peer_report` 的 working/ready/done 不催，因为它们不要求回执。
+- 测试 307 → 311。
+
 ## 未发布：R1 issue 投影（版本号待定）
 
 GitHub issue 单向投影（本地为准，开关默认关）。

@@ -21,6 +21,7 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - `/relay wt <会话> [--from <基分支|提交>] [--name <名字>]`：用官方工作树服务给会话建分支与新目录并切过去，不用手动 `git worktree add`；宿主没启用该功能时明确报错。
 - 任务阶段与审批（2.0.0 R0）：本地 `stage`（待分诊/可认领/进行中/待审查/暂停/不做）与 `approval`，认领自动进入进行中；阶段只由用户或主会话改，审批只走用户命令 `/relay approve|reject`（模型无审批工具）。
 - GitHub 仓库接入（2.0.0 R0）：`/relay repo` 只读探测 origin 仓库能力（issues / projects / 合并方式 / 分支保护 / sub-issues），仓库开关按 `owner/repo` 存、只由用户 `/relay repo on|off <开关>` 或协作面板「交接与核验 → GitHub 仓库」里点，模型没有写入口；当前只存本地、不写 GitHub（远端投影排 2.0.0 之后），开关改动写本地审计。
+- 平级通知回执时限：`peer_send` 默认 3 分钟（`timeout` 可自定义 90s/5m/2h，10 秒–24 小时）；`peer_report question/blocked` 同样有时限。对方超时没回，会用插队消息提醒发送方；对方回复或撤回即销账。
 - GitHub issue 投影（R1，本地为准）：`issues` 开关打开后，任务变化会单向投影成 GitHub issue（marker 幂等、unknown 退避重试、重启恢复）；`closeOnTerminal` 打开且合并已审批（或已放弃）才关票；`labelSync` 维护 `relay:*` 标签（缺失自动创建）；`mapIssues` 给父子任务建地图票/子票，sub-issues 不可用时降级为父票正文 tasklist。用户命令 `/relay sync status|flush|backfill|retry|detach|on|off`，模型没有写入口；右侧边栏任务区和协作面板显示只读同步状态（队列/链接票），不新增 gh 轮询。默认关、不写 GitHub。
 - 任务 PR 只读（2.0.0 R0）：`/relay task pr <任务号> <PR 号|URL>` 把任务关联到 PR，只读展示 state / 可合并性 / 审批决定 / checks；状态缓存在本地，2 分钟后查看自动刷新（`refresh` 强制、`clear` 解除）。只给号时按当前目录的 GitHub origin 推断仓库。relay 不代开 PR、不代合并，PR 状态不会自动改任务阶段/审批；模型没有关联入口。
 - GitHub 账号：侧栏顶部账号胶囊点开就地登录卡（登录/补权限/锁定/解除锁定），设置页仍有完整账号面板；登录权限分「基础 / 仓库管理 / 全部」三档，默认仓库管理，按档申请 scope；当前 scope 以小胶囊逐颗显示。换号或退出时标红、发一次通知，并暂停 relay 自己的 CI 核验。

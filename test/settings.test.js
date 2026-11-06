@@ -12,7 +12,7 @@ import { COMMAND_REFERENCE, HELP_TEXT } from '../lib/core.js'
 async function makeRelay() {
   const dir = await mkdtemp(join(tmpdir(), 'relay-settings-'))
   const relay = new SessionRelay({ logger: { warn() {} }, get: () => undefined, sessions: { get: () => undefined } }, {
-    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), watchPath: join(dir, 'watches.json'), watch: false, githubAuto: false
+    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), watchPath: join(dir, 'watches.json'), deadlinePath: join(dir, 'deadlines.json'), deadlineTickMs: 0, watch: false, githubAuto: false
   })
   await relay.ready()
   return { dir, relay, cleanup: async () => { await relay.away.chain; await rm(dir, { recursive: true, force: true }) } }

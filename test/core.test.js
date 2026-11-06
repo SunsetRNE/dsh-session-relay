@@ -20,8 +20,10 @@ test('解析 new：选项只在正文前读取，正文原样保留（含换行�
 })
 
 test('解析发送与模式', () => {
-  assert.deepEqual(parseRelayCommand('release 先跑 lint'), { kind: 'send', target: 'release', mode: 'followup', text: '先跑 lint' })
-  assert.deepEqual(parseRelayCommand('@x --steer 停一下'), { kind: 'send', target: '@x', mode: 'steer', text: '停一下' })
+  assert.deepEqual(parseRelayCommand('release 先跑 lint'), { kind: 'send', target: 'release', mode: 'followup', text: '先跑 lint', timeoutMs: 180_000 })
+  assert.deepEqual(parseRelayCommand('@x --steer 停一下'), { kind: 'send', target: '@x', mode: 'steer', text: '停一下', timeoutMs: 180_000 })
+  assert.deepEqual(parseRelayCommand('@x --timeout 90s 停一下'), { kind: 'send', target: '@x', mode: 'followup', text: '停一下', timeoutMs: 90_000 })
+  assert.equal(parseRelayCommand('@x --timeout nope 停一下').kind, 'invalid')
   assert.equal(parseRelayCommand('09cef708 --queue 稍后看').mode, 'queue')
   assert.equal(parseRelayCommand('x --steer --queue a').kind, 'invalid')
   assert.equal(parseRelayCommand('release').kind, 'invalid')
@@ -151,7 +153,7 @@ test('解析 main / board / drop；main 后跟正文是发给主会话', () => {
   assert.deepEqual(parseRelayCommand('main here'), { kind: 'main-set' })
   assert.deepEqual(parseRelayCommand('main set rel'), { kind: 'main-set', target: 'rel' })
   assert.deepEqual(parseRelayCommand('main clear'), { kind: 'main-clear' })
-  assert.deepEqual(parseRelayCommand('main 版本线定为 build273'), { kind: 'send', target: 'main', mode: 'followup', text: '版本线定为 build273' })
+  assert.deepEqual(parseRelayCommand('main 版本线定为 build273'), { kind: 'send', target: 'main', mode: 'followup', text: '版本线定为 build273', timeoutMs: 180_000 })
   assert.deepEqual(parseRelayCommand('board'), { kind: 'board' })
     assert.throws(() => validateAlias('main'), RelayError)
 })
@@ -242,7 +244,7 @@ test('解析 line / tpl / leave / --tpl', () => {
   assert.deepEqual(parseRelayCommand('tpl rm claim'), { kind: 'tpl-remove', name: 'claim' })
   assert.equal(parseRelayCommand('tpl save claim').kind, 'invalid')
   assert.deepEqual(parseRelayCommand('new --as c1 --tpl claim'), { kind: 'spawn', text: '', alias: 'c1', template: 'claim' })
-  assert.deepEqual(parseRelayCommand('c1 --tpl claim 补充'), { kind: 'send', target: 'c1', mode: 'followup', text: '补充', template: 'claim' })
+  assert.deepEqual(parseRelayCommand('c1 --tpl claim 补充'), { kind: 'send', target: 'c1', mode: 'followup', text: '补充', template: 'claim', timeoutMs: 180_000 })
   assert.deepEqual(parseRelayCommand('leave'), { kind: 'leave' })
   assert.deepEqual(parseRelayCommand('drop lint'), { kind: 'leave', target: 'lint' })
   assert.throws(() => validateAlias('line'), RelayError)
@@ -270,7 +272,7 @@ test('版本线与退出标记持久化', async () => {
 test('--tpl / --as 后紧跟中文标点和正文时，正确拆出名字', () => {
   assert.deepEqual(parseRelayCommand('new --as xx --tpl claim，告诉我能否看到版本基线即可'), { kind: 'spawn', text: '告诉我能否看到版本基线即可', alias: 'xx', template: 'claim' })
   assert.deepEqual(parseRelayCommand('new --as xx，--tpl claim 正文'), { kind: 'spawn', text: '正文', alias: 'xx', template: 'claim' })
-  assert.deepEqual(parseRelayCommand('c1 --tpl claim。再来一个'), { kind: 'send', target: 'c1', mode: 'followup', text: '再来一个', template: 'claim' })
+  assert.deepEqual(parseRelayCommand('c1 --tpl claim。再来一个'), { kind: 'send', target: 'c1', mode: 'followup', text: '再来一个', template: 'claim', timeoutMs: 180_000 })
   assert.equal(parseRelayCommand('new --tpl 认领 x').kind, 'invalid')
 })
 
