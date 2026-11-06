@@ -138,10 +138,10 @@ function kitFor(opened = []) {
 }
 
 // useState 顺序：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note
-// 父组件 13 个 useState：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note、doneOpen、tab、settingsOpen
+// 父组件 14 个 useState：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note、doneOpen、tab、settingsOpen、updatedIds
 // extra 接在父组件之后，给卡片 / 交接页等子组件用
 const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, extra = [] } = {}) =>
-  [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, ...extra]
+  [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, ...extra]
 
 test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；会话页有顶栏、4 个页签、计数、主会话、版本线与卡片', async () => {
   const React = fakeReact(states(sampleBoard()))
