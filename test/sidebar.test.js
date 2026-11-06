@@ -843,9 +843,31 @@ test('动态页：没有拆分任务时给出创建入口，不再显示待接�
   const React = fakeReact(states({ ...sampleBoard(), github, repo, sync, taskBoard }, { tab: 'activity' }))
   const { mod } = await load('client.sidebar.js', React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
-  assert.ok(text.includes('sideMapEmpty'), '空地图给出 /relay task split 提示')
+  assert.ok(text.includes('sideMapEmpty'), '空地图给出建任务提示')
   assert.ok(text.includes('sideTicketEmpty'), '没有投影票时票子区给说明')
   assert.ok(!text.includes('sideMapGroups'), '没有任务树时不显示组计数')
+})
+
+test('动态页：拆分子任务表单以用户身份提交 task-split', async () => {
+  const posted = []
+  const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
+  const github = { state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 }, scopes: ['repo'], loginFlow: null, error: null }
+  const repo = { available: true, source: 'ok', repo: 'o/r' }
+  const sync = { available: true, repo: 'o/r', paused: false, queue: 0, switches: { issues: true }, links: [] }
+  const taskBoard = { open: [{ id: 'T10', title: '父任务' }], claimed: 0, claimedRows: [], map: [{ id: 'T10', title: '父任务', kind: 'open', childTotal: 0, children: [] }] }
+  // ActivityTab 的 4 个 useState：表单开、父任务号、子任务正文、串行依赖
+  const React = fakeReact(states({ ...sampleBoard(), github, repo, sync, taskBoard }, { tab: 'activity', extra: [true, 'T10', '子一\n子二', true] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const text = textOf(tree)
+  for (const part of ['sideMapSplitSubmit', 'sideMapSplitHint', 'sideMapSplitSerial']) assert.ok(text.includes(part), '缺少 ' + part)
+  const area = findNode(tree, (node) => node.type === 'textarea' && node.props?.placeholder === 'sideMapSplitChildren')
+  assert.ok(area !== undefined, '子任务输入框带占位说明')
+  const form = findNode(tree, (node) => node.type === 'form' && typeof node.props?.onSubmit === 'function')
+  assert.ok(form !== undefined, '拆分表单可提交')
+  form.props.onSubmit({ preventDefault() {} })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(posted.at(-1), { action: 'task-split', task: 'T10', subtasks: ['子一', '子二'], serial: true, fromSession: 'session-self' })
 })
 
 test('交接页：草稿、接手方与二次确认；确认以用户身份发出', async () => {
