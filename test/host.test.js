@@ -185,7 +185,8 @@ test('peer_send：模型消息标记为 agent-message，并在 maxHops 后拒绝
     // peer 被这条中继消息唤醒，回复 → hop 2
     h.listeners['session/event'](h.peer.session, { type: 'user/message', data: message })
     await h.call('peer_send', { target: 'me2', message: '收到' }, h.peer)
-    const back = h.caller.inbox.at(-1)[1]
+    const back = h.caller.inbox.map(([, item]) => item).find((item) => /第 2\/2 跳/.test(String(item?.content?.[0]?.text ?? '')))
+    assert.ok(back !== undefined)
     assert.match(back.content[0].text, /第 2\/2 跳/)
     h.listeners['session/event'](h.caller.session, { type: 'user/message', data: back })
     await assert.rejects(h.call('peer_send', { target: 'peer', message: '再说一句' }), /跳/)
@@ -3102,5 +3103,21 @@ test('expect_reply=false：待命消息不因没回复触发超时；空闲兜�
     const received = await h.relay.sweepReceipts()
     assert.equal(received.length, 1, '宿主看不到队列时，空闲目标兜底回执')
     assert.ok(h.caller.inbox.some(([, message]) => message.content?.[0]?.text?.includes('<relay-receipt>')))
+  } finally { await h.cleanup() }
+})
+
+test('事件回执：目标会话处理到这条消息时按 id 自动回执', async () => {
+  const h = await setup()
+  try {
+    await h.call('peer_send', { target: h.peer.id, message: '事件回执测试' }, h.caller)
+    const delivered = h.peer.inbox.find(([, message]) => Array.isArray(message?.content) && String(message.content[0]?.text ?? '').includes('事件回执测试'))
+    assert.ok(delivered !== undefined)
+    const message = delivered[1]
+    assert.equal(typeof message.id, 'string')
+    h.listeners['session/event'](h.peer.session, { type: 'user/message', data: { message } })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const receipt = h.caller.inbox.find(([, item]) => item.content?.[0]?.text?.includes('<relay-receipt>'))
+    assert.ok(receipt, '目标处理消息后发送方收到回执')
+    assert.match(receipt[1].content[0].text, /事件回执测试/)
   } finally { await h.cleanup() }
 })
