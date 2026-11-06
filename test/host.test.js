@@ -3121,3 +3121,23 @@ test('事件回执：目标会话处理到这条消息时按 id 自动回执', a
     assert.match(receipt[1].content[0].text, /事件回执测试/)
   } finally { await h.cleanup() }
 })
+
+test('汇报接收回执：主会话处理到汇报批后，按批消息 id 回执工作会话', async () => {
+  let now = 5_000_000
+  const h = await setup({ deadlineNow: () => now })
+  try {
+    await h.run('main here')
+    await h.call('peer_report', { status: 'question', summary: '要决定', question: 'A 还是 B', timeout: '10s' }, h.peer)
+    await h.relay.batcher.flushAll()
+    const batch = h.caller.inbox.map(([, message]) => message).find((message) => String(message?.content?.[0]?.text ?? '').includes('要决定'))
+    assert.ok(batch !== undefined)
+    assert.equal(typeof batch.id, 'string')
+    h.listeners['session/event'](h.caller.session, { type: 'user/message', data: { message: batch } })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const receipt = h.peer.inbox.map(([, message]) => message).find((message) => String(message?.content?.[0]?.text ?? '').includes('<relay-receipt>'))
+    assert.ok(receipt, '工作会话收到主会话已接收汇报的回执')
+    assert.match(receipt.content[0].text, /已接收/)
+    now += 11_000
+    assert.equal((await h.relay.sweepDeadlines()).length, 0, '已回执的不再超时提醒')
+  } finally { await h.cleanup() }
+})
