@@ -2011,6 +2011,23 @@ test('任务库：超过 taskStoreMaxActive 时先把最老的终态任务归档
   } finally { await h.cleanup() }
 })
 
+test('看板快照：lightweight 先给核心字段，完整快照再补声明/任务区', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    const light = await h.relay.board(undefined, { session: h.caller.id, lightweight: true })
+    assert.equal(light.partial, true)
+    assert.ok(Array.isArray(light.entries))
+    assert.equal(light.declarations, null)
+    assert.equal(light.taskBoard, null)
+    assert.equal(light.setup, null)
+    const full = await h.relay.board(undefined, { session: h.caller.id })
+    assert.equal(full.partial, false)
+    assert.ok(Array.isArray(full.entries))
+  } finally { await h.cleanup() }
+})
+
 test('tasksPanel：面板任务状态返回结构化分组，不含 <task-status> 原始文本', async () => {
   const h = await setup()
   try {
