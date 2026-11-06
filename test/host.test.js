@@ -3035,3 +3035,32 @@ test('汇报 question 也有回执时限；主会话回复即销账', async () =
     } finally { await h2.cleanup() }
   } finally { await h.cleanup() }
 })
+
+test('待收队列：硬上限拒绝普通消息，queue 在落后时拒绝，steer 可插队，peer_list 显示待收', async () => {
+  const h = await setup()
+  try {
+    const pending = (n) => Array.from({ length: n }, (_, index) => ({ id: 'm' + index, senderId: h.peer.id, list: 'next-turn', message: {} }))
+    h.relay.pendingFor = async () => ({ agent: h.peer, pending: pending(8) })
+    await assert.rejects(h.call('peer_send', { target: h.peer.id, message: 'x' }, h.caller), /待收消息已有 8 条|硬上限/)
+    const steered = await h.call('peer_send', { target: h.peer.id, message: 'x', mode: 'steer' }, h.caller)
+    assert.match(steered, /已送达/)
+    h.relay.pendingFor = async () => ({ agent: h.peer, pending: pending(4) })
+    await assert.rejects(h.call('peer_send', { target: h.peer.id, message: 'x', mode: 'queue' }, h.caller), /落后.*queue/)
+    const list = await h.call('peer_list', {}, h.caller)
+    assert.match(list, /待收 4/)
+  } finally { await h.cleanup() }
+})
+
+test('看板快照：活跃会话带待收队列，落后时标 lagging', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-backlog', title: 'B', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await h.call('peer_report', { status: 'working', summary: '干活' }, h.peer)
+    h.relay.pendingFor = async () => ({ agent: h.peer, pending: Array.from({ length: 4 }, (_, index) => ({ id: 'q' + index, senderId: h.caller.id, list: 'next-turn', message: {} })) })
+    const board = await h.relay.board(undefined, { workspaceId: 'ws-backlog' })
+    const entry = board.entries.find((item) => item.sessionId === h.peer.id)
+    assert.equal(entry.pending.count, 4)
+    assert.equal(entry.pending.level, 'lagging')
+  } finally { await h.cleanup() }
+})
