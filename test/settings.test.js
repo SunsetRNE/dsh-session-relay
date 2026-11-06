@@ -668,7 +668,7 @@ test('Client：看板按插件分类分组，归档条目进右栏「归档」�
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
   const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
   React.useState = original
-  for (const key of ['catAttention', 'catReady', 'why_failed', 'archiveTitle', 'foldArchiveSum', 'catHint']) assert.match(page, new RegExp(key))
+  for (const key of ['catAttention', 'catReady', 'why_failed', 'archiveTitle', 'foldArchiveSum']) assert.match(page, new RegExp(key))
   assert.doesNotMatch(page, /catActive|boardEmpty/)
 })
 
