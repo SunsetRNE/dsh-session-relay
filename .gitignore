@@ -2,6 +2,7 @@
 .gen-test/
 .ACTIVE-SESSION
 .SESSION-DONE
+.agents/
 node_modules
 *.tgz
 dist/
