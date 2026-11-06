@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GitHubIdentity, parseDeviceLogin, parseUserResponse, shellHasGithub } from '../lib/github.js'
+import { GitHubIdentity, LOGIN_SCOPES, SCOPE_TIERS, impliedScopes, loginArgs, missingScopes, parseDeviceLogin, parseUserResponse, shellHasGithub, tierScopes } from '../lib/github.js'
 
 const userReply = (login, id, scopes = 'repo, workflow') => ({ stdout: `HTTP/2.0 200 OK\r\nX-Oauth-Scopes: ${scopes}\r\n\r\n${JSON.stringify({ login, id })}`, stderr: '' })
 
@@ -34,6 +34,8 @@ async function setup({ account = { login: 'alice', id: 101 }, shell } = {}) {
   const notified = []
   const opened = []
   const children = []
+  const kinds = []
+  const scopesSeen = []
   const bridge = {
     get: async (path) => {
       if (path === '/app/version') return { result: shell ? 'VERSION=1\nGITHUB_CREDENTIALS=1\n' : 'VERSION=1\n' }
@@ -45,11 +47,20 @@ async function setup({ account = { login: 'alice', id: 101 }, shell } = {}) {
   }
   const identity = new GitHubIdentity(join(dir, 'github.json'), join(dir, 'github-audit.jsonl'), {
     gh: fakeGh(state), bridge, notify: async (title, text) => notified.push([title, text]),
-    spawnLogin: () => { const child = fakeChild(); children.push(child); return child }
+    spawnLogin: (kind = 'login', scopes) => { kinds.push(kind); scopesSeen.push(scopes); const child = fakeChild(); children.push(child); return child }
   })
   await identity.load()
   const audit = async () => (await readFile(join(dir, 'github-audit.jsonl'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
-  return { dir, state, identity, notified, opened, children, audit, cleanup: () => rm(dir, { recursive: true, force: true }) }
+  // 收尾可能和退出后的异步 probe/审计撞上（已知偶发 ENOTEMPTY）：重试几次再放弃
+  const cleanup = async () => {
+    for (let i = 0; i < 10; i += 1) {
+      try { await rm(dir, { recursive: true, force: true }); return } catch (error) {
+        if (error?.code !== 'ENOTEMPTY' && error?.code !== 'EBUSY') throw error
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+    }
+  }
+  return { dir, state, identity, notified, opened, children, kinds, scopesSeen, audit, cleanup }
 }
 
 test('github 解析：gh api -i user、设备验证码、壳的 GITHUB_CREDENTIALS', () => {
@@ -182,4 +193,129 @@ test('github.json 损坏：留底后按未锁定处理', async () => {
     assert.equal(await identity.load(), null)
     assert.equal(await readFile(join(dir, 'github.json.corrupt-42'), 'utf8'), '{oops')
   } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+
+test('全量 scope：登录/刷新都带全部经典权限，含组织、删除仓库、webhooks 等；不含 offline_access', () => {
+  for (const scope of ['repo', 'workflow', 'admin:org', 'admin:repo_hook', 'delete_repo', 'project', 'write:packages', 'read:audit_log', 'admin:public_key']) {
+    assert.ok(LOGIN_SCOPES.includes(scope), '缺少 ' + scope)
+  }
+  assert.ok(!LOGIN_SCOPES.includes('offline_access'), '不请求 offline_access（不改变 token 生命周期）')
+  const login = loginArgs('login')
+  assert.deepEqual(login.slice(0, 5), ['auth', 'login', '--web', '--hostname', 'github.com'])
+  assert.equal(login[login.indexOf('--scopes') + 1].split(',').length, LOGIN_SCOPES.length)
+  const refresh = loginArgs('refresh')
+  assert.deepEqual(refresh.slice(0, 2), ['auth', 'refresh'])
+  assert.equal(refresh[refresh.indexOf('--scopes') + 1].split(',').includes('admin:org'), true)
+})
+
+test('github 登录：已登录时 refresh 走 gh auth refresh；没登录时退回登录', async () => {
+  const h = await setup()
+  try {
+    // 先把 current 探成 ready（模拟已登录）
+    await h.identity.probe()
+    const pending = h.identity.startLogin({ refresh: true })
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(h.kinds, ['refresh'], '已登录时补权限')
+    const child = h.children[0]
+    child.stderr.emit('data', '! First copy your one-time code: QWER-5678\n')
+    child.stderr.emit('data', 'Open this URL to continue in your web browser: https://github.com/login/device\n')
+    const view = await pending
+    assert.equal(view.loginFlow.userCode, 'QWER-5678')
+    child.emit('exit', 0)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    // 没登录时 refresh 退回登录
+    h.state.account = null
+    await h.identity.probe()
+    const again = h.identity.startLogin({ refresh: true })
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(h.kinds, ['refresh', 'login'])
+    h.children[1].emit('exit', 1)
+    await again.catch(() => {})
+  } finally { await h.cleanup() }
+})
+
+
+test('权限分档：basic / repo / all 三档，未知档位按「全部」处理', () => {
+  assert.deepEqual(SCOPE_TIERS.basic, ['repo', 'read:org', 'gist', 'workflow'])
+  assert.ok(SCOPE_TIERS.repo.includes('admin:repo_hook') && !SCOPE_TIERS.repo.includes('delete_repo'))
+  assert.equal(tierScopes('all'), LOGIN_SCOPES)
+  assert.equal(tierScopes('unknown'), SCOPE_TIERS.repo)
+  assert.equal(loginArgs('login', tierScopes('basic')).at(-1), 'repo,read:org,gist,workflow')
+})
+
+test('github 登录：按所选档位把 scope 交给 gh；已登录补权限用 refresh', async () => {
+  const h = await setup()
+  try {
+    const pending = h.identity.startLogin({ tier: 'basic' })
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(h.kinds, ['login'])
+    assert.deepEqual(h.scopesSeen[0], ['repo', 'read:org', 'gist', 'workflow'])
+    h.children[0].emit('exit', 1)
+    await pending.catch(() => {})
+    await h.identity.probe()
+    const refresh = h.identity.startLogin({ refresh: true, tier: 'repo' })
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(h.kinds, ['login', 'refresh'])
+    assert.ok(h.scopesSeen[1].includes('admin:repo_hook'))
+    assert.ok(!h.scopesSeen[1].includes('delete_repo'))
+    h.children[1].emit('exit', 1)
+    await refresh.catch(() => {})
+  } finally { await h.cleanup() }
+})
+
+
+test('github 登录：scope 没授全会记 missing 并在审计里留请求/实际数量；resetLogin 先退出再完整登录', async () => {
+  const h = await setup()
+  try {
+    await h.identity.probe() // 已登录，current ready
+    const pending = h.identity.startLogin({ refresh: true, tier: 'basic' })
+    await new Promise((resolve) => setImmediate(resolve))
+    const child = h.children[0]
+    child.emit('exit', 0)
+    await pending.catch(() => {})
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const audit = await h.audit()
+    const done = audit.find((item) => item.event === 'login-done')
+    assert.equal(done.tier, 'basic')
+    assert.equal(done.requested, 4)
+    assert.equal(done.granted, 2)
+    assert.equal(done.missing, 2)
+    const view = h.identity.view({ withCode: true })
+    assert.deepEqual(view.loginFlow.missing, ['read:org', 'gist'])
+    assert.equal(view.loginFlow.missingTotal, 2)
+
+    // resetLogin：先 gh auth logout，再 kind=login
+    const before = h.state.calls.length
+    const again = h.identity.resetLogin({ tier: 'repo' })
+    for (let i = 0; i < 50 && h.kinds.length < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.deepEqual(h.state.calls.at(-1), ['auth', 'logout', '--hostname', 'github.com'])
+    assert.equal(h.state.calls.length, before + 1)
+    assert.deepEqual(h.kinds.at(-1), 'login')
+    assert.ok(h.scopesSeen.at(-1).includes('admin:repo_hook'))
+    h.children.at(-1).emit('exit', 1)
+    await again.catch(() => {})
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  } finally { await h.cleanup() }
+})
+
+
+test('scope 核对：按隐含闭包判断，GitHub 归一化掉的低级 scope 不算缺', () => {
+  // 实际归一化后常见的一组（2026-11-06 实测）
+  const granted = ['admin:gpg_key', 'admin:org', 'admin:org_hook', 'admin:public_key', 'admin:repo_hook', 'codespace', 'delete:packages', 'delete_repo', 'gist', 'notifications', 'project', 'read:audit_log', 'repo', 'user', 'workflow', 'write:packages']
+  assert.deepEqual(missingScopes(LOGIN_SCOPES, granted), [], '全部档在归一化后不应报缺')
+  assert.deepEqual(missingScopes(SCOPE_TIERS.repo, granted), [], '仓库管理档也不应报缺')
+  assert.deepEqual(missingScopes(SCOPE_TIERS.basic, ['repo', 'workflow']), ['read:org', 'gist'], '基础档真缺时才报')
+  const implied = impliedScopes(['repo', 'admin:org'])
+  for (const child of ['repo:status', 'public_repo', 'write:org', 'read:org', 'security_events']) assert.ok(implied.has(child), '缺少隐含 ' + child)
+})
+
+
+test('github 视图带每档 scope 清单：前端据此判断「已补足」', async () => {
+  const h = await setup()
+  try {
+    const view = h.identity.view()
+    assert.deepEqual(view.tiers.basic, SCOPE_TIERS.basic)
+    assert.deepEqual(view.tiers.all, LOGIN_SCOPES)
+  } finally { await h.cleanup() }
 })

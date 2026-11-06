@@ -60,3 +60,23 @@ test('scanBoard：从工作树目录往上找到；待认领以认领目录为�
     assert.equal(await scanBoard(tmpdir()), undefined)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+test('scanBoard：进行中的认领带 owner（打开持有会话用），已结束进 endedRows', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'relay-board-'))
+  try {
+    await mkdir(join(root, '.agents/claims/T3'), { recursive: true })
+    await writeFile(join(root, '.agents/claims/T3/owner'), 'session-aaaaaaaa-0000-0000-0000-000000000001\n2026-11-06T10:00:00Z\n')
+    await mkdir(join(root, '.agents/claims/T4'), { recursive: true })
+    await writeFile(join(root, '.agents/claims/T4/done'), 'abc1234 可合并\n')
+    await writeFile(join(root, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |\n|---|---|---|---|---|---|\n| T2 | P1 | 待认领的 | b | 是 | 待认领 |\n| T3 | P1 | 进行中 | c | 否 | 进行中 |\n| T4 | P0 | 已完成 | d | 是 | 已合入 |\n')
+    const board = await scanBoard(root)
+    assert.deepEqual(board.open.map((row) => row.id), ['T2'])
+    assert.deepEqual(board.claimed.map((row) => [row.id, row.claim, row.owner]), [['T3', 'claimed', 'session-aaaaaaaa-0000-0000-0000-000000000001']])
+    assert.deepEqual(board.endedRows.map((row) => [row.id, row.claim]), [['T4', 'done']])
+    assert.equal(board.ended, 1)
+    // 没写 owner 的认领不伪造持有者
+    await rm(join(root, '.agents/claims/T3/owner'))
+    const bare = await scanBoard(root)
+    assert.equal(bare.claimed[0].owner, undefined)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

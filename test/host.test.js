@@ -1257,7 +1257,10 @@ test('拉起认领会话：首条消息写明身份、看板与认领方式；�
     h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
     await h.run('main here')
     await mkdir(join(h.dir, '.agents/claims/T2'), { recursive: true })
-    await writeFile(join(h.dir, '.agents/TASKS.md'), '## 认领规则\n\n| 号 | 优先 | 任务 | 状态 |\n|---|---|---|---|\n| T1 | P2 | 低优先 | 待认领 |\n| T2 | P0 | 已被认领 | 待认领 |\n| T3 | P1 | 修 MCP | 可认领 |\n')
+    await writeFile(join(h.dir, '.agents/claims/T2/owner'), `${h.peer.id}\n2026-11-06T10:00:00Z\n`)
+    await mkdir(join(h.dir, '.agents/claims/T4'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/claims/T4/done'), 'abc1234 可合并\n')
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '## 认领规则\n\n| 号 | 优先 | 任务 | 状态 |\n|---|---|---|---|\n| T1 | P2 | 低优先 | 待认领 |\n| T2 | P0 | 已被认领 | 待认领 |\n| T3 | P1 | 修 MCP | 可认领 |\n| T4 | P0 | 已完成 | 已合入 |\n')
     const done = await h.run('claim T3')
     assert.equal(done.kind, 'success', done.text)
     const claimer = [...h.agents.values()].find((agent) => agent.id.startsWith('dddddddd'))
@@ -1284,6 +1287,17 @@ test('拉起认领会话：首条消息写明身份、看板与认领方式；�
     // 面板数据：待认领按优先级
     const board = await h.relay.board(undefined, { session: h.caller.id })
     assert.deepEqual(board.taskBoard.open.map((row) => row.id), ['T3', 'T1'])
+    // 侧栏任务分组：进行中带认领者会话（点开可直接打开），已结束只给结论
+    assert.equal(board.taskBoard.claimed, 1)
+    assert.deepEqual(board.taskBoard.claimedRows.map((row) => [row.id, row.owner]), [['T2', h.peer.id]])
+    assert.equal(typeof board.taskBoard.claimedRows[0].ownerLabel, 'string')
+    assert.deepEqual(board.taskBoard.endedRows.map((row) => [row.id, row.claim]), [['T4', 'done']])
+    assert.equal(board.taskBoard.ended, 1)
+    // 任务树依赖随快照带出，侧栏详情能显示「依赖」
+    const found = await h.relay.taskBoardFor({ session: h.caller.id })
+    await writeFile(join(found.board.storeRoot, 'graph.json'), JSON.stringify({ version: 1, tasks: { T3: { parentId: null, dependsOn: ['T1'] } } }))
+    const withDeps = await h.relay.board(undefined, { session: h.caller.id })
+    assert.deepEqual(withDeps.taskBoard.open.find((row) => row.id === 'T3').dependsOn, ['T1'])
     // 模型：peer_spawn claim=any（主会话）→ 按 agent 来源送达，取最高优先的
     const reply = await h.call('peer_spawn', { claim: 'any' })
     assert.match(reply, /去认领一个待认领任务/)
@@ -2664,6 +2678,20 @@ test('GitHub 面板动作：只走设置路由；锁定后换号拒绝登记 CI 
     assert.equal(refreshed.board.github.match, 'unpinned')
     const pinned = await perform(h.relay, { action: 'github-pin', fromSession: h.caller.id })
     assert.equal(pinned.board.github.pinned.accountId, 101)
+    // 补权限：路由必须认识 github-relogin，并把档位交给 startLogin（不能掉到「未知操作」）
+    let started
+    const realStart = h.relay.github.startLogin.bind(h.relay.github)
+    h.relay.github.startLogin = async (options) => { started = options; return h.relay.github.view({ withCode: true }) }
+    await perform(h.relay, { action: 'github-relogin', fromSession: h.caller.id, tier: 'repo' })
+    assert.deepEqual(started, { refresh: true, tier: 'repo' })
+    h.relay.github.startLogin = realStart
+    // 退出后重新登录：路由要认识并转到 resetLogin
+    let reset
+    const realReset = h.relay.github.resetLogin.bind(h.relay.github)
+    h.relay.github.resetLogin = async (options) => { reset = options; return h.relay.github.view({ withCode: true }) }
+    await perform(h.relay, { action: 'github-reset-login', fromSession: h.caller.id, tier: 'all' })
+    assert.deepEqual(reset, { tier: 'all' })
+    h.relay.github.resetLogin = realReset
     assert.equal(JSON.parse(await readFile(join(h.dir, 'github.json'), 'utf8')).pinned.login, 'alice')
     // 换号
     account.value = { login: 'mallory', id: 666 }
@@ -2706,5 +2734,24 @@ test('看板版本：内容不变两次版本相同，带 since 只回 notModifi
     const changed = await get('view=board&session=' + h.caller.id + '&since=' + first.version)
     assert.notEqual(changed.version, first.version)
     assert.ok(Array.isArray(changed.entries))
+  } finally { await h.cleanup() }
+})
+
+test('reload：换新的 GitHub 身份实例，旧方法不会残留（tier/refresh/reset 都在新代码里）', async () => {
+  const h = await setup()
+  try {
+    const before = h.shell.relay.github
+    assert.equal(typeof before.resetLogin, 'function')
+    assert.equal(typeof before.startLogin, 'function')
+    // 模拟旧实例上还挂着一个登录流程：reload 后不能把它带进新实例
+    const child = { killed: false, kill() { this.killed = true } }
+    before.login = { state: 'pending', child }
+    const text = await h.shell.reload('test')
+    assert.match(text, /重新加载/)
+    const after = h.shell.relay.github
+    assert.notEqual(after, before, '身份对象必须换新，不能整对象接管旧实例')
+    assert.equal(typeof after.resetLogin, 'function')
+    assert.equal(after.login, null, '旧登录流程被取消，不跨实例悬挂')
+    assert.equal(child.killed, true)
   } finally { await h.cleanup() }
 })
