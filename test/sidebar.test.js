@@ -811,14 +811,14 @@ test('设置页：GitHub 账号、仓库开关、同步与核验集中；返回�
 test('动态页：已登录显示地图任务树、关联 PR、仓库与同步；不再出现登录卡', async () => {
   const github = { state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 }, scopes: ['repo'], loginFlow: null, error: null }
   const repo = { available: true, source: 'ok', repo: 'o/r' }
-  const sync = { available: true, repo: 'o/r', paused: false, queue: 1, switches: { issues: true }, links: [] }
+  const sync = { available: true, repo: 'o/r', paused: false, queue: 1, switches: { issues: true }, links: [{ id: 'T3', issue: 9, url: 'https://github.com/o/r/issues/9', state: 'synced', remoteState: 'OPEN' }] }
   const taskBoard = {
     open: [], claimed: 1, claimedRows: [{ id: 'T3', title: '跑真机', pr: { number: 7, url: 'https://github.com/o/r/pull/7', label: 'PR #7 · OPEN · 可合并' } }],
     map: [
       {
         id: 'T10', title: '父任务', kind: 'active', stageLabel: '进行中', childTotal: 3,
         children: [
-          { id: 'T10.1', title: '子任务一', kind: 'open', issue: 12, issueUrl: 'https://github.com/o/r/issues/12', dependsOn: ['T10'] },
+          { id: 'T10.1', title: '子任务一', kind: 'open', issue: 12, issueUrl: 'https://github.com/o/r/issues/12', issueRemoteState: 'OPEN', dependsOn: ['T10'] },
           { id: 'T10.2', title: '子任务二', kind: 'ended' }
         ]
       }
@@ -828,9 +828,10 @@ test('动态页：已登录显示地图任务树、关联 PR、仓库与同步�
   const React = fakeReact(states({ ...sampleBoard(), github, repo, sync, taskBoard }, { tab: 'activity' }))
   const { mod } = await load('client.sidebar.js', React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
-  for (const part of ['sideMapTitle', 'sideMapHint', 'sideMapGroups', 'T10', '父任务', 'T10.1', '子任务一', 'sideMapDepends', '#12', 'sideMapMore',
-    'sidePrTitle', 'PR #7 · OPEN · 可合并', 'repoTitle', 'o/r', 'repoRefresh', 'syncTitle']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['sideMapTitle', 'sideMapHint', 'sideMapGroups', 'T10', '父任务', 'T10.1', '子任务一', 'sideMapDepends', '#12', 'sideMapNoTicket', 'OPEN', 'sideMapMore',
+    'sideTicketTitle', '#9', 'sideRepoInSettings', 'sidePrTitle', 'PR #7 · OPEN · 可合并', 'repoTitle', 'o/r', 'syncTitle']) assert.ok(text.includes(part), '缺少 ' + part)
   assert.ok(!text.includes('sideMapPending'), '不再显示「待接入」占位')
+  assert.ok(!text.includes('repoRefresh'), '仓库开关不再重复放动态页')
   assert.ok(!text.includes('ghStateMissing') && !text.includes('ghCode'), '已登录不再显示登录卡')
 })
 
@@ -843,6 +844,7 @@ test('动态页：没有拆分任务时给出创建入口，不再显示待接�
   const { mod } = await load('client.sidebar.js', React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(text.includes('sideMapEmpty'), '空地图给出 /relay task split 提示')
+  assert.ok(text.includes('sideTicketEmpty'), '没有投影票时票子区给说明')
   assert.ok(!text.includes('sideMapGroups'), '没有任务树时不显示组计数')
 })
 
