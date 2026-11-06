@@ -1010,6 +1010,39 @@ test('peer_inspect digest：只读最近几轮，读别的工作区要开发者�
   } finally { await h.cleanup() }
 })
 
+test('归档会话：不再默认出现在列表 / 读取 / 搜索 / 投递里；主会话 include_archived 才可读', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-a', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    h.relay.ctx.workspaceRegistry.archivedSessionIds = [h.peer.id]
+    await h.run('main here')
+    const text = (t) => [{ type: 'text', text: t }]
+    h.services.sessionQuery = {
+      readSession: async (id) => ({ session: { id, header: {} }, events: id === h.peer.id ? [{ seq: 1, time: 1, type: 'assistant/message', data: { message: { role: 'assistant', content: text('UNIQUE_ARCHIVED_MARKER') } } }] : [] }),
+      readSurface: async () => ({ events: [] })
+    }
+    // 列表默认不列归档会话
+    assert.doesNotMatch(await h.call('peer_list', {}), /bbbbbbbb/)
+    // 默认拒绝直接读 / digest
+    await assert.rejects(h.call('peer_inspect', { session: 'bbbbbbbb', view: 'overview' }), /已归档/)
+    await assert.rejects(h.call('peer_inspect', { session: 'bbbbbbbb', view: 'digest' }), /已归档/)
+    // 投递报“已归档”，不是“找不到”
+    await assert.rejects(h.call('peer_send', { target: 'bbbbbbbb', message: 'hi' }), /已归档/)
+    // 主会话显式 include_archived 可读，并标出归档状态
+    assert.match(await h.call('peer_inspect', { session: 'bbbbbbbb', view: 'overview', include_archived: true }), /已归档/)
+    // 工作会话不能显式读
+    await assert.rejects(h.call('peer_inspect', { session: 'bbbbbbbb', view: 'overview', include_archived: true }, h.peer), /只给用户或本工作区主会话/)
+    // 工作区搜索默认跳过归档；显式 include_archived 才出现
+    assert.doesNotMatch(await h.call('peer_inspect', { view: 'search', scope: 'workspace', query: 'UNIQUE_ARCHIVED_MARKER' }), /bbbbbbbb/)
+    assert.match(await h.call('peer_inspect', { view: 'search', scope: 'workspace', query: 'UNIQUE_ARCHIVED_MARKER', include_archived: true }), /bbbbbbbb/)
+    // 用户命令要显式 --archived
+    const denied = await h.run('inspect bbbbbbbb')
+    assert.equal(denied.kind, 'error')
+    assert.match(denied.text, /已归档/)
+    assert.match((await h.run('inspect bbbbbbbb --archived')).text, /已归档/)
+  } finally { await h.cleanup() }
+})
+
 test('交接：主会话模型只能起草；用户确认后新建会话接手、旧主会话收到卸任通知、可退回', async () => {
   const h = await setup()
   try {

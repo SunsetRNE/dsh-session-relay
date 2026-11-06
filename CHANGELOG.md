@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.11.1 - 2026-11-06
+
+归档会话在工具面按归档处理。
+
+- `peer_inspect`（含 `view=digest`、`view=search scope=workspace|all`）默认拒绝或跳过 DSH 侧栏已归档的会话（错误码 `session_archived`），不再返回它们的目录和内容；用户或本工作区主会话可加 `include_archived=true` 显式读取。
+- `/relay inspect` 新增 `--archived`：默认对归档会话给出「已归档」提示，要硬看时加这个参数。
+- `peer_send` 发给归档会话时，从笼统的「找不到会话」改成明确的「已归档，需要时在侧栏取消归档」。
+- `peer_list` 本来就不列归档会话；看板仍把归档会话放在「归档」分区。
+- 测试 244 → 245。
+
+需要 `/relay reload` 后生效。
+
+**要求 DSH 0.2.2-rc.1 及以上**。安装：插件管理器 → 从 Release 安装，或直接下载下面的 `dsh-session-relay-1.11.1.tgz`。
+
 ## 1.11.0 - 2026-11-06
 
 `peer_list` 收口：工具 15 → 14，跨工作区列表进开发者模式。
