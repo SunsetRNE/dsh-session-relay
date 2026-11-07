@@ -108,6 +108,21 @@ test('侧栏分支：聚合全部登记工作区；单工作区失败不影响�
   } finally { await h.cleanup(); await rm(base, { recursive: true, force: true }) }
 })
 
+test('页签计数：当前工作区 PR / 问题数量 + 邮箱未读', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'relay-ws-counts-'))
+  const repo = await makeRepo(base, 'counts')
+  const lists = {
+    pullRequests: async () => ({ items: [{ number: 1 }, { number: 2 }] }),
+    issues: async () => ({ items: [{ number: 3 }] }),
+    branches: async () => ({ local: [], remote: [] })
+  }
+  const h = await makeRelay({ lists, workspaces: [{ id: 'ws1', title: '项目', path: repo, sessionIds: ['s1'] }] })
+  try {
+    h.relay.mailView = async () => ({ mailbox: { unread: 3 }, items: [] })
+    assert.deepEqual(await h.relay.railCounts({ fromSession: 's1' }), { prs: 2, issues: 1, mail: 3 })
+  } finally { await h.cleanup(); await rm(base, { recursive: true, force: true }) }
+})
+
 test('用户写动作：PR 与分支删除必须 user=true，工作区路径来自登记', async () => {
   const base = await mkdtemp(join(tmpdir(), 'relay-ws3-'))
   const repo = await makeRepo(base, 'repo')

@@ -169,7 +169,7 @@ function kitFor(opened = []) {
 // 父组件 14 个 useState：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note、doneOpen、tab、settingsOpen、updatedIds
 // extra 接在父组件之后，给卡片 / 交接页等子组件用
 const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, extra = [] } = {}) =>
-  [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, ...extra]
+  [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, {}, ...extra]
 
 test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
   const React = fakeReact(states(sampleBoard()))
@@ -424,13 +424,18 @@ test('正文 chunk：轮询带上次的 since；notModified 时不换看板对�
   globalThis.document = { visibilityState: 'visible', addEventListener() {}, removeEventListener() {}, querySelector: () => null, createElement: () => ({ dataset: {}, remove() {} }), head: { appendChild() {} } }
   const cleanups = []
   // 找出更新看板的那次 setState（还有刷新提示等别的更新）
-  const boardUpdate = () => sets.map((value) => (typeof value === 'function' ? value({ board: undefined }) : value)).find((value) => value && typeof value === 'object' && 'board' in value && value.at !== undefined)
+  const boardUpdate = () => {
+    const values = sets.map((value) => (typeof value === 'function' ? value({ board: undefined }) : value));
+    return values.find((value) => value && typeof value === 'object' && 'board' in value && 'version' in value)
+      ?? values.find((value) => value && typeof value === 'object' && 'board' in value);
+  }
   try {
     const { mod } = await load('client.sidebar.js', React)
     React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-poll', useTabInfo: () => ({ tab: { visible: true } }) })
     cleanups.push(...effects.map((fn) => fn()))
     await new Promise((resolve) => setTimeout(resolve, 5))
-    assert.equal(calls[0].since, undefined)
+    const boardCalls = () => calls.filter((query) => query?.view === 'board')
+    assert.equal(boardCalls()[0].since, undefined)
     const first = boardUpdate()
     assert.equal(first.version, 'v1')
     // 第二轮：模块缓存里有 v1，带 since；服务端回 notModified
@@ -439,7 +444,7 @@ test('正文 chunk：轮询带上次的 since；notModified 时不换看板对�
     React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-poll', useTabInfo: () => ({ tab: { visible: true } }) })
     cleanups.push(...effects.map((fn) => fn()))
     await new Promise((resolve) => setTimeout(resolve, 5))
-    assert.equal(calls.at(-1).since, 'v1')
+    assert.equal(boardCalls().at(-1).since, 'v1')
     const updated = boardUpdate()
     assert.equal(updated.board, first.board, '看板对象沿用')
   } finally {
