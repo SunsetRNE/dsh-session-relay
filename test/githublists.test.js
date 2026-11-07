@@ -7,7 +7,7 @@ import {
 
 test('PR / issue 列表解析：字段归一、排序不动、坏输出拒绝', () => {
   const prs = parsePullRequests(JSON.stringify([
-    { number: 7, title: '修 bug', author: { login: 'alice' }, url: 'https://github.com/o/r/pull/7', isDraft: false, reviewDecision: 'CHANGES_REQUESTED', updatedAt: '2026-11-07T01:00:00Z', comments: 3, headRefName: 'fix/x', baseRefName: 'main' },
+    { number: 7, title: '修 bug', author: { login: 'alice' }, url: 'https://github.com/o/r/pull/7', isDraft: false, reviewDecision: 'CHANGES_REQUESTED', updatedAt: '2026-11-07T01:00:00Z', comments: 3, additions: 12, deletions: 3, changedFiles: 2, headRefName: 'fix/x', baseRefName: 'main' },
     { number: 8, title: '已合', mergedAt: '2026-11-07T02:00:00Z' },
     { number: 9, title: '有评论', comments: [{}, {}] },
     { number: 0, title: '坏条目' }
@@ -16,6 +16,7 @@ test('PR / issue 列表解析：字段归一、排序不动、坏输出拒绝', 
   assert.deepEqual({ n: prs[0].number, r: prs[0].reviewDecision, a: prs[0].author, h: prs[0].head }, { n: 7, r: 'CHANGES_REQUESTED', a: 'alice', h: 'fix/x' })
   assert.equal(prs[1].merged, true)
   assert.equal(prs[2].comments, 2, 'comments 数组按条数')
+  assert.deepEqual({ a: prs[0].additions, d: prs[0].deletions, c: prs[0].changedFiles }, { a: 12, d: 3, c: 2 }, '列表带改动统计')
   assert.throws(() => parsePullRequests('not json'), /不是 JSON/)
   assert.throws(() => parsePullRequests('{}'), /不是数组/)
 
@@ -29,7 +30,8 @@ test('PR / issue 列表解析：字段归一、排序不动、坏输出拒绝', 
 test('PR 详情解析：评审与评论正文', () => {
   const detail = parsePullDetail(JSON.stringify({
     number: 7, title: '修 bug', body: '说明', author: { login: 'alice' }, state: 'OPEN', isDraft: false, mergedAt: null,
-    url: 'u', createdAt: 't0', updatedAt: 't1',
+    url: 'u', createdAt: 't0', updatedAt: 't1', additions: 12, deletions: 3, changedFiles: 1,
+    files: [{ path: 'lib/x.js', additions: 12, deletions: 3, changeType: 'MODIFIED' }],
     reviews: [{ author: { login: 'bob' }, state: 'CHANGES_REQUESTED', body: '改一下', submittedAt: 't2' }],
     comments: [{ author: { login: 'carol' }, body: '收到', createdAt: 't3' }]
   }))
@@ -37,6 +39,8 @@ test('PR 详情解析：评审与评论正文', () => {
   assert.equal(detail.reviews[0].state, 'changes-requested')
   assert.equal(detail.reviews[0].body, '改一下')
   assert.equal(detail.comments[0].login, 'carol')
+  assert.deepEqual({ a: detail.additions, d: detail.deletions, c: detail.changedFiles }, { a: 12, d: 3, c: 1 }, '详情带改动统计')
+  assert.deepEqual(detail.files, [{ path: 'lib/x.js', additions: 12, deletions: 3, changeType: 'MODIFIED' }], '详情带文件清单')
   assert.throws(() => parsePullDetail('[]'), /不是对象/)
 })
 
@@ -157,6 +161,17 @@ test('PR 写动作：清掉打开 / 已关闭列表与详情缓存', async () =>
   await lists.pullRequests('o/r', { state: 'closed' })
   await lists.pullRequestDetail('o/r', 7)
   assert.equal(calls.gh.length, 7, '写后列表与详情缓存都失效')
+})
+
+test('PR 列表 / 详情请求带改动字段', async () => {
+  const { gh, git, calls } = fakeTools()
+  const lists = new GitHubLists({ gh, git, now: () => 1000 })
+  await lists.pullRequests('o/r')
+  await lists.pullRequestDetail('o/r', 7)
+  const listArgs = calls.gh.find((args) => args.join(' ').startsWith('pr list'))?.join(' ') ?? ''
+  assert.match(listArgs, /additions,deletions,changedFiles/, '列表带改动统计字段')
+  const detailArgs = calls.gh.find((args) => args.join(' ').startsWith('pr view'))?.join(' ') ?? ''
+  assert.match(detailArgs, /files,additions,deletions,changedFiles/, '详情带文件清单字段')
 })
 
 test('分支删除：当前 / 默认 / 未合并 / 远端确认名', async () => {

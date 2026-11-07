@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 12 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 13 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -133,7 +133,7 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const loaded = await lazyFactory()
   assert.equal(textOf(loaded.default()), 'sideStale')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 12, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 13, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -909,7 +909,7 @@ test('地图页：已登录显示地图任务树与本地票子；不再出现�
 const prData = () => ({
   prs: {
     repo: 'o/r', fetchedAt: 1,
-    items: [{ number: 7, title: '修 bug', author: 'alice', url: 'https://github.com/o/r/pull/7', draft: false, reviewDecision: 'CHANGES_REQUESTED', updatedAt: '2026-11-07T00:00:00Z', comments: 3, head: 'fix/x', base: 'main' }]
+    items: [{ number: 7, title: '修 bug', author: 'alice', url: 'https://github.com/o/r/pull/7', draft: false, reviewDecision: 'CHANGES_REQUESTED', updatedAt: '2026-11-07T00:00:00Z', comments: 3, additions: 12, deletions: 3, changedFiles: 2, head: 'fix/x', base: 'main' }]
   }
 })
 
@@ -942,7 +942,7 @@ test('PR 页：远端列表、标题链接、状态与请求修改/评论/关联
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
-  for (const part of ['sideTabPr', '#7', '修 bug', 'prReviewChanges', 'o/r', 'prCommentCount', 'prRequestChanges', 'prApprove', 'prClose', 'prLinkTask']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['sideTabPr', '#7', '修 bug', 'prReviewChanges', 'o/r', 'prCommentCount', 'prRequestChanges', 'prApprove', 'prClose', 'prLinkTask', '+12 −3', 'prDiffFiles', 'prAiReview']) assert.ok(text.includes(part), '缺少 ' + part)
   assert.ok(findNode(tree, (node) => node.props?.placeholder === 'sidePrTask'), '关联任务输入框')
   const titleLink = findNode(tree, (node) => node.type === 'a' && String(node.props?.className ?? '').includes('dshaSv_titleLink'))
   assert.equal(titleLink?.props?.href, 'https://github.com/o/r/pull/7', '标题可点开 GitHub')
@@ -1012,14 +1012,17 @@ test('PR 页：已关闭列表可重开；关闭后的列表与打开的列表�
 
 test('PR 详情：点详情展开评审与评论正文，空数据有说明', async () => {
   const detail = { prDetail: { repo: 'o/r', detail: {
-    number: 7, body: 'PR 说明', reviews: [{ login: 'bob', state: 'changes-requested', body: '改一下', submittedAt: '2026-11-07T00:00:00Z' }],
+    number: 7, body: 'PR 说明', url: 'https://github.com/o/r/pull/7', additions: 12, deletions: 3, changedFiles: 1,
+    files: [{ path: 'lib/x.js', additions: 12, deletions: 3, changeType: 'MODIFIED' }],
+    reviews: [{ login: 'bob', state: 'changes-requested', body: '改一下', submittedAt: '2026-11-07T00:00:00Z' }],
     comments: [{ login: 'carol', body: '收到', createdAt: '2026-11-07T01:00:00Z' }]
   } } }
   // PrDetail 的 3 个 useState：data / error / busy
   const React = fakeReact([detail, undefined, false])
   const { mod } = await load('client.sidebar.js', React)
   const text = textOf(React.createElement(mod.PrDetail, { kit: kitFor(), sessionId: 's1', number: 7 }))
-  for (const part of ['PR 说明', 'prReviewsTitle', '改一下', 'prReviewChanges', 'prCommentsTitle', '收到']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['PR 说明', 'prReviewsTitle', '改一下', 'prReviewChanges', 'prCommentsTitle', '收到', 'prDiffTitle', 'lib/x.js', '+12', '−3', 'prChangeModified', 'prOpenPr']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.equal(text.includes('prDiffEmpty'), false, '有文件改动时不显示空态')
 
   const React2 = fakeReact([{ prDetail: { detail: { number: 7, reviews: [], comments: [] } } }, undefined, false])
   const mod2 = (await load('client.sidebar.js', React2)).mod
@@ -1032,6 +1035,29 @@ test('PR 详情：点详情展开评审与评论正文，空数据有说明', as
   const longTree = React3.createElement(mod3.PrDetail, { kit: kitFor(), sessionId: 's1', number: 7 })
   assert.ok(textOf(longTree).includes('prExpand'), '长正文给展开按钮')
   assert.ok(findNode(longTree, (node) => String(node.props?.className ?? '').includes('dshaSv_clampFold')), '长正文默认折叠')
+})
+
+test('PR 页：AI 审核按钮拉起审核会话并打开', async () => {
+  const posted = []
+  const opened = []
+  const kit = {
+    ...kitFor(),
+    openSession: (id) => opened.push(id),
+    request: async (method, body) => {
+      posted.push([method, body])
+      if (method === 'POST' && body?.action === 'pr-ai-review') return { result: { sessionId: 'session-ai', repo: 'o/r', number: 7 }, board: {} }
+      return {}
+    }
+  }
+  const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', undefined, '', undefined, undefined] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const button = findButton(tree, (label) => label === 'prAiReview')
+  assert.ok(button !== undefined, 'PR 行有 AI 审核按钮')
+  await button.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(lastPost(posted), { action: 'pr-ai-review', number: 7, fromSession: 'session-self' })
+  assert.deepEqual(opened, ['session-ai'], '拉起后打开新会话')
 })
 
 test('问题页：issue 列表与标签 / 指派，不混入地图', async () => {

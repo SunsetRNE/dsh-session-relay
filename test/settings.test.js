@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
-import { SessionRelay } from '../lib/impl.js'
+import { SessionRelay, prReviewLaunchText } from '../lib/impl.js'
 import { createHandler, perform, snapshot } from '../lib/settings-route.js'
 import { COMMAND_REFERENCE, HELP_TEXT } from '../lib/core.js'
 
@@ -95,6 +95,22 @@ test('路由：鉴权失败、跨源、坏请求体、正常读写', async () =>
     assert.equal(res.body.ok, true)
     assert.equal(res.body.templates.length, 1)
     assert.equal(JSON.parse(await readFile(join(h.dir, 'templates.json'), 'utf8')).templates.claim.text, '正文')
+  } finally { await h.cleanup() }
+})
+
+test('PR「AI 审核」提示词：带仓库 / PR 号 / 只读边界', () => {
+  const text = prReviewLaunchText({ repo: 'o/r', number: 7, title: '修 bug', url: 'https://github.com/o/r/pull/7', workspaceTitle: 'w', sessionId: 'session-ai' })
+  for (const part of ['o/r#7', 'gh pr diff 7 --repo o/r', '只读', '不要改任何文件', 'peer_report']) assert.ok(text.includes(part), '缺少 ' + part)
+})
+
+test('PR「AI 审核」路由：用户动作把 PR 号交给 launchPrReview', async () => {
+  const h = await makeRelay()
+  try {
+    let got
+    h.relay.launchPrReview = async (args) => { got = args; return { sessionId: 'session-ai', repo: 'o/r', number: 7 } }
+    const done = await perform(h.relay, { action: 'pr-ai-review', number: 7, fromSession: 'session-x' })
+    assert.deepEqual(got, { fromId: 'session-x', number: 7, model: undefined })
+    assert.equal(done.result.sessionId, 'session-ai')
   } finally { await h.cleanup() }
 })
 
