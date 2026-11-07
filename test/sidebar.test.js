@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 10 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 11 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -133,7 +133,7 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const loaded = await lazyFactory()
   assert.equal(textOf(loaded.default()), 'sideStale')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 10, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 11, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -902,6 +902,8 @@ test('地图页：已登录显示地图任务树与本地票子；不再出现�
   assert.ok(!text.includes('sidePrTitle'), '地图页不混入 PR 列表')
   assert.ok(!text.includes('repoTitle') && !text.includes('syncTitle'), '仓库与同步在更多页')
   assert.ok(!text.includes('sideMapPending'), '不再显示「待接入」占位')
+  assert.equal(findNode(tree, (node) => String(node.props?.className ?? '') === 'dshaSv_map'), undefined, '地图页不再套外层卡片，间距与其他页一致')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_bar') && textOf(node).includes('sideTicketTitle')) !== undefined, '票子区与其他页一样有标题栏')
 })
 
 const prData = () => ({
@@ -1117,12 +1119,30 @@ test('更多页：已登录显示仓库与同步；不再出现登录卡', async
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const text = textOf(tree)
-  for (const part of ['repoTitle', 'repoProbeOk', 'syncTitle', 'sideRepoInSettings']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['repoTitle', 'repoProbeOk', 'syncTitle', 'sideRepoInSettings', 'sideMoreQuick', 'sideTabMap', 'sideTabPr', 'sideTabBranches', 'sideTabIssues', 'sideMoreSettings']) assert.ok(text.includes(part), '缺少 ' + part)
   assert.ok(!text.includes('o/r'), '仓库名收进 title，不再占可见文字')
   assert.ok(findNode(tree, (node) => node.props?.title === 'o/r') !== undefined, '仓库名在 title 里可悬停查看')
   assert.ok(!text.includes('ghStateMissing') && !text.includes('ghCode'), '已登录不再显示登录卡')
   assert.ok(findNode(tree, (node) => String(node.props?.className ?? '') === 'dshaSv_box' && textOf(node).includes('sideRepoInSettings')) !== undefined, '仓库状态与说明有包裹框')
   assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_box') && textOf(node).includes('syncTitle')) !== undefined, '同步行有包裹框')
+})
+
+test('更多页：快捷入口常驻，点条目切页 / 打开设置', async () => {
+  const board = { ...sampleBoard(), github: { state: 'ready' }, repo: { available: true, source: 'ok', repo: 'o/r' }, sync: { available: false } }
+  const React = fakeReact()
+  const { mod } = await load('client.sidebar.js', React)
+  const opened = []
+  let settings = 0
+  const tree = React.createElement(mod.MoreTab, {
+    kit: kitFor(), board, act: async () => ({}), busy: false,
+    onOpen: (key) => opened.push(key), onSettings: () => { settings += 1 }, counts: { map: 2, prs: 3, issues: 4 }
+  })
+  for (const label of ['sideTabMap', 'sideTabPr', 'sideTabBranches', 'sideTabIssues']) {
+    await findButton(tree, (text) => text.startsWith(label)).props.onClick()
+  }
+  assert.deepEqual(opened, ['map', 'prs', 'branches', 'issues'])
+  await findButton(tree, (text) => text.startsWith('sideMoreSettings')).props.onClick()
+  assert.equal(settings, 1)
 })
 
 test('设置页：仓库守候卡片显示状态、上次唤醒与过滤原因，可暂停和用户态 ack', async () => {
