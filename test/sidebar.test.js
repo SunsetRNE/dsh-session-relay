@@ -63,7 +63,35 @@ test('入口：有 sidebarRightTabs 时登记标签类型与正文，旧的 7 �
   const body = slots.find((item) => item.options.name === 'sidebar.right.pane.tab')
   assert.equal(body.options.key, mod.SIDEBAR_TYPE_ID, '正文按类型 id 登记')
   assert.deepEqual(body.options.inject('session-x'), { sessionId: 'session-x' })
-  assert.equal(slots.filter((item) => item.options.name !== 'sidebar.right.pane.tab').length, 7)
+  assert.equal(slots.filter((item) => item.options.name !== 'sidebar.right.pane.tab').length, 8)
+  const orbit = slots.find((item) => item.options.name === 'conversation.composer.dock')
+  assert.equal(orbit.options.id, 'session-relay-watch')
+  assert.equal(orbit.options.order, -10)
+  assert.deepEqual(Object.keys(orbit.options.inject('session-x')).sort(), ['openWatch', 'sessionId', 't'])
+})
+
+test('卫星环：本会话没有守候时不渲染；有守候时显示状态、数量与快捷面板', async () => {
+  const React = fakeReact([{ watchStatus: { watches: [] } }, undefined, false, undefined, false])
+  const { mod } = await load('client.js', React)
+  assert.equal(React.createElement(mod.WatchOrbit, { sessionId: 's', t: (key) => key, openWatch: () => {} }), null)
+
+  const watches = [{
+    id: 'o/r#s', repo: 'o/r', enabled: true, observe: false, lastError: null, deferReason: 'rate',
+    lastPoll: 1, lastWake: 2, lastBatch: { items: [{ number: 7, title: 'x' }] }
+  }]
+  const opened = []
+  const React2 = fakeReact([{ watchStatus: { watches } }, undefined, true, { left: 10, top: 800 }, false])
+  const mod2 = (await load('client.js', React2)).mod
+  globalThis.window = { innerHeight: 800 }
+  try {
+    const tree = React2.createElement(mod2.WatchOrbit, { sessionId: 's', t: (key) => key, openWatch: () => opened.push(1) })
+    const text = textOf(tree)
+    for (const part of ['o/r', 'rwStateOn', 'rwPause', 'rwCheck', 'watchRingTitle', 'watchRingOpen']) assert.ok(text.includes(part), '缺少 ' + part)
+    assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSr_orb')), '卫星环按钮')
+    assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSr_orbCount') && textOf(node) === '1'), '数量胶囊')
+    await findButton(tree, (label) => label === 'watchRingOpen').props.onClick()
+    assert.deepEqual(opened, [1])
+  } finally { delete globalThis.window }
 })
 
 test('入口：没有 ctx.inject（旧宿主）时不登记右侧边栏、不报错', async () => {
@@ -1010,11 +1038,22 @@ test('设置页：仓库守候卡片显示状态、上次唤醒与过滤原因�
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
   assert.ok(text.includes('rwTitle') && text.includes('o/r') && text.includes('rwStateOn'), '守候卡片标题/仓库/状态')
-  assert.ok(text.includes('rwDeferBusy') && text.includes('rwLastBatch') && text.includes('rwFiltered'), '中间态与原因')
+  assert.ok(text.includes('rwDeferBusy') && text.includes('rwLastBatch'), '总览有延后原因与上次批次')
+  for (const part of ['rwTabOverview', 'rwTabJudge', 'rwTabTrigger', 'rwTabSettings']) assert.ok(text.includes(part), '缺少子页签 ' + part)
   await findButton(tree, (label) => label === 'rwPause').props.onClick()
   assert.deepEqual(posted.at(-1), { action: 'repo-watch-toggle', id: 'o/r#s', enabled: false, fromSession: 'session-self' })
   await findButton(tree, (label) => label === 'rwAckGithub').props.onClick()
   assert.deepEqual(posted.at(-1), { action: 'repo-watch-ack', id: 'o/r#s', numbers: [7], fromSession: 'session-self' })
+
+  // 判定子页签：过滤原因与最近记录（直接渲染区块，避免页面其它 state 占位）
+  const ReactJ = fakeReact(['judge'])
+  const modJ = (await load('client.sidebar.js', ReactJ)).mod
+  const judge = textOf(ReactJ.createElement(modJ.RepoWatchSettings, {
+    kit, act: async () => ({}), busy: false,
+    board: { ...sampleBoard(), repoWatches }
+  }))
+  assert.ok(judge.includes('rwFiltered') && judge.includes('rwJudgeHistory'), '判定页有过滤与记录')
+  assert.ok(judge.includes('rwJudgeRate'), '判定页有每小时用量')
 })
 
 test('地图页：没有拆分任务时给出创建入口，不再显示待接入占位', async () => {

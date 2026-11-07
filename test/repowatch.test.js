@@ -179,3 +179,70 @@ test('仓库守候：盘上保存/恢复；同仓库同会话更新不重复建'
     assert.equal(again.list()[0].goal, '')
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
+
+test('仓库守候：存量补报参数与水位下限', () => {
+  assert.equal(normalizeStartRequest({ repo: 'o/r', backlogHours: 24 }).backlogHours, 24)
+  assert.equal(normalizeStartRequest({ repo: 'o/r' }).backlogHours, 0)
+  assert.throws(() => normalizeStartRequest({ repo: 'o/r', backlogHours: -1 }), /补报小时数/)
+  assert.throws(() => normalizeStartRequest({ repo: 'o/r', backlogHours: 721 }), /补报小时数/)
+  const now = 100_000
+  const watch = { cursor: new Date(now).toISOString(), seen: {} }
+  const stale = item(30, { updated_at: new Date(now - 60_000).toISOString() })
+  assert.deepEqual(partitionItems([stale], watch, { now, cooldownMs: 0 }).fresh, [])
+  assert.deepEqual(partitionItems([stale], watch, { now, cooldownMs: 0, floorMs: now - 3_600_000 }).fresh.map((row) => row.number), [30])
+  const seenWatch = { cursor: new Date(now).toISOString(), seen: { 30: new Date(now - 30_000).toISOString() } }
+  assert.deepEqual(partitionItems([stale], seenWatch, { now, cooldownMs: 0, floorMs: 0 }).fresh, [], 'seen 优先于补报下限')
+})
+
+test('仓库守候：存量补报只做一次；忙 / 失败保留待补，观察消耗', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'relay-rw-backlog-'))
+  try {
+    const store = new RepoWatchStore(join(dir, 'repo-watches.json'))
+    await store.load()
+    let now = 100_000
+    let running = false
+    let pollError = false
+    const delivered = []
+    const stale = item(40, { updated_at: new Date(now - 60_000).toISOString() })
+    const runner = new RepoWatchRunner({
+      store, now: () => now,
+      poll: async () => { if (pollError) throw new Error('gh down'); return [stale] },
+      sessionState: async () => ({ exists: true, running }),
+      deliver: async (sessionId, text) => { delivered.push(text) }
+    })
+    const started = await runner.start({ repo: 'o/r', backlogHours: 2, intervalSec: 60 }, { sessionId: 's1', groupKey: 'g' })
+    assert.equal(started.backlog.pending, true)
+    const row = () => runner.list({ groupKey: 'g' })[0]
+    // 忙：不拉、不消耗
+    running = true
+    row().nextAt = now
+    await runner.tick()
+    assert.equal(row().backlog.pending, true)
+    // 轮询失败：保留待补
+    running = false
+    pollError = true
+    row().nextAt = now
+    await runner.tick()
+    assert.equal(row().backlog.pending, true)
+    // 成功：补报一次，消息带标记
+    pollError = false
+    now += 2000
+    row().nextAt = now
+    await runner.tick()
+    assert.equal(delivered.length, 1)
+    assert.match(delivered[0], /首次补报/)
+    assert.match(delivered[0], /#40/)
+    assert.equal(row().backlog.pending, false)
+    assert.ok(row().backlog.doneAt > 0)
+    // 第二次不再补
+    now += 60_000
+    row().nextAt = now
+    await runner.tick()
+    assert.equal(delivered.length, 1)
+    // update 带 backlogHours 重新武装；显式 0 关闭
+    await runner.update(started.id, { backlogHours: 48 })
+    assert.equal(row().backlog.pending, true)
+    await runner.update(started.id, { backlogHours: 0 })
+    assert.equal(row().backlog, null)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
