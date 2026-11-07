@@ -965,13 +965,14 @@ test('PR 页：已批准筛选与空态；批准 / 关闭走二次确认', async
 test('PR 页：已关闭列表可重开；关闭后的列表与打开的列表分开请求', async () => {
   const posted = []
   const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
-  const closed = { prs: { repo: 'o/r', state: 'closed', items: [{ number: 7, title: '修 bug', author: 'alice', url: 'https://github.com/o/r/pull/7', draft: false, reviewDecision: '', updatedAt: '2026-11-07T00:00:00Z', comments: 0, head: 'fix/x', base: 'main' }] } }
+  const closed = { prs: { repo: 'o/r', state: 'closed', items: [{ number: 7, title: '修 bug', author: 'alice', url: 'https://github.com/o/r/pull/7', draft: false, merged: false, reviewDecision: '', updatedAt: '2026-11-07T00:00:00Z', comments: 0, head: 'fix/x', base: 'main' }, { number: 8, title: '已合并', author: 'bob', url: 'https://github.com/o/r/pull/8', draft: false, merged: true, reviewDecision: '', updatedAt: '2026-11-06T00:00:00Z', comments: 1, head: 'a', base: 'main' }] } }
   // PrTab 的 9 个 useState：data / error / busy / filter / openNo / comment / pending / running / prState
   const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [closed, undefined, false, 'all', 7, '', { number: 7, kind: 'reopen' }, undefined, 'closed'] }))
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
-  for (const part of ['prStateOpen', 'prStateClosed', 'prReopen', 'prConfirmReopen']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['prStateOpen', 'prStateClosed', 'prReopen', 'prConfirmReopen', 'prMerged']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.equal((text.match(/prReopen/g) || []).length >= 1, true, '未合并的关闭 PR 可重开')
   await findButton(tree, (label) => label === 'prConfirm').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(lastPost(posted), { action: 'pr-state', number: 7, state: 'reopen', fromSession: 'session-self' })
