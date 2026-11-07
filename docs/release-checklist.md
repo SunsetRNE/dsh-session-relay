@@ -31,7 +31,7 @@ node --test --test-concurrency=1 test/*.test.js
 ## 2. 版本号与 CHANGELOG
 
 - `package.json` version 为 `2.0.0`，tag 为 `v2.0.0`。
-- CHANGELOG 的版本标题用 `## 2.0.0 - YYYY-MM-DD`；本仓库既有条目都用 UTC 日期（2.0.0 写 `2026-11-06`）。
+- CHANGELOG 的版本标题用 `## 2.0.0 - YYYY-MM-DD`；本仓库既有条目都用 UTC 日期（2.0.0 写 `2026-11-07`）。
 - 2.0.0 段按主题收口（侧栏 / 任务与审批 / GitHub / 模板与搜索 / 协作可靠性），不再保留逐检查点的「未发布」段。
 - 从 1.11.x 升级：任务库的 `stage` / `approval` 是增量字段，旧任务缺字段时降级显示；issue / repo / sync 开关默认关，不打开不会写 GitHub。
 
