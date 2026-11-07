@@ -108,7 +108,7 @@ git tag v<版本> && git push origin v<版本>
 gh release create v<版本> dist/dsh-session-relay-<版本>.tgz --title v<版本> --notes-file <说明文件>
 ```
 
-每个 Release 只挂一个 `.tgz`：插件管理器按 Release 安装时只认唯一一个压缩包附件。逐项走 [发版清单](docs/release-checklist.md)（测试、版本号、tag、Release 说明、市场条目、发版后核对）；2.1.0 的 Release 说明草稿在 [docs/release-notes-2.1.0.md](docs/release-notes-2.1.0.md)。
+每个 Release 只挂一个 `.tgz`：插件管理器按 Release 安装时只认唯一一个压缩包附件。逐项走 [发版清单](docs/release-checklist.md)（测试、版本号、tag、Release 说明、市场条目、发版后核对）；2.2.0 的 Release 说明草稿在 [docs/release-notes-2.2.0.md](docs/release-notes-2.2.0.md)。
 
 **已发布的 Release 和 tag 一律保留，永远不删、不改写**（用户 2026-11-06 定）：插件市场条目、别人的安装记录都可能钉在某个具体版本上，删掉或改写历史版本等于让那些安装直接断链。要修正内容就发新版本，不做撤回。
 
