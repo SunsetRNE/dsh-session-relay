@@ -9,11 +9,13 @@ test('PR / issue 列表解析：字段归一、排序不动、坏输出拒绝', 
   const prs = parsePullRequests(JSON.stringify([
     { number: 7, title: '修 bug', author: { login: 'alice' }, url: 'https://github.com/o/r/pull/7', isDraft: false, reviewDecision: 'CHANGES_REQUESTED', updatedAt: '2026-11-07T01:00:00Z', comments: 3, headRefName: 'fix/x', baseRefName: 'main' },
     { number: 8, title: '已合', mergedAt: '2026-11-07T02:00:00Z' },
+    { number: 9, title: '有评论', comments: [{}, {}] },
     { number: 0, title: '坏条目' }
   ]))
-  assert.equal(prs.length, 2)
+  assert.equal(prs.length, 3)
   assert.deepEqual({ n: prs[0].number, r: prs[0].reviewDecision, a: prs[0].author, h: prs[0].head }, { n: 7, r: 'CHANGES_REQUESTED', a: 'alice', h: 'fix/x' })
   assert.equal(prs[1].merged, true)
+  assert.equal(prs[2].comments, 2, 'comments 数组按条数')
   assert.throws(() => parsePullRequests('not json'), /不是 JSON/)
   assert.throws(() => parsePullRequests('{}'), /不是数组/)
 

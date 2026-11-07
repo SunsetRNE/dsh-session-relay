@@ -83,11 +83,11 @@ test('侧栏分支：聚合全部登记工作区；单工作区失败不影响�
   try {
     const view = await h.relay.branchListView()
     assert.deepEqual(calls, [two, one])
-    assert.deepEqual(view.workspaces.map((row) => row.workspace.title), ['乙', '甲'], '按标题排序')
-    assert.match(view.workspaces[0].error, /not a git repository/)
-    assert.equal(view.workspaces[1].current, 'main')
-    assert.deepEqual(view.workspaces[1].local, [{ name: 'main' }])
-    assert.equal(view.workspaces[1].error, null)
+    assert.equal(view.skipped, 1, '非 git 工作区被跳过')
+    assert.deepEqual(view.workspaces.map((row) => row.workspace.title), ['甲'], '只列 git 工作区')
+    assert.equal(view.workspaces[0].current, 'main')
+    assert.deepEqual(view.workspaces[0].local, [{ name: 'main' }])
+    assert.equal(view.workspaces[0].error, null)
   } finally { await h.cleanup(); await rm(base, { recursive: true, force: true }) }
 })
 
