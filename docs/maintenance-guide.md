@@ -48,11 +48,12 @@
 - **面板查询参数不校验**：空查询、浮点/负数轮次、超出会话/命中上限、`scope=all` 同时带 workspace 都应在路由层拒绝，不能静默裁剪后返回误导结果。
 - **路径/工作区软链陷阱**：不要把 DSH 工作目录或插件加载路径做成软链。工作目录检查不跟随软链，reload 可能报 `ENOTDIR`；仓库应使用真实目录。
 - **外壳与实现边界**：改 `lib/client.js` 是面板热更新；改 `lib/impl.js` 需 `/relay reload`；改 `lib/index.js`、`package.json` 的 `dsh` 字段或 `cordis.patch.yml` 需要重启 DSH。
-- **面板 / 侧栏 chunk 缓存（2026-11-07 实锤）**：`lib/client.js` 是外壳，DSH 启动时加载；`/relay reload` 只换实现和 staged 的 lib 文件，不换外壳。
+- **面板 / 侧栏 chunk 缓存（2026-11-07 实锤；当晚更正重启结论）**：`lib/client.js` 是网页入口，DSH 的客户端热更新会重拉；`/relay reload` 只换服务端实现和 staged 的 lib 文件。
   - 只改 `lib/client.panel.js`：必须同步改一行 `lib/client.js`（注释即可），并把 `PANEL_KIT` 与 `client.panel.js` 的 `KIT_VERSION` 一起加 1；否则浏览器继续用旧面板——`/relay reload` 提示正常，但页面完全没变（邮箱裸文本就是这样复现的）。
-  - 只改 `lib/client.sidebar.js`：必须同步改一行 `lib/client.js`，并把 `SIDEBAR_KIT` 与 `client.sidebar.js` 的 `KIT_VERSION` 一起加 1（本次 2→3）；浏览器热更新只看入口文件版本，否则侧栏继续用旧 chunk。
-  - 改过 `lib/client.js` 或 `lib/index.js`：`/relay reload` 不够，必须重启 DSH（外壳文件），再整页刷新。
-  - 验证顺序：`/relay reload` → 整页/重开页面 → 仍旧则重启 DSH；不要反复改业务文件“试”。`PANEL_KIT === client.panel.js KIT_VERSION` 已有测试覆盖。
+  - 只改 `lib/client.sidebar.js`：必须同步改一行 `lib/client.js`，并把 `SIDEBAR_KIT` 与 `client.sidebar.js` 的 `KIT_VERSION` 一起加 1（本次 3→4）；浏览器热更新只看入口文件版本，否则侧栏继续用旧 chunk。
+  - `lib/client.js` 本身：2026-11-07 本机实测，DSH 进程 11:23Z 启动、11:29–11:32 改的 `client.js` / 侧栏 / 面板都在页面里直接生效，**没有重启 DSH**；先等热更新或整页刷新，不要默认要求重启。宿主没开客户端热更新、页面仍旧时才重启。
+  - `lib/index.js`、`package.json` 的 `dsh` 字段、`cordis.patch.yml`：仍然必须重启 DSH（服务端外壳 / 启动期注册）。
+  - 验证顺序：等客户端热更新 / 整页刷新（需要时 `/relay reload` 换实现）→ 仍旧则重启 DSH；不要反复改业务文件“试”。`PANEL_KIT === client.panel.js KIT_VERSION`、`SIDEBAR_KIT === client.sidebar.js KIT_VERSION` 已有测试覆盖。
 - **发布物约束**：不发 npm；每个 GitHub Release 只挂一个 `.tgz`，插件管理器按唯一附件安装。
 - **每步注入的上下文要短且稳定**：协作上下文每一步都进模型提示，慢模型尤其吃亏。
   - 旁观会话（本组有主会话、本会话未加入）只拿一行版本线摘要（`OBSERVER_LINE_LIMIT`）、一行插件核验（`mainBriefLine`）和一行看板计数（`boardBrief`）；没有主会话时照常给完整看板段。
