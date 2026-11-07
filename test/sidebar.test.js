@@ -980,6 +980,23 @@ test('PR 页：已关闭列表可重开；关闭后的列表与打开的列表�
   assert.deepEqual(lastPost(posted), { action: 'pr-state', number: 7, state: 'reopen', fromSession: 'session-self' })
 })
 
+test('PR 详情：点详情展开评审与评论正文，空数据有说明', async () => {
+  const detail = { prDetail: { repo: 'o/r', detail: {
+    number: 7, body: 'PR 说明', reviews: [{ login: 'bob', state: 'changes-requested', body: '改一下', submittedAt: '2026-11-07T00:00:00Z' }],
+    comments: [{ login: 'carol', body: '收到', createdAt: '2026-11-07T01:00:00Z' }]
+  } } }
+  // PrDetail 的 3 个 useState：data / error / busy
+  const React = fakeReact([detail, undefined, false])
+  const { mod } = await load('client.sidebar.js', React)
+  const text = textOf(React.createElement(mod.PrDetail, { kit: kitFor(), sessionId: 's1', number: 7 }))
+  for (const part of ['PR 说明', 'prReviewsTitle', '改一下', 'prReviewChanges', 'prCommentsTitle', '收到']) assert.ok(text.includes(part), '缺少 ' + part)
+
+  const React2 = fakeReact([{ prDetail: { detail: { number: 7, reviews: [], comments: [] } } }, undefined, false])
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const empty = textOf(React2.createElement(mod2.PrDetail, { kit: kitFor(), sessionId: 's1', number: 7 }))
+  assert.ok(empty.includes('prNoReviews') && empty.includes('prNoComments'))
+})
+
 test('问题页：issue 列表与标签 / 指派，不混入地图', async () => {
   // IssueTab 的 3 个 useState：data / error / busy
   const React = fakeReact(states(sampleBoard(), { tab: 'issues', extra: [issueData(), undefined, false] }))

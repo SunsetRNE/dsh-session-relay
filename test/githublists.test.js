@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   GitHubLists, LIST_TTL_MS, assertBranchDeletable, commandError, parseDefaultBranch, parseIssues,
-  parseLocalBranches, parsePullRequests, parseRemoteBranches, requireRepo, validateBranchName
+  parseLocalBranches, parsePullDetail, parsePullRequests, parseRemoteBranches, requireRepo, validateBranchName
 } from '../lib/githublists.js'
 
 test('PR / issue 列表解析：字段归一、排序不动、坏输出拒绝', () => {
@@ -24,6 +24,20 @@ test('PR / issue 列表解析：字段归一、排序不动、坏输出拒绝', 
   ]))
   assert.deepEqual(issues[0].labels, ['bug', 'ui'])
   assert.deepEqual(issues[0].assignees, ['carol'])
+})
+
+test('PR 详情解析：评审与评论正文', () => {
+  const detail = parsePullDetail(JSON.stringify({
+    number: 7, title: '修 bug', body: '说明', author: { login: 'alice' }, state: 'OPEN', isDraft: false, mergedAt: null,
+    url: 'u', createdAt: 't0', updatedAt: 't1',
+    reviews: [{ author: { login: 'bob' }, state: 'CHANGES_REQUESTED', body: '改一下', submittedAt: 't2' }],
+    comments: [{ author: { login: 'carol' }, body: '收到', createdAt: 't3' }]
+  }))
+  assert.equal(detail.number, 7)
+  assert.equal(detail.reviews[0].state, 'changes-requested')
+  assert.equal(detail.reviews[0].body, '改一下')
+  assert.equal(detail.comments[0].login, 'carol')
+  assert.throws(() => parsePullDetail('[]'), /不是对象/)
 })
 
 test('分支解析：本地 / 远端 / 默认分支', () => {
@@ -68,6 +82,7 @@ function fakeTools() {
     const joined = args.join(' ')
     if (joined.startsWith('pr list')) return { stdout: JSON.stringify([{ number: 7, title: 'x', author: { login: 'a' }, url: 'u', isDraft: false, reviewDecision: 'APPROVED', updatedAt: 't', comments: 0, headRefName: 'h', baseRefName: 'main' }]), stderr: '' }
     if (joined.startsWith('issue list')) return { stdout: JSON.stringify([{ number: 9, title: 'i', author: { login: 'b' }, url: 'u', updatedAt: 't', comments: 0, labels: [], assignees: [] }]), stderr: '' }
+    if (joined.startsWith('pr view')) return { stdout: JSON.stringify({ number: 7, title: 'x', body: 'b', author: { login: 'a' }, state: 'OPEN', reviews: [], comments: [], url: 'u' }), stderr: '' }
     if (joined.startsWith('pr review') || joined.startsWith('pr comment') || joined.startsWith('pr close') || joined.startsWith('pr reopen')) return { stdout: '', stderr: '' }
     throw Object.assign(new Error('unknown gh ' + joined), { stderr: 'unknown gh' })
   }

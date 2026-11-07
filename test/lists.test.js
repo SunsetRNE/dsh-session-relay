@@ -54,6 +54,23 @@ test('侧栏列表：PR / 问题按当前工作区仓库取，状态透传', asy
   } finally { await h.cleanup(); await rm(base, { recursive: true, force: true }) }
 })
 
+test('PR 详情：按当前工作区仓库与 PR 号取，非法编号拒绝', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'relay-ws-detail-'))
+  const repo = await makeRepo(base, 'detail')
+  const calls = []
+  const lists = {
+    pullRequests: async () => ({ items: [] }), issues: async () => ({ items: [] }), branches: async () => ({ local: [], remote: [] }),
+    pullRequestDetail: async (name, number) => { calls.push([name, number]); return { repo: name, detail: { number, reviews: [], comments: [] } } }
+  }
+  const h = await makeRelay({ lists, workspaces: [{ id: 'ws1', title: '项目', path: repo, sessionIds: ['s1'] }] })
+  try {
+    const view = await h.relay.prDetailView({ fromSession: 's1', number: 7 })
+    assert.equal(view.detail.number, 7)
+    assert.deepEqual(calls, [['o/detail', 7]])
+    await assert.rejects(() => h.relay.prDetailView({ fromSession: 's1', number: 0 }), /正整数/)
+  } finally { await h.cleanup(); await rm(base, { recursive: true, force: true }) }
+})
+
 test('侧栏列表：无工作区路径 / 无 GitHub origin 给空态而不是抛错', async () => {
   const lists = { pullRequests: async () => ({ items: [] }), issues: async () => ({ items: [] }), branches: async () => ({ local: [], remote: [] }) }
   const h = await makeRelay({ lists, workspaces: [] })
