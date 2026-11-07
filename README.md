@@ -56,15 +56,24 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - **仓库链接**：`https://github.com/SunsetRNE/dsh-session-relay` 装 main 最新提交；指定版本用 `https://github.com/SunsetRNE/dsh-session-relay/tree/v<版本>`。
 - **本地压缩包**：下载 Release 附件后导入。
 
-## 仓库守候（2.1.0）
+## 仓库守候（2.1.0 起，2.2.0 补完整可视化）
 
 会话可以让插件只读盯一个 GitHub 仓库的 issue / PR：有新动态时，插件只在会话空闲时叫醒它，并把条目、目标与完成标准一起带进消息。
 
 - 开启：直接对模型说「守候 owner/name」，或让它调用 `peer_repo_watch action=start repo=owner/name goal="处理这个仓库的 issue"`；同一会话同一仓库重复 start 是更新。
 - 过滤：标签白名单 / 排除标签 / 作者白名单 / 仅指派 / 跳过已关闭 / 跳过草稿 / 跳过机器人；另有活跃时段、每小时唤醒上限、单次批量上限与观察模式。
-- 收口：模型 `peer_repo_watch action=ack` 只做本机 ack；要让 GitHub 也留痕，由用户在侧栏「仓库守候」卡片点「在 GitHub 打 ack 标签」写 `relay:ack`。
-- 诊断：`peer_repo_watch action=list` 会列出上次轮询 / 唤醒、延后原因、最近过滤原因与上次错误；侧栏动态页也有同一份卡片。
-- 2.1.0 只支持 GitHub；Gitee、自动隔离 worktree、卫星环与完整守候面板在 2.2.0。
+- 收口：模型 `peer_repo_watch action=ack` 只做本机 ack；要让 GitHub 也留痕，由用户在「设置 → 仓库守候 → 触发」里点「在 GitHub 打 ack 标签」写 `relay:ack`。
+- 诊断：`peer_repo_watch action=list` 会列出上次轮询 / 唤醒、延后原因、最近过滤原因与上次错误；侧栏「设置 → 仓库守候 → 判定」有同一份原因链。
+- 可视化（2.2.0）：输入框左侧卫星环显示本会话守候的运行 / 观察 / 暂停 / 异常；设置 → 仓库守候分总览 / 判定 / 触发 / 设置四页签。
+- 存量补报（2.2.0）：登记时可选 `backlogHours`（0–720，默认关），第一次成功轮询把最近 N 小时的存量报一次，之后只报新动态。
+- 2.1.0 起只支持 GitHub；Gitee、自动隔离 worktree 仍在 2.2.0 后续。
+
+## 右侧边栏（2.2.0）
+
+- 8 个页签：会话 / 任务 / 交接 / 地图 / PR / 分支 / 问题 / 更多；侧栏压到 620px 以下时，地图 / PR / 分支 / 问题 折进「更多」，以列表入口打开。
+- 地图：任务地图票子 + 本地票子；问题：远端 issue 列表；PR：远端 PR 列表，审批 / 评论 / 关闭 / 重开只由用户点击；分支：全部登记工作区的本地 / 远端分支，删除逐条确认（远端要输入分支名，默认分支和当前分支不可删）。
+- 更多：邮箱、同步队列、仓库探测；GitHub 账号与登录只在「设置」里。
+- 模型没有 PR 审批 / 评论 / 分支删除的入口；推送、合并、发版仍由用户决定。
 
 ## 开发
 
