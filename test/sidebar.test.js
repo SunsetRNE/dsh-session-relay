@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 9 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 10 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -133,7 +133,7 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const loaded = await lazyFactory()
   assert.equal(textOf(loaded.default()), 'sideStale')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 9, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 10, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -964,13 +964,20 @@ test('PR 页：已批准筛选与空态；批准 / 关闭走二次确认', async
   const modClosed = (await load('client.sidebar.js', ReactClosed)).mod
   assert.ok(textOf(ReactClosed.createElement(modClosed.RelaySidebar, { kit, sessionId: 'session-self' })).includes('prClosedEmpty'), '已关闭列表空态单独文案')
 
-  const React2 = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, '', { number: 7, kind: 'approve' }, undefined] }))
+  const errorView = { prs: { repo: 'o/r', items: [], error: '当前工作区没有 GitHub origin' } }
+  const ReactErr = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [errorView, undefined, false, 'all', undefined] }))
+  const modErr = (await load('client.sidebar.js', ReactErr)).mod
+  const errorText = textOf(ReactErr.createElement(modErr.RelaySidebar, { kit, sessionId: 'session-self' }))
+  assert.ok(errorText.includes('没有 GitHub origin'), '错误原因照常显示')
+  assert.ok(!errorText.includes('prEmpty'), '有错误时不再叠一句「没有打开的 PR」')
+
+  const React2 = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, '附言', { number: 7, kind: 'approve' }, undefined] }))
   const mod2 = (await load('client.sidebar.js', React2)).mod
   const tree2 = React2.createElement(mod2.RelaySidebar, { kit, sessionId: 'session-self' })
   assert.ok(textOf(tree2).includes('prConfirmApprove'))
   await findButton(tree2, (label) => label === 'prConfirm').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
-  assert.deepEqual(lastPost(posted), { action: 'pr-review', number: 7, verdict: 'approve', fromSession: 'session-self' })
+  assert.deepEqual(lastPost(posted), { action: 'pr-review', number: 7, verdict: 'approve', body: '附言', fromSession: 'session-self' })
 
   const React3 = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, '', { number: 7, kind: 'close' }, undefined] }))
   const mod3 = (await load('client.sidebar.js', React3)).mod
@@ -982,7 +989,7 @@ test('PR 页：已批准筛选与空态；批准 / 关闭走二次确认', async
 
 test('PR 页：已关闭列表可重开；关闭后的列表与打开的列表分开请求', async () => {
   const posted = []
-  const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
+  const kit = { ...kitFor(), request: async (...args) => { posted.push(args); return {} } }
   const closed = { prs: { repo: 'o/r', state: 'closed', items: [{ number: 7, title: '修 bug', author: 'alice', url: 'https://github.com/o/r/pull/7', draft: false, merged: false, reviewDecision: '', updatedAt: '2026-11-07T00:00:00Z', comments: 0, head: 'fix/x', base: 'main' }, { number: 8, title: '已合并', author: 'bob', url: 'https://github.com/o/r/pull/8', draft: false, merged: true, reviewDecision: '', updatedAt: '2026-11-06T00:00:00Z', comments: 1, head: 'a', base: 'main' }] } }
   // PrTab 的 9 个 useState：data / error / busy / filter / openNo / comment / pending / running / prState
   const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [closed, undefined, false, 'all', 7, '', { number: 7, kind: 'reopen' }, undefined, 'closed'] }))
@@ -994,6 +1001,11 @@ test('PR 页：已关闭列表可重开；关闭后的列表与打开的列表�
   await findButton(tree, (label) => label === 'prConfirm').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(lastPost(posted), { action: 'pr-state', number: 7, state: 'reopen', fromSession: 'session-self' })
+
+  await findButton(tree, (label) => label === 'tasksRefresh').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const lastGet = posted.filter(([method]) => method === 'GET').at(-1)
+  assert.deepEqual(lastGet?.[2], { view: 'pr-list', session: 'session-self', state: 'closed', force: 1 }, '已关闭视图点刷新仍请求已关闭列表')
 })
 
 test('PR 详情：点详情展开评审与评论正文，空数据有说明', async () => {

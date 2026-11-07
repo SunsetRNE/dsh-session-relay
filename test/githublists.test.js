@@ -144,6 +144,21 @@ test('PR 写动作：approve / 评论 / 关闭重开带审计；缺正文拒绝'
   assert.deepEqual(audits.map((row) => row.event), ['pr-approve', 'pr-close', 'pr-reopen'])
 })
 
+test('PR 写动作：清掉打开 / 已关闭列表与详情缓存', async () => {
+  const { gh, git, calls } = fakeTools()
+  const lists = new GitHubLists({ gh, git, now: () => 1000 })
+  await lists.pullRequests('o/r')
+  await lists.pullRequests('o/r', { state: 'closed' })
+  await lists.pullRequestDetail('o/r', 7)
+  assert.equal(calls.gh.length, 3)
+  await lists.prAction('o/r', 7, 'comment', { body: '收到' })
+  assert.equal(calls.gh.length, 4)
+  await lists.pullRequests('o/r')
+  await lists.pullRequests('o/r', { state: 'closed' })
+  await lists.pullRequestDetail('o/r', 7)
+  assert.equal(calls.gh.length, 7, '写后列表与详情缓存都失效')
+})
+
 test('分支删除：当前 / 默认 / 未合并 / 远端确认名', async () => {
   const { gh, git } = fakeTools()
   const audits = []
