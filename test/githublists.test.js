@@ -121,7 +121,8 @@ test('PR 写动作：approve / 评论 / 关闭重开带审计；缺正文拒绝'
   await assert.rejects(() => lists.prAction('o/r', 7, 'comment', { body: '  ' }), /不能为空/)
   await assert.rejects(() => lists.prAction('o/r', 7, 'request-changes', {}), /请求修改/)
   await lists.prAction('o/r', 7, 'close')
-  assert.deepEqual(audits.map((row) => row.event), ['pr-approve', 'pr-close'])
+  await lists.prAction('o/r', 7, 'reopen')
+  assert.deepEqual(audits.map((row) => row.event), ['pr-approve', 'pr-close', 'pr-reopen'])
 })
 
 test('分支删除：当前 / 默认 / 未合并 / 远端确认名', async () => {

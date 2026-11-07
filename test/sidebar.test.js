@@ -962,6 +962,21 @@ test('PR 页：已批准筛选与空态；批准 / 关闭走二次确认', async
   assert.deepEqual(lastPost(posted), { action: 'pr-state', number: 7, state: 'close', fromSession: 'session-self' })
 })
 
+test('PR 页：已关闭列表可重开；关闭后的列表与打开的列表分开请求', async () => {
+  const posted = []
+  const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
+  const closed = { prs: { repo: 'o/r', state: 'closed', items: [{ number: 7, title: '修 bug', author: 'alice', url: 'https://github.com/o/r/pull/7', draft: false, reviewDecision: '', updatedAt: '2026-11-07T00:00:00Z', comments: 0, head: 'fix/x', base: 'main' }] } }
+  // PrTab 的 9 个 useState：data / error / busy / filter / openNo / comment / pending / running / prState
+  const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [closed, undefined, false, 'all', 7, '', { number: 7, kind: 'reopen' }, undefined, 'closed'] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const text = textOf(tree)
+  for (const part of ['prStateOpen', 'prStateClosed', 'prReopen', 'prConfirmReopen']) assert.ok(text.includes(part), '缺少 ' + part)
+  await findButton(tree, (label) => label === 'prConfirm').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(lastPost(posted), { action: 'pr-state', number: 7, state: 'reopen', fromSession: 'session-self' })
+})
+
 test('问题页：issue 列表与标签 / 指派，不混入地图', async () => {
   // IssueTab 的 3 个 useState：data / error / busy
   const React = fakeReact(states(sampleBoard(), { tab: 'issues', extra: [issueData(), undefined, false] }))
