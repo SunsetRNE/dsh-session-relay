@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GitHubIdentity, LOGIN_SCOPES, SCOPE_TIERS, impliedScopes, loginArgs, missingScopes, parseDeviceLogin, parseUserResponse, shellHasGithub, tierScopes } from '../lib/github.js'
+import { GitHubIdentity, LOGIN_SCOPES, PROBE_ERROR_RETRY_MS, SCOPE_TIERS, impliedScopes, loginArgs, missingScopes, parseDeviceLogin, parseUserResponse, shellHasGithub, tierScopes } from '../lib/github.js'
 
 const userReply = (login, id, scopes = 'repo, workflow') => ({ stdout: `HTTP/2.0 200 OK\r\nX-Oauth-Scopes: ${scopes}\r\n\r\n${JSON.stringify({ login, id })}`, stderr: '' })
 
@@ -318,4 +318,41 @@ test('github 视图带每档 scope 清单：前端据此判断「已补足」', 
     assert.deepEqual(view.tiers.basic, SCOPE_TIERS.basic)
     assert.deepEqual(view.tiers.all, LOGIN_SCOPES)
   } finally { await h.cleanup() }
+})
+
+test('github 中间态：探测中给 reading，失败给 retryAt 并保留上次成功账号', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'relay-gh-view-'))
+  try {
+    let mode = 'slow'
+    let release
+    const gate = new Promise((resolve) => { release = resolve })
+    const identity = new GitHubIdentity(join(dir, 'github.json'), undefined, {
+      gh: async () => {
+        if (mode === 'slow') await gate
+        if (mode === 'fail') throw Object.assign(new Error('timeout'), { stderr: 'dial tcp: i/o timeout' })
+        return userReply('alice', 101)
+      },
+      bridge: { get: async () => ({ result: 'VERSION=1\n' }), post: async () => ({}), open: async () => {} },
+      now: () => 1_000
+    })
+    await identity.load()
+    const pending = identity.probe()
+    const during = identity.view()
+    assert.equal(during.reading, true, '探测在飞时给中间态')
+    assert.equal(during.readingSince, 1_000)
+    assert.equal(during.lastReady, null)
+    release()
+    await pending
+    const ready = identity.view()
+    assert.equal(ready.reading, false)
+    assert.equal(ready.state, 'ready')
+    assert.equal(ready.lastReady.login, 'alice')
+    assert.equal(ready.retryAt, null)
+    mode = 'fail'
+    const failed = await identity.probe()
+    assert.equal(failed.state, 'error')
+    const view = identity.view()
+    assert.equal(view.retryAt, 1_000 + PROBE_ERROR_RETRY_MS, '失败后给自动重试时间')
+    assert.equal(view.lastReady.login, 'alice', '失败不清掉上次成功')
+  } finally { await rm(dir, { recursive: true, force: true }) }
 })

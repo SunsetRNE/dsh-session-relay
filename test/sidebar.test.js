@@ -84,7 +84,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 2 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 3 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -105,7 +105,7 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const loaded = await lazyFactory()
   assert.equal(textOf(loaded.default()), 'sideStale')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 2, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 3, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -786,6 +786,33 @@ test('GitHub 登录卡：档位已补足时显示「已补足」状态，档位�
   assert.ok(!text.includes('ghTierBasic ✓'), '未覆盖的档位不带 ✓')
   const status = findNode(tree, (node) => node.props?.['aria-disabled'] === true && textOf(node).includes('ghTierCovered'))
   assert.ok(status !== undefined, '状态是不可点的一行')
+})
+
+test('GitHub 登录卡：还没读到身份时显示「正在读取账号…」，不给登录按钮，读取中不能重复点', async () => {
+  const github = { state: null, reading: true, match: 'unknown', pinned: null, scopes: [], loginFlow: null, error: null, lastReady: null }
+  const React = fakeReact(['repo'])
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.GitHubCard, { kit: kitFor(), github, busy: false, act: async () => ({}) })
+  const text = textOf(tree)
+  assert.ok(text.includes('ghStateReading') && text.includes('ghReadingHint'), '有读取中状态和说明')
+  assert.ok(!text.includes('ghLogin'), '身份未知时不给误导性的登录按钮')
+  const refresh = findButton(tree, (label) => label === 'ghRefreshBusy')
+  assert.ok(refresh !== undefined && refresh.props.disabled === true, '读取中时刷新按钮禁用并改文案')
+})
+
+test('GitHub 登录卡：读取失败给原因、自动重试提示和上次成功账号', async () => {
+  const github = {
+    state: 'error', match: 'error', error: 'dial tcp: i/o timeout', retryAt: 1_015, checkedAt: 1_000,
+    lastReady: { login: 'alice', accountId: 1, scopes: ['repo'], source: 'gh', at: 900 },
+    pinned: null, scopes: [], loginFlow: null
+  }
+  const React = fakeReact(['repo'])
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.GitHubCard, { kit: kitFor(), github, busy: false, act: async () => ({}) })
+  const text = textOf(tree)
+  assert.ok(text.includes('ghStateError') && text.includes('ghError'), '失败状态和原因都在')
+  assert.ok(text.includes('ghRetryAuto'), '明确告诉用户会自动重试')
+  assert.ok(text.includes('ghLastGood') && text.includes('alice'), '保留上次成功读到的账号')
 })
 
 test('设置页：GitHub 账号、仓库开关、同步与核验集中；返回页签；开关以用户身份提交', async () => {

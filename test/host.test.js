@@ -2059,6 +2059,10 @@ test('看板快照：lightweight 先给核心字段，完整快照再补声明/�
     assert.equal(light.declarations, null)
     assert.equal(light.taskBoard, null)
     assert.equal(light.setup, null)
+    // 交接页与 GitHub 卡片不再等完整快照：轻量首屏就带（都是本地/内存数据）
+    assert.ok(light.handoff !== null && typeof light.handoff === 'object', '轻量快照带交接数据')
+    assert.ok(light.github !== null && typeof light.github === 'object', '轻量快照带 GitHub 缓存视图')
+    assert.equal(light.github.state, null, '测试里不自动探测，先给空状态由前端显示读取中')
     const full = await h.relay.board(undefined, { session: h.caller.id })
     assert.equal(full.partial, false)
     assert.ok(Array.isArray(full.entries))

@@ -50,7 +50,7 @@
 - **外壳与实现边界**：改 `lib/client.js` 是面板热更新；改 `lib/impl.js` 需 `/relay reload`；改 `lib/index.js`、`package.json` 的 `dsh` 字段或 `cordis.patch.yml` 需要重启 DSH。
 - **面板 / 侧栏 chunk 缓存（2026-11-07 实锤）**：`lib/client.js` 是外壳，DSH 启动时加载；`/relay reload` 只换实现和 staged 的 lib 文件，不换外壳。
   - 只改 `lib/client.panel.js`：必须同步改一行 `lib/client.js`（注释即可），并把 `PANEL_KIT` 与 `client.panel.js` 的 `KIT_VERSION` 一起加 1；否则浏览器继续用旧面板——`/relay reload` 提示正常，但页面完全没变（邮箱裸文本就是这样复现的）。
-  - 只改 `lib/client.sidebar.js`：必须同步改一行 `lib/client.js`；浏览器热更新只看入口文件版本，否则侧栏继续用旧 chunk。
+  - 只改 `lib/client.sidebar.js`：必须同步改一行 `lib/client.js`，并把 `SIDEBAR_KIT` 与 `client.sidebar.js` 的 `KIT_VERSION` 一起加 1（本次 2→3）；浏览器热更新只看入口文件版本，否则侧栏继续用旧 chunk。
   - 改过 `lib/client.js` 或 `lib/index.js`：`/relay reload` 不够，必须重启 DSH（外壳文件），再整页刷新。
   - 验证顺序：`/relay reload` → 整页/重开页面 → 仍旧则重启 DSH；不要反复改业务文件“试”。`PANEL_KIT === client.panel.js KIT_VERSION` 已有测试覆盖。
 - **发布物约束**：不发 npm；每个 GitHub Release 只挂一个 `.tgz`，插件管理器按唯一附件安装。
