@@ -261,6 +261,8 @@ test('正文 chunk：样式随标签注入，不在入口里；不用 backdrop-f
   const withoutBusy = cssText.replace(/\.dshaSv_icon\[data-busy\][^}]*}/g, '')
   assert.ok(!/animation:[^;}]*infinite/.test(withoutBusy), '不要常驻动画')
   assert.ok(/@keyframes dshaSv_fadeIn/.test(cssText), '状态切换有短动画')
+  assert.ok(cssText.includes('@container (min-width:620px){.dshaSv .dshaSv_foldOnly{display:none}}'), '宽屏隐藏折叠入口，双类名压过 .dshaSv_sec')
+  assert.ok(cssText.includes('@container (max-width:619px){.dshaSv .dshaSv_foldTab{display:none}}'), '窄屏隐藏折叠页签')
 })
 
 test('正文 chunk：空白会话按服务端分类显示「空白」，不算进行中；没有待领任务给提示；不用黑色 brand-primary', async () => {
