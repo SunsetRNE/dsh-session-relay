@@ -94,7 +94,7 @@ async function setup(options = {}) {
     stageRoot: STAGE, identityForAll: false,
     notify: async (title, text) => { notified.push([title, text]) },
     restart: { intervalMs: 1_000_000, stableMs: 0 },
-    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), pinPath: join(dir, 'pins.json'), watchPath: join(dir, 'watches.json'), watch: false, autoPinIntervalMs: 0, titlePath: join(dir, 'titles.json'), autoTitleIntervalMs: 0, chainWatchIntervalMs: 0, deadlinePath: join(dir, 'deadlines.json'), deadlineTickMs: 0, remoteReleaseTags: false, maxHops: 2, githubAuto: false,
+    aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'), handoffPath: join(dir, 'handoffs.json'), pinPath: join(dir, 'pins.json'), watchPath: join(dir, 'watches.json'), watch: false, autoPinIntervalMs: 0, titlePath: join(dir, 'titles.json'), autoTitleIntervalMs: 0, chainWatchIntervalMs: 0, deadlinePath: join(dir, 'deadlines.json'), deadlineTickMs: 0, remoteReleaseTags: false, maxHops: 2, githubAuto: false, repoWatchTickMs: 0,
     ...options,
     setTimer: (fn) => { timers.push(fn); return timers.length }, clearTimer: () => {}
   })
@@ -111,7 +111,7 @@ test('注册了 /relay 与四个 peer 工具', async () => {
   try {
     assert.ok(h.commands.has('relay'))
     assert.equal(h.routes[0].path, '/api/dsha-session-relay')
-    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_ask_user', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_line', 'peer_list', 'peer_mail', 'peer_report', 'peer_send', 'peer_spawn', 'peer_task', 'peer_tasks', 'peer_watch'])
+    assert.deepEqual([...h.tools.keys()].sort(), ['peer_alias', 'peer_ask_user', 'peer_assign', 'peer_handoff', 'peer_inspect', 'peer_line', 'peer_list', 'peer_mail', 'peer_repo_watch', 'peer_report', 'peer_send', 'peer_spawn', 'peer_task', 'peer_tasks', 'peer_watch'])
   } finally { await h.cleanup() }
 })
 
@@ -2063,9 +2063,31 @@ test('看板快照：lightweight 先给核心字段，完整快照再补声明/�
     assert.ok(light.handoff !== null && typeof light.handoff === 'object', '轻量快照带交接数据')
     assert.ok(light.github !== null && typeof light.github === 'object', '轻量快照带 GitHub 缓存视图')
     assert.equal(light.github.state, null, '测试里不自动探测，先给空状态由前端显示读取中')
+    assert.ok(light.repoWatches !== null && Array.isArray(light.repoWatches.watches), '轻量快照带仓库守候列表')
     const full = await h.relay.board(undefined, { session: h.caller.id })
     assert.equal(full.partial, false)
     assert.ok(Array.isArray(full.entries))
+  } finally { await h.cleanup() }
+})
+
+test('仓库守候：peer_repo_watch 登记 / 列表 / ack / 停止；轻量看板带守候列表', async () => {
+  const h = await setup()
+  try {
+    const id = 'o/r#' + h.caller.id
+    const started = await h.call('peer_repo_watch', { action: 'start', repo: 'o/r', goal: '处理 issue', intervalSec: 60 })
+    assert.match(started, /已登记仓库守候/)
+    assert.match(started, /o\/r/)
+    const listed = await h.call('peer_repo_watch', { action: 'list' })
+    assert.match(listed, /仓库守候/)
+    assert.match(listed, /o\/r/)
+    const acked = await h.call('peer_repo_watch', { action: 'ack', id, numbers: [3, 4] })
+    assert.match(acked, /已在本地标记 #3 #4/)
+    const board = await h.relay.board(undefined, { session: h.caller.id, lightweight: true })
+    assert.equal(board.repoWatches.total, 1)
+    assert.equal(board.repoWatches.watches[0].repo, 'o/r')
+    const stopped = await h.call('peer_repo_watch', { action: 'stop', id })
+    assert.match(stopped, /已停止守候/)
+    assert.equal((await h.relay.board(undefined, { session: h.caller.id, lightweight: true })).repoWatches.total, 0)
   } finally { await h.cleanup() }
 })
 

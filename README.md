@@ -56,6 +56,16 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - **仓库链接**：`https://github.com/SunsetRNE/dsh-session-relay` 装 main 最新提交；指定版本用 `https://github.com/SunsetRNE/dsh-session-relay/tree/v<版本>`。
 - **本地压缩包**：下载 Release 附件后导入。
 
+## 仓库守候（2.1.0）
+
+会话可以让插件只读盯一个 GitHub 仓库的 issue / PR：有新动态时，插件只在会话空闲时叫醒它，并把条目、目标与完成标准一起带进消息。
+
+- 开启：直接对模型说「守候 owner/name」，或让它调用 `peer_repo_watch action=start repo=owner/name goal="处理这个仓库的 issue"`；同一会话同一仓库重复 start 是更新。
+- 过滤：标签白名单 / 排除标签 / 作者白名单 / 仅指派 / 跳过已关闭 / 跳过草稿 / 跳过机器人；另有活跃时段、每小时唤醒上限、单次批量上限与观察模式。
+- 收口：模型 `peer_repo_watch action=ack` 只做本机 ack；要让 GitHub 也留痕，由用户在侧栏「仓库守候」卡片点「在 GitHub 打 ack 标签」写 `relay:ack`。
+- 诊断：`peer_repo_watch action=list` 会列出上次轮询 / 唤醒、延后原因、最近过滤原因与上次错误；侧栏动态页也有同一份卡片。
+- 2.1.0 只支持 GitHub；Gitee、自动隔离 worktree、卫星环与完整守候面板在 2.2.0。
+
 ## 开发
 
 ```sh
@@ -89,7 +99,7 @@ git tag v<版本> && git push origin v<版本>
 gh release create v<版本> dist/dsh-session-relay-<版本>.tgz --title v<版本> --notes-file <说明文件>
 ```
 
-每个 Release 只挂一个 `.tgz`：插件管理器按 Release 安装时只认唯一一个压缩包附件。逐项走 [发版清单](docs/release-checklist.md)（测试、版本号、tag、Release 说明、市场条目、发版后核对）；2.0.0 的 Release 说明草稿在 [docs/release-notes-2.0.0.md](docs/release-notes-2.0.0.md)。
+每个 Release 只挂一个 `.tgz`：插件管理器按 Release 安装时只认唯一一个压缩包附件。逐项走 [发版清单](docs/release-checklist.md)（测试、版本号、tag、Release 说明、市场条目、发版后核对）；2.1.0 的 Release 说明草稿在 [docs/release-notes-2.1.0.md](docs/release-notes-2.1.0.md)。
 
 **已发布的 Release 和 tag 一律保留，永远不删、不改写**（用户 2026-11-06 定）：插件市场条目、别人的安装记录都可能钉在某个具体版本上，删掉或改写历史版本等于让那些安装直接断链。要修正内容就发新版本，不做撤回。
 

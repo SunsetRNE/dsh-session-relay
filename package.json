@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-relay",
   "description": "DSHA 平级会话互通：主会话 + 工作会话协作，版本线公告、指令模板、汇报合并唤醒",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "engines": {
     "dsh": ">=0.2.2-rc.1 <0.3.0-0 || >=0.2.3-rc.1 <0.3.0-0 || >=0.2.4-rc.1 <0.3.0-0"
@@ -12,9 +12,15 @@
     "@deepseek-ai/dsh-tools": ">=0.2.2-rc.1 <0.3.0-0 || >=0.2.3-rc.1 <0.3.0-0 || >=0.2.4-rc.1 <0.3.0-0"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-llm": { "optional": true },
-    "@deepseek-ai/dsh-subagent": { "optional": true },
-    "@deepseek-ai/dsh-tools": { "optional": true }
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-subagent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
   },
   "main": "lib/index.js",
   "exports": {

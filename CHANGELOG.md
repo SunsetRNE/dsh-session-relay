@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.0 - 2026-11-08
+
+2.1.0：仓库守候（核心）——会话可只读轮询一个 GitHub 仓库的 issue/PR，按标签 / 作者 / 指派 / 关闭 / 草稿 / 机器人过滤，在会话空闲时唤醒，并支持观察模式、活跃时段、每小时上限、本机 ack 与可解释的诊断状态。参考 dsh-session-superagent 的「盯仓库 → 空闲唤醒 → 按规则办事 → ack 收口」；Gitee、自动隔离 worktree、卫星环与完整守候面板留到 2.2.0。串行测试 362 全过。
+
+### 仓库守候（2.1.0 核心）
+
+- 新工具 `peer_repo_watch`：start / update / stop / list / ack / check；每个会话对同一仓库一条守候，`id=<owner/repo>#<sessionId>`；参数含 goal、intervalSec、labels / ignoreLabels / allowAuthors / onlyAssigned、skipClosed / skipBots / skipDrafts、activeHours、batchLimit、maxWakesPerHour、ackLabel、observe。
+- 只读轮询 `gh api repos/<repo>/issues`（issue 与 PR 同一列表）；失败按 30s→30m 退避；固定 GitHub 身份不符时记录错误，不写入。
+- 只在会话空闲时 `followup` 唤醒；忙 / 不在活跃时段 / 达每小时上限 / 绑定会话不存在都记 `deferReason`，不推进水位，下一轮还能认成 fresh。
+- 观察模式只记「本会唤醒哪几条」；ack 本机生效并推进水位；用户在侧栏「仓库守候」卡片点「在 GitHub 打 ack 标签」才写 `relay:ack` 标签（模型没有 GitHub 写入口）。
+- 侧栏动态页新增「仓库守候」卡片：状态、轮询 / 唤醒时间、延后原因、上次唤醒条目、最近过滤原因、暂停 / 恢复与 ack 按钮；轻量首屏即带。
+- 诊断：`peer_repo_watch action=list` 和卡片都会说明「为什么没叫醒」（过滤原因 / 延后原因 / 上次错误）。卫星环与「总览 / 判定 / 触发 / 设置」完整面板留到 2.2.0。
+
 ## 2.0.0 - 2026-11-07
 
 2.0.0 把 relay 从「会话协调 + 只读看板」扩成「任务看板 + 本地阶段/审批 + GitHub 单向接入」：右侧边栏重做为「会话 / 任务 / 交接 / 动态」4 页签并对齐 Deck 视觉，任务可关联 issue / PR / Projects Status，新增指令模板管理与全文内容搜索，全插件文案与反馈按 UI 基准线统一压缩。串行测试 352 全过。
