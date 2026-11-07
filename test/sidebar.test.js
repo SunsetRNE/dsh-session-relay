@@ -84,7 +84,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 5 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 6 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -105,7 +105,7 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const loaded = await lazyFactory()
   assert.equal(textOf(loaded.default()), 'sideStale')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 5, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 6, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -1172,6 +1172,8 @@ test('任务看板：GitHub 同步一行状态，可展开链接票列表', asyn
   assert.ok(!collapsedText.includes('o/r'), '仓库名收进 title，不再占可见文字')
   const syncLine = findNode(collapsedTree, (node) => node.type === 'button' && String(node.props?.className ?? '').includes('dshaSv_syncLine'))
   assert.match(syncLine.props.title, /o\/r/)
+  assert.ok(findNode(syncLine, (node) => String(node.props?.className ?? '').includes('dshaSv_syncK')) !== undefined, '「同步」标题单独渲染')
+  assert.ok(findNode(syncLine, (node) => String(node.props?.className ?? '').includes('dshaSv_pill')) !== undefined, '状态单独渲染为胶囊')
   assert.ok(!collapsedText.includes('#7'), '默认收起不展开列表')
 
   const idleSync = { available: true, repo: 'o/r', paused: false, queue: 0, switches: { issues: true }, links: [] }
