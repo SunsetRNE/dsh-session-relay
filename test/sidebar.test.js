@@ -147,7 +147,8 @@ test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；会话�
   const React = fakeReact(states(sampleBoard()))
   const { mod, chunk } = await load('client.sidebar.js', React)
   assert.equal(chunk, 'client.sidebar.js')
-  const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) }))
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
+  const text = textOf(tree)
   for (const part of ['dsha-session-relay', 'sideTabSessions', 'sideTabTasks', 'sideTabHandoff', 'sideTabActivity', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
     '@w1', 'why_question', '要不要改', 'feat/side', 'abcdef1', '⚠ 1', '@w2', 'queueNo', 'openSession']) {
     assert.ok(text.includes(part), '缺少 ' + part)
@@ -157,6 +158,9 @@ test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；会话�
   assert.ok(!text.includes('hoTitle') && !text.includes('sideMapTitle'), '交接 / 动态页签未挂载')
   // 空白会话合成一行，不单独列卡片；计数本身就是筛选
   assert.ok(text.includes('catBlank 1'))
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_lineCard')), '版本线有卡片包裹')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_sumBox')), '汇报摘要有小卡包裹')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_metaChip')), '提交/分支用胶囊包裹')
   assert.ok(!text.includes('@w3'))
   assert.ok(!text.includes('sideFAll'), '没有单独的「全部」筛选')
 })
