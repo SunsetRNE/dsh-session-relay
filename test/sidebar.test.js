@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 8 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 9 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -133,7 +133,7 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const loaded = await lazyFactory()
   assert.equal(textOf(loaded.default()), 'sideStale')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 8, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 9, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -932,18 +932,24 @@ const branchData = () => ({
   }
 })
 
-test('PR 页：远端列表、状态与请求修改/评论动作', async () => {
+test('PR 页：远端列表、标题链接、状态与请求修改/评论/关联任务动作', async () => {
   const posted = []
   const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
-  // PrTab 的 8 个 useState：data / error / busy / filter / openNo / comment / pending / running
-  const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, 'LGTM', undefined, undefined] }))
+  // PrTab 的 useState：data / error / busy / filter / openNo / comment / pending / running / prState / detailNo / linkTask
+  const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, 'LGTM', undefined, undefined, 'open', undefined, 'T12'] }))
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
-  for (const part of ['sideTabPr', '#7', '修 bug', 'prReviewChanges', 'o/r', 'prCommentCount', 'prRequestChanges', 'prApprove', 'prClose']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['sideTabPr', '#7', '修 bug', 'prReviewChanges', 'o/r', 'prCommentCount', 'prRequestChanges', 'prApprove', 'prClose', 'prLinkTask']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(findNode(tree, (node) => node.props?.placeholder === 'sidePrTask'), '关联任务输入框')
+  const titleLink = findNode(tree, (node) => node.type === 'a' && String(node.props?.className ?? '').includes('dshaSv_titleLink'))
+  assert.equal(titleLink?.props?.href, 'https://github.com/o/r/pull/7', '标题可点开 GitHub')
   await findButton(tree, (label) => label === 'prRequestChanges').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(lastPost(posted), { action: 'pr-review', number: 7, verdict: 'request-changes', body: 'LGTM', fromSession: 'session-self' })
+  await findButton(tree, (label) => label === 'prLinkTask').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(lastPost(posted), { action: 'task-pr', task: 'T12', pr: '7', fromSession: 'session-self' })
 })
 
 test('PR 页：已批准筛选与空态；批准 / 关闭走二次确认', async () => {
@@ -951,7 +957,12 @@ test('PR 页：已批准筛选与空态；批准 / 关闭走二次确认', async
   const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
   const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'approved', 7, '', undefined, undefined] }))
   const mod = (await load('client.sidebar.js', React)).mod
-  assert.ok(textOf(React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })).includes('prEmpty'), '筛选后无条目给空态')
+  assert.ok(textOf(React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })).includes('prNoMatch'), '筛选后无条目给「没有匹配」空态')
+
+  const emptyClosed = { prs: { repo: 'o/r', state: 'closed', items: [] } }
+  const ReactClosed = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [emptyClosed, undefined, false, 'all', undefined, '', undefined, undefined, 'closed'] }))
+  const modClosed = (await load('client.sidebar.js', ReactClosed)).mod
+  assert.ok(textOf(ReactClosed.createElement(modClosed.RelaySidebar, { kit, sessionId: 'session-self' })).includes('prClosedEmpty'), '已关闭列表空态单独文案')
 
   const React2 = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, '', { number: 7, kind: 'approve' }, undefined] }))
   const mod2 = (await load('client.sidebar.js', React2)).mod
@@ -1000,6 +1011,13 @@ test('PR 详情：点详情展开评审与评论正文，空数据有说明', as
   const mod2 = (await load('client.sidebar.js', React2)).mod
   const empty = textOf(React2.createElement(mod2.PrDetail, { kit: kitFor(), sessionId: 's1', number: 7 }))
   assert.ok(empty.includes('prNoReviews') && empty.includes('prNoComments'))
+
+  const long = { prDetail: { detail: { number: 7, body: '长'.repeat(200), reviews: [{ login: 'bob', state: 'approved', body: '长'.repeat(180), submittedAt: '2026-11-07T00:00:00Z' }], comments: [] } } }
+  const React3 = fakeReact([long, undefined, false])
+  const mod3 = (await load('client.sidebar.js', React3)).mod
+  const longTree = React3.createElement(mod3.PrDetail, { kit: kitFor(), sessionId: 's1', number: 7 })
+  assert.ok(textOf(longTree).includes('prExpand'), '长正文给展开按钮')
+  assert.ok(findNode(longTree, (node) => String(node.props?.className ?? '').includes('dshaSv_clampFold')), '长正文默认折叠')
 })
 
 test('问题页：issue 列表与标签 / 指派，不混入地图', async () => {
