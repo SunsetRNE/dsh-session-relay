@@ -1007,8 +1007,35 @@ test('问题页：issue 列表与标签 / 指派，不混入地图', async () =>
   const React = fakeReact(states(sampleBoard(), { tab: 'issues', extra: [issueData(), undefined, false] }))
   const { mod } = await load('client.sidebar.js', React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
-  for (const part of ['sideTabIssues', '#9', '崩溃', 'bug', 'ui', 'issueAssigned', '@carol', 'prCommentCount']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['sideTabIssues', '#9', '崩溃', 'bug', 'ui', '@carol', 'prCommentCount']) assert.ok(text.includes(part), '缺少 ' + part)
   assert.ok(!text.includes('sideMapTitle'), '问题页不混入地图')
+})
+
+test('问题页：搜索 / 指派给我 / 标签筛选与关联任务', async () => {
+  const issueData2 = {
+    issues: { repo: 'o/r', items: [
+      { number: 9, title: '崩溃', author: 'bob', url: 'u9', updatedAt: '2026-11-07T00:00:00Z', comments: 2, labels: ['bug'], assignees: ['carol'] },
+      { number: 10, title: '界面', author: 'dave', url: 'u10', updatedAt: '2026-11-06T00:00:00Z', comments: 0, labels: ['ui'], assignees: [] }
+    ] }
+  }
+  const board = { ...sampleBoard(), github: { login: 'carol', state: 'ready' }, sync: { links: [{ id: 'T3', issue: 9 }] } }
+  // IssueTab 的 6 个 useState：data / error / busy / query / filter / label
+  const React = fakeReact([issueData2, undefined, false, '', 'all', undefined])
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.IssueTab, { kit: kitFor(), board, sessionId: 's1' })
+  const text = textOf(tree)
+  for (const part of ['#9', '#10', 'bug', 'ui', 'issueFilterMine', 'T3']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(findNode(tree, (node) => node.type === 'input' && node.props?.placeholder === 'issueSearch') !== undefined, '搜索框带占位')
+
+  const React2 = fakeReact([issueData2, undefined, false, '', 'mine', undefined])
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const mine = textOf(React2.createElement(mod2.IssueTab, { kit: kitFor(), board, sessionId: 's1' }))
+  assert.ok(mine.includes('#9') && !mine.includes('#10'), '指派给我只留 carol 的 issue')
+
+  const React3 = fakeReact([issueData2, undefined, false, '界面', 'all', undefined])
+  const mod3 = (await load('client.sidebar.js', React3)).mod
+  const searched = textOf(React3.createElement(mod3.IssueTab, { kit: kitFor(), board, sessionId: 's1' }))
+  assert.ok(searched.includes('#10') && !searched.includes('#9'), '搜索标题命中')
 })
 
 test('分支页：全工作区列表、当前/默认/合并状态与拉取', async () => {
