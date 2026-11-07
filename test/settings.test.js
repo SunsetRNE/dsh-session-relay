@@ -509,7 +509,7 @@ test('Client：侧栏面板（无会话视角）按本机记住的工作区取�
   // 渲染：两个工作区时有下拉，当前选中看板所在的工作区
   const board = {
     entries: [], others: [], groupKey: 'ws-b', workspace: { id: 'ws-b', title: 'B', path: '/b' },
-    workspaces: [{ id: 'ws-a', title: 'A', path: '/a', hasMain: true }, { id: 'ws-b', title: 'B', path: '/b', hasMain: false }]
+    workspaces: [{ id: 'ws-a', title: 'A', path: '/a', hasMain: true }, { id: 'ws-b', title: 'B', path: '/b', hasMain: false }, { id: 'ws-gone', title: 'GONE', path: '/gone', hasMain: true, registered: false }]
   }
   const realState = React.useState
   let calls = 0
@@ -521,6 +521,7 @@ test('Client：侧栏面板（无会话视角）按本机记住的工作区取�
   } finally { React.useState = realState; delete globalThis.window }
   assert.match(text, /wsPick/)
   assert.match(text, /wsPickAwsPickMainBpageOverview/, '两个选项：A（有主会话）、B')
+  assert.ok(!text.includes('GONE'), '已从侧栏删除的工作区不出现在选项里')
 })
 
 test('Client：设置页每个工作区一条版本线；协作标签列出未加入的会话', async () => {

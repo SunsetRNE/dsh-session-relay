@@ -1540,6 +1540,19 @@ test('交接前检查是否还在运作：轮次 / 后台任务 / 子代理拒�
   } finally { await h.cleanup() }
 })
 
+test('已从侧栏删除的工作区不再作为默认分组', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-gone', title: 'Gone', path: h.dir, sessionIds: [h.caller.id] })
+    await h.run('main here')
+    assert.equal(h.relay.primaryGroupKey(), 'ws-gone')
+    h.workspaces.splice(h.workspaces.findIndex((item) => item.id === 'ws-gone'), 1)
+    assert.notEqual(h.relay.primaryGroupKey(), 'ws-gone', '删除后不能再被选为默认工作区')
+    const board = await h.relay.board(undefined, {})
+    assert.notEqual(board.groupKey, 'ws-gone')
+  } finally { await h.cleanup() }
+})
+
 test('主会话上下文超限：不再让它起草；插件从最近记录整理草稿，确认后照常交接', async () => {
   const h = await setup()
   try {
