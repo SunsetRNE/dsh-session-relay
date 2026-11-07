@@ -84,7 +84,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 4 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 5 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -105,7 +105,7 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const loaded = await lazyFactory()
   assert.equal(textOf(loaded.default()), 'sideStale')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 4, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 5, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -867,6 +867,8 @@ test('动态页：已登录显示地图任务树、关联 PR、仓库与同步�
   assert.ok(!text.includes('sideMapPending'), '不再显示「待接入」占位')
   assert.ok(!text.includes('repoRefresh'), '仓库开关不再重复放动态页')
   assert.ok(!text.includes('ghStateMissing') && !text.includes('ghCode'), '已登录不再显示登录卡')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '') === 'dshaSv_box' && textOf(node).includes('sideRepoInSettings')) !== undefined, '仓库状态与说明有包裹框')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '') === 'dshaSv_box' && textOf(node).includes('syncTitle')) !== undefined, '同步行有包裹框')
 })
 
 test('动态页：关联 PR 表单以用户身份提交 task-pr', async () => {
