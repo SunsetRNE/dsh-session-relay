@@ -870,6 +870,11 @@ test('Client：模型下拉（跟随 / 全局默认 / 按服务商分组 / 推�
   const pickers = rendered.filter((node) => node.type === 'button' && node.props['aria-haspopup'] === 'listbox')
   assert.ok(pickers.length >= 1, '新建表单用的是自绘模型选择器')
   assert.ok(textOf(pickers[0]).includes('modelFollowIs'), '默认显示「跟随默认」')
+  // 推理强度也改成自绘分段：已选具体模型（worker = p1/big@high）时出现 Low/High，当前值选中
+  const effortButtons = rendered.filter((node) => node.type === 'button' && node.props['aria-pressed'] !== undefined && ['Low', 'High'].includes(textOf(node)))
+  assert.ok(effortButtons.some((node) => textOf(node) === 'Low'), '给出可用强度')
+  assert.ok(effortButtons.some((node) => textOf(node) === 'High' && node.props['aria-pressed'] === 'true'), '当前强度选中')
+  assert.ok(!rendered.some((node) => node.type === 'select' && node.props['aria-label'] === 'modelEffort'), '强度不再用原生 select')
   // 不支持时只给一行说明
   rendered.length = 0
   calls = 0

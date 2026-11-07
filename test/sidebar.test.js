@@ -84,7 +84,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 3 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 4 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -105,7 +105,7 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const loaded = await lazyFactory()
   assert.equal(textOf(loaded.default()), 'sideStale')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 3, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 4, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -278,7 +278,7 @@ test('入口：设置页 / 协作标签 / 监督面板的正文在 client.panel.
   React.lazy = (factory) => { lazies.push(factory); return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 2 }
+  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 3 }
   const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve(reply) })
   assert.equal(asked.length, 0, '载入入口时不下载正文')
   const tree = React.createElement(mod.BoardPage, { t })
@@ -1029,6 +1029,29 @@ test('设置页：模型角色保存为具体模型；常设授权、置顶、�
   const mod2 = (await load('client.sidebar.js', React2)).mod
   const text2 = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   for (const part of ['delegTitle', 'pinTitle', 'devTitle', 'restartTitle', 'lineTitle', 'modelRolesTitle']) assert.ok(text2.includes(part), '设置页缺少 ' + part)
+})
+
+test('模型强度：具体模型出现分段按钮，改强度回传 reasoningEffort；未选模型提示先选', async () => {
+  const React = fakeReact()
+  const { mod } = await load('client.sidebar.js', React)
+  const data = {
+    catalog: {
+      default: { provider: 'g', model: 'm' },
+      groups: [{ id: 'g', name: 'G', models: [{ id: 'm', name: 'M', efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }], defaultEffort: 'low' }] }]
+    }
+  }
+  const seen = []
+  const tree = React.createElement(mod.ModelEffort, { kit: kitFor(), data, value: { provider: 'g', model: 'm', reasoningEffort: 'high' }, disabled: false, onChange: (next) => seen.push(next) })
+  const text = textOf(tree)
+  assert.ok(text.includes('modelEffort') && text.includes('Low') && text.includes('High'), '给出强度选项')
+  const high = findButton(tree, (label) => label === 'High')
+  assert.equal(high.props['aria-pressed'], true, '当前强度选中')
+  high.props.onClick()
+  assert.deepEqual(seen.at(-1), { provider: 'g', model: 'm', reasoningEffort: 'high' })
+  findButton(tree, (label) => label === 'modelEffortAuto').props.onClick()
+  assert.deepEqual(seen.at(-1), { provider: 'g', model: 'm' }, '「默认」清掉显式强度')
+  const hint = textOf(React.createElement(mod.ModelEffort, { kit: kitFor(), data, value: 'default', disabled: false, onChange: () => {} }))
+  assert.ok(hint.includes('modelEffortPickModel'), '没选具体模型时提示先选模型')
 })
 
 test('找会话：按关键词问服务端，结果可直接打开，未加入的会标出来', async () => {

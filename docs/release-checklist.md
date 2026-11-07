@@ -25,7 +25,7 @@
 node --test --test-concurrency=1 test/*.test.js
 ```
 
-- 结果必须是 351 pass / 0 fail 才继续（2.0.0 当前 351）。
+- 结果必须是 352 pass / 0 fail 才继续（2.0.0 当前 352）。
 - 偶发 `ENOTEMPTY` 等环境错误先重跑一次并记录；不重试到「抽到绿色」为止，要确认失败原因。
 - 真机确认项（用户）：UI 五批、T3 模板 / 全文搜索、任务页闪烁、成功反馈动画；projectStatus A/B 已实弹通过（T3 → issue #1 → Project 1，Todo → In Progress）。
 - 真机步骤：插件管理器装本版本 → `/relay reload` → 刷新面板 → 侧栏 4 页签 / 模板 / 全文搜索 / 任务详情 / 动态页票卡与拆分子任务各过一遍；错误文案仍应是文字。
@@ -95,5 +95,5 @@ gh release create v2.0.0 dist/dsh-session-relay-2.0.0.tgz \
 - 本地 HEAD：准备完成后的 SHA（起点 `3a9b38c`；收口提交在其后）。
 - `origin/main`：`bb5bcee`（v1.11.6 在 `24902db`）。
 - 本地领先：40 个检查点 + 本轮发版准备提交；未推送、未打 tag、未发 Release。
-- 串行测试：351 pass / 0 fail（约 45s）。
+- 串行测试：352 pass / 0 fail（约 45s）。
 - 市场：PR #12624 等维护者；issue #1 等推送后按规则关闭。
