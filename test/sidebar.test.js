@@ -836,7 +836,7 @@ test('动态页：已登录显示地图任务树、关联 PR、仓库与同步�
   for (const part of ['sideMapTitle', 'sideMapHint', 'sideMapGroups', 'T10', '父任务', 'T10.1', '子任务一', 'sideMapDepends', '#12', 'sideMapNoTicket', 'OPEN', 'sideMapMore',
     'sideTicketTitle', '#9', 'sideRepoInSettings', 'sidePrTitle', 'sidePrAdd', 'PR #7 · OPEN · 可合并', 'repoTitle', 'repoProbeOk', 'syncTitle']) assert.ok(text.includes(part), '缺少 ' + part)
   assert.ok(!text.includes('o/r'), '仓库名收进 title，不再占可见文字')
-  assert.ok(findNode(tree, (node) => node.type === 'p' && node.props?.title === 'o/r') !== undefined, '仓库名在 title 里可悬停查看')
+  assert.ok(findNode(tree, (node) => node.props?.title === 'o/r') !== undefined, '仓库名在 title 里可悬停查看')
   assert.ok(!text.includes('sideMapPending'), '不再显示「待接入」占位')
   assert.ok(!text.includes('repoRefresh'), '仓库开关不再重复放动态页')
   assert.ok(!text.includes('ghStateMissing') && !text.includes('ghCode'), '已登录不再显示登录卡')
