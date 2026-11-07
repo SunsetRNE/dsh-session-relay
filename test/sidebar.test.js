@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 11 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 12 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -133,7 +133,7 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const loaded = await lazyFactory()
   assert.equal(textOf(loaded.default()), 'sideStale')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 11, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 12, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -1127,7 +1127,7 @@ test('更多页：已登录显示仓库与同步；不再出现登录卡', async
   assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_box') && textOf(node).includes('syncTitle')) !== undefined, '同步行有包裹框')
 })
 
-test('更多页：快捷入口常驻，点条目切页 / 打开设置', async () => {
+test('更多页：窄屏快捷入口，点条目切页 / 打开设置', async () => {
   const board = { ...sampleBoard(), github: { state: 'ready' }, repo: { available: true, source: 'ok', repo: 'o/r' }, sync: { available: false } }
   const React = fakeReact()
   const { mod } = await load('client.sidebar.js', React)
@@ -1143,6 +1143,19 @@ test('更多页：快捷入口常驻，点条目切页 / 打开设置', async ()
   assert.deepEqual(opened, ['map', 'prs', 'branches', 'issues'])
   await findButton(tree, (text) => text.startsWith('sideMoreSettings')).props.onClick()
   assert.equal(settings, 1)
+  const folded = findNode(tree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_foldOnly'))
+  assert.ok(folded !== undefined && textOf(folded).includes('sideMoreQuick'), '入口挂 dshaSv_foldOnly，只在窄屏显示')
+})
+
+test('侧栏折叠：更多页快捷入口只在窄屏显示，隐藏规则用双类名', async () => {
+  const source = await readFile(new URL('../lib/client.sidebar.js', import.meta.url), 'utf8')
+  assert.ok(source.includes('@container (min-width:620px){.dshaSv .dshaSv_foldOnly{display:none}}'), '宽屏隐藏规则用 .dshaSv .dshaSv_foldOnly 双类名')
+  const React = fakeReact()
+  const { mod } = await load('client.sidebar.js', React)
+  const board = { ...sampleBoard(), github: { state: 'ready' }, repo: null, sync: { available: false } }
+  const tree = React.createElement(mod.MoreTab, { kit: kitFor(), board, act: async () => ({}), busy: false, onOpen: () => {}, onSettings: () => {}, counts: {} })
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_quick')) !== undefined, '窄屏入口列表还在')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_foldOnly') && textOf(node).includes('sideMoreQuick')) !== undefined, '入口 section 挂了 dshaSv_foldOnly')
 })
 
 test('设置页：仓库守候卡片显示状态、上次唤醒与过滤原因，可暂停和用户态 ack', async () => {
