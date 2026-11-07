@@ -171,13 +171,13 @@ function kitFor(opened = []) {
 const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, extra = [] } = {}) =>
   [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, ...extra]
 
-test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；会话页有顶栏、8 个页签、计数、主会话、版本线与卡片', async () => {
+test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
   const React = fakeReact(states(sampleBoard()))
   const { mod, chunk } = await load('client.sidebar.js', React)
   assert.equal(chunk, 'client.sidebar.js')
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
   const text = textOf(tree)
-  for (const part of ['dsha-session-relay', 'sideTabSessions', 'sideTabTasks', 'sideTabHandoff', 'sideTabMap', 'sideTabPr', 'sideTabBranches', 'sideTabIssues', 'sideTabMore', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
+  for (const part of ['dsha-session-relay', 'sideTabSessions', 'sideTabTasks', 'sideTabHandoff', 'sideTabMap', 'sideTabPr', 'sideTabBranches', 'sideTabIssues', 'sideTabMail', 'sideTabMore', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
     '@w1', 'why_question', '要不要改', 'feat/side', 'abcdef1', '⚠ 1', '@w2', 'queueNo', 'openSession']) {
     assert.ok(text.includes(part), '缺少 ' + part)
   }
@@ -1019,6 +1019,15 @@ test('分支页：本地删除与远端删除各自确认后提交', async () =>
   await findButton(tree2, (label) => label === 'brConfirm').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(lastPost(posted), { action: 'branch-delete', workspaceId: 'ws1', name: 'fix/y', remote: true, confirm: 'fix/y', fromSession: 'session-self' })
+})
+
+test('邮箱页：独立页签直接用 MailBox 渲染公共通知', async () => {
+  const data = { mailbox: { unread: 2 }, items: [{ id: 'm1', subject: '发版公告', body: '正文', kind: 'notice', at: 1, readBy: {} }] }
+  // MailBox 的 3 个 useState：数据 / 错误 / busy
+  const React = fakeReact(states(sampleBoard(), { tab: 'mail', extra: [data, undefined, false] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  for (const part of ['sideTabMail', 'pageMail', '发版公告', '正文', 'mailUnread']) assert.ok(text.includes(part), '缺少 ' + part)
 })
 
 test('更多页：已登录显示仓库与同步；不再出现登录卡', async () => {
