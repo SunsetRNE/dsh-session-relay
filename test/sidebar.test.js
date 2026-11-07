@@ -534,6 +534,8 @@ const findNode = (node, pred) => {
   return findNode(node.children, pred)
 }
 
+const lastPost = (rows) => rows.filter(([method]) => method === 'POST').at(-1)?.[1]
+
 const findButton = (node, pred) => {
   if (!node || typeof node !== 'object') return undefined
   if (Array.isArray(node)) { for (const child of node) { const hit = findButton(child, pred); if (hit) return hit } return undefined }
@@ -867,14 +869,110 @@ test('地图页：已登录显示地图任务树与本地票子；不再出现�
   assert.ok(!text.includes('sideMapPending'), '不再显示「待接入」占位')
 })
 
-test('PR 页：关联 PR 列表与表单；地图不混入', async () => {
-  const github = { state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 }, scopes: ['repo'], loginFlow: null, error: null }
-  const taskBoard = { open: [], claimed: 1, claimedRows: [{ id: 'T3', title: '跑真机', pr: { number: 7, url: 'https://github.com/o/r/pull/7', label: 'PR #7 · OPEN · 可合并' } }], map: [] }
-  const React = fakeReact(states({ ...sampleBoard(), github, taskBoard }, { tab: 'prs' }))
+const prData = () => ({
+  prs: {
+    repo: 'o/r', fetchedAt: 1,
+    items: [{ number: 7, title: '修 bug', author: 'alice', url: 'https://github.com/o/r/pull/7', draft: false, reviewDecision: 'CHANGES_REQUESTED', updatedAt: '2026-11-07T00:00:00Z', comments: 3, head: 'fix/x', base: 'main' }]
+  }
+})
+
+const issueData = () => ({
+  issues: {
+    repo: 'o/r', fetchedAt: 1,
+    items: [{ number: 9, title: '崩溃', author: 'bob', url: 'https://github.com/o/r/issues/9', updatedAt: '2026-11-07T00:00:00Z', comments: 2, labels: ['bug', 'ui'], assignees: ['carol'] }]
+  }
+})
+
+const branchData = () => ({
+  branches: {
+    fetchedAt: 1,
+    workspaces: [{
+      workspace: { id: 'ws1', title: 'relay', path: '/repo' }, repo: 'o/r', current: 'main', defaultBranch: 'main', error: null,
+      local: [
+        { name: 'main', sha: 'a', current: true, upstream: 'origin/main', ahead: 0, behind: 0, at: '2026-11-07T00:00:00Z', subject: 'chore', merged: true },
+        { name: 'fix/y', sha: 'b', current: false, upstream: null, ahead: 2, behind: 1, at: '2026-11-06T00:00:00Z', subject: 'fix', merged: false }
+      ],
+      remote: [{ name: 'main', sha: 'a', at: '2026-11-07T00:00:00Z', subject: 'chore' }, { name: 'fix/y', sha: 'b', at: '2026-11-06T00:00:00Z', subject: 'fix' }]
+    }]
+  }
+})
+
+test('PR 页：远端列表、状态与请求修改/评论动作', async () => {
+  const posted = []
+  const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
+  // PrTab 的 8 个 useState：data / error / busy / filter / openNo / comment / pending / running
+  const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, 'LGTM', undefined, undefined] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const text = textOf(tree)
+  for (const part of ['sideTabPr', '#7', '修 bug', 'prReviewChanges', 'o/r', 'prCommentCount', 'prRequestChanges', 'prApprove', 'prClose']) assert.ok(text.includes(part), '缺少 ' + part)
+  await findButton(tree, (label) => label === 'prRequestChanges').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(lastPost(posted), { action: 'pr-review', number: 7, verdict: 'request-changes', body: 'LGTM', fromSession: 'session-self' })
+})
+
+test('PR 页：已批准筛选与空态；批准 / 关闭走二次确认', async () => {
+  const posted = []
+  const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
+  const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'approved', 7, '', undefined, undefined] }))
+  const mod = (await load('client.sidebar.js', React)).mod
+  assert.ok(textOf(React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })).includes('prEmpty'), '筛选后无条目给空态')
+
+  const React2 = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, '', { number: 7, kind: 'approve' }, undefined] }))
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const tree2 = React2.createElement(mod2.RelaySidebar, { kit, sessionId: 'session-self' })
+  assert.ok(textOf(tree2).includes('prConfirmApprove'))
+  await findButton(tree2, (label) => label === 'prConfirm').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(lastPost(posted), { action: 'pr-review', number: 7, verdict: 'approve', fromSession: 'session-self' })
+
+  const React3 = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, '', { number: 7, kind: 'close' }, undefined] }))
+  const mod3 = (await load('client.sidebar.js', React3)).mod
+  const tree3 = React3.createElement(mod3.RelaySidebar, { kit, sessionId: 'session-self' })
+  await findButton(tree3, (label) => label === 'prConfirm').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(lastPost(posted), { action: 'pr-state', number: 7, state: 'close', fromSession: 'session-self' })
+})
+
+test('问题页：issue 列表与标签 / 指派，不混入地图', async () => {
+  // IssueTab 的 3 个 useState：data / error / busy
+  const React = fakeReact(states(sampleBoard(), { tab: 'issues', extra: [issueData(), undefined, false] }))
   const { mod } = await load('client.sidebar.js', React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
-  for (const part of ['sidePrTitle', 'sidePrAdd', 'PR #7 · OPEN · 可合并']) assert.ok(text.includes(part), '缺少 ' + part)
-  assert.ok(!text.includes('sideMapTitle'), 'PR 页不混入地图')
+  for (const part of ['sideTabIssues', '#9', '崩溃', 'bug', 'ui', 'issueAssigned', '@carol', 'prCommentCount']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(!text.includes('sideMapTitle'), '问题页不混入地图')
+})
+
+test('分支页：全工作区列表、当前/默认/合并状态与拉取', async () => {
+  const posted = []
+  const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
+  // BranchTab 的 7 个 useState：data / error / busy / confirm / typed / force / running
+  const React = fakeReact(states(sampleBoard(), { tab: 'branches', extra: [branchData(), undefined, false, undefined, '', false, undefined] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  const text = textOf(tree)
+  for (const part of ['sideTabBranches', 'relay', 'o/r', 'main', 'fix/y', 'brCurrent', 'brDefault', 'brUnmerged', 'brAhead', 'brBehind', 'brLocal', 'brRemote', 'brDelete', 'brDeleteRemote']) assert.ok(text.includes(part), '缺少 ' + part)
+  await findButton(tree, (label) => label === 'brFetch').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(lastPost(posted), { action: 'branch-fetch', workspaceId: 'ws1', fromSession: 'session-self' })
+})
+
+test('分支页：本地删除与远端删除各自确认后提交', async () => {
+  const posted = []
+  const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
+  const React = fakeReact(states(sampleBoard(), { tab: 'branches', extra: [branchData(), undefined, false, { workspaceId: 'ws1', name: 'fix/y', remote: false }, '', false, undefined] }))
+  const mod = (await load('client.sidebar.js', React)).mod
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  await findButton(tree, (label) => label === 'brConfirm').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(lastPost(posted), { action: 'branch-delete', workspaceId: 'ws1', name: 'fix/y', force: false, fromSession: 'session-self' })
+
+  const React2 = fakeReact(states(sampleBoard(), { tab: 'branches', extra: [branchData(), undefined, false, { workspaceId: 'ws1', name: 'fix/y', remote: true }, 'fix/y', false, undefined] }))
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const tree2 = React2.createElement(mod2.RelaySidebar, { kit, sessionId: 'session-self' })
+  await findButton(tree2, (label) => label === 'brConfirm').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(lastPost(posted), { action: 'branch-delete', workspaceId: 'ws1', name: 'fix/y', remote: true, confirm: 'fix/y', fromSession: 'session-self' })
 })
 
 test('更多页：已登录显示仓库与同步；不再出现登录卡', async () => {
@@ -917,27 +1015,6 @@ test('设置页：仓库守候卡片显示状态、上次唤醒与过滤原因�
   assert.deepEqual(posted.at(-1), { action: 'repo-watch-toggle', id: 'o/r#s', enabled: false, fromSession: 'session-self' })
   await findButton(tree, (label) => label === 'rwAckGithub').props.onClick()
   assert.deepEqual(posted.at(-1), { action: 'repo-watch-ack', id: 'o/r#s', numbers: [7], fromSession: 'session-self' })
-})
-
-test('PR 页：关联 PR 表单以用户身份提交 task-pr', async () => {
-  const posted = []
-  const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
-  const github = { state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 }, scopes: ['repo'], loginFlow: null, error: null }
-  const repo = { available: true, source: 'ok', repo: 'o/r' }
-  const sync = { available: true, repo: 'o/r', paused: false, queue: 0, switches: { issues: true }, links: [] }
-  const taskBoard = { open: [{ id: 'T3', title: '跑真机' }], claimed: 0, claimedRows: [], endedRows: [], map: [{ id: 'T3', title: '跑真机', kind: 'open', childTotal: 0, children: [] }] }
-  // PrTab 的 3 个 useState：表单开、任务号、PR 号 / URL
-  const React = fakeReact(states({ ...sampleBoard(), github, repo, sync, taskBoard }, { tab: 'prs', extra: [true, 'T3', 'https://github.com/o/r/pull/9'] }))
-  const { mod } = await load('client.sidebar.js', React)
-  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
-  const text = textOf(tree)
-  for (const part of ['sidePrAdd', 'sidePrLink']) assert.ok(text.includes(part), '缺少 ' + part)
-  assert.ok(findNode(tree, (node) => node.type === 'input' && node.props?.placeholder === 'sidePrTask') !== undefined, '任务号输入框带占位说明')
-  const form = findNode(tree, (node) => node.type === 'form' && typeof node.props?.onSubmit === 'function')
-  assert.ok(form !== undefined, '关联 PR 表单可提交')
-  form.props.onSubmit({ preventDefault() {} })
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  assert.deepEqual(posted.at(-1), { action: 'task-pr', task: 'T3', pr: 'https://github.com/o/r/pull/9', fromSession: 'session-self' })
 })
 
 test('地图页：没有拆分任务时给出创建入口，不再显示待接入占位', async () => {

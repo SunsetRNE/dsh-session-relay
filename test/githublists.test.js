@@ -1,0 +1,145 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  GitHubLists, LIST_TTL_MS, assertBranchDeletable, commandError, parseDefaultBranch, parseIssues,
+  parseLocalBranches, parsePullRequests, parseRemoteBranches, requireRepo, validateBranchName
+} from '../lib/githublists.js'
+
+test('PR / issue 列表解析：字段归一、排序不动、坏输出拒绝', () => {
+  const prs = parsePullRequests(JSON.stringify([
+    { number: 7, title: '修 bug', author: { login: 'alice' }, url: 'https://github.com/o/r/pull/7', isDraft: false, reviewDecision: 'CHANGES_REQUESTED', updatedAt: '2026-11-07T01:00:00Z', comments: 3, headRefName: 'fix/x', baseRefName: 'main' },
+    { number: 0, title: '坏条目' }
+  ]))
+  assert.equal(prs.length, 1)
+  assert.deepEqual({ n: prs[0].number, r: prs[0].reviewDecision, a: prs[0].author, h: prs[0].head }, { n: 7, r: 'CHANGES_REQUESTED', a: 'alice', h: 'fix/x' })
+  assert.throws(() => parsePullRequests('not json'), /不是 JSON/)
+  assert.throws(() => parsePullRequests('{}'), /不是数组/)
+
+  const issues = parseIssues(JSON.stringify([
+    { number: 9, title: '问题', author: { login: 'bob' }, url: 'u', updatedAt: 't', comments: 1, labels: [{ name: 'bug' }, 'ui'], assignees: [{ login: 'carol' }] }
+  ]))
+  assert.deepEqual(issues[0].labels, ['bug', 'ui'])
+  assert.deepEqual(issues[0].assignees, ['carol'])
+})
+
+test('分支解析：本地 / 远端 / 默认分支', () => {
+  const local = parseLocalBranches([
+    '*\x00main\x00abc\x00origin/main\x00[ahead 2, behind 1]\x002026-11-07T00:00:00+08:00\x00chore: x',
+    ' \x00fix/y\x00def\x00\x00\x002026-11-06T00:00:00+08:00\x00fix y'
+  ].join('\n'))
+  assert.equal(local.length, 2)
+  assert.equal(local[0].current, true)
+  assert.equal(local[0].ahead, 2)
+  assert.equal(local[0].behind, 1)
+  assert.equal(local[0].upstream, 'origin/main')
+  assert.equal(local[1].current, false)
+  assert.equal(local[1].upstream, null)
+
+  const remote = parseRemoteBranches([
+    'origin/HEAD\x00abc\x00t\x00x',
+    'origin/main\x00aaa\x002026-11-07T00:00:00Z\x00subject',
+    'origin/fix/y\x00bbb\x002026-11-06T00:00:00Z\x00fix'
+  ].join('\n'))
+  assert.deepEqual(remote.map((row) => row.name), ['main', 'fix/y'])
+  assert.equal(parseDefaultBranch('origin/main\n'), 'main')
+  assert.equal(parseDefaultBranch(''), undefined)
+})
+
+test('分支名校验与删除规则', () => {
+  assert.equal(validateBranchName('fix/a-1'), 'fix/a-1')
+  for (const bad of ['-x', 'a..b', 'a@{b', 'a/', 'x.lock', 'a b', '']) assert.throws(() => validateBranchName(bad), /分支名/)
+  assert.throws(() => assertBranchDeletable({ name: 'main', defaultBranch: 'main' }), /默认分支/)
+  assert.throws(() => assertBranchDeletable({ name: 'fix', current: true }), /当前分支/)
+  assert.throws(() => assertBranchDeletable({ name: 'fix', merged: false }), /还没合并/)
+  assert.equal(assertBranchDeletable({ name: 'fix', merged: true }), 'fix')
+  assert.equal(assertBranchDeletable({ name: 'fix', merged: false, force: true }), 'fix')
+  assert.throws(() => requireRepo('gitee:o/r'), /owner\/name/)
+  assert.equal(requireRepo('o/r'), 'o/r')
+})
+
+function fakeTools() {
+  const calls = { gh: [], git: [] }
+  const gh = async (args) => {
+    calls.gh.push(args)
+    const joined = args.join(' ')
+    if (joined.startsWith('pr list')) return { stdout: JSON.stringify([{ number: 7, title: 'x', author: { login: 'a' }, url: 'u', isDraft: false, reviewDecision: 'APPROVED', updatedAt: 't', comments: 0, headRefName: 'h', baseRefName: 'main' }]), stderr: '' }
+    if (joined.startsWith('issue list')) return { stdout: JSON.stringify([{ number: 9, title: 'i', author: { login: 'b' }, url: 'u', updatedAt: 't', comments: 0, labels: [], assignees: [] }]), stderr: '' }
+    if (joined.startsWith('pr review') || joined.startsWith('pr comment') || joined.startsWith('pr close') || joined.startsWith('pr reopen')) return { stdout: '', stderr: '' }
+    throw Object.assign(new Error('unknown gh ' + joined), { stderr: 'unknown gh' })
+  }
+  const git = async (args) => {
+    calls.git.push(args)
+    const joined = args.join(' ')
+    if (joined.includes('for-each-ref') && joined.includes('refs/heads')) return { stdout: ['*\x00main\x00abc\x00origin/main\x00\x002026-11-07T00:00:00+08:00\x00c',
+      ' \x00fix/merged\x00def\x00\x00\x002026-11-06T00:00:00+08:00\x00m',
+      ' \x00fix/y\x00ghi\x00\x00\x002026-11-05T00:00:00+08:00\x00y'].join('\n'), stderr: '' }
+    if (joined.includes('for-each-ref') && joined.includes('refs/remotes/origin')) return { stdout: 'origin/main\x00abc\x002026-11-07T00:00:00+08:00\x00c', stderr: '' }
+    if (joined.includes('symbolic-ref')) return { stdout: 'origin/main\n', stderr: '' }
+    if (joined.includes('branch --merged')) return { stdout: '* main\n  fix/merged\n', stderr: '' }
+    if (joined.includes('fetch --prune')) return { stdout: '', stderr: '' }
+    if (joined.includes('branch -d') || joined.includes('branch -D')) return { stdout: '', stderr: '' }
+    if (joined.includes('push origin --delete')) return { stdout: '', stderr: '' }
+    throw Object.assign(new Error('unknown git ' + joined), { stderr: 'unknown git' })
+  }
+  return { gh, git, calls }
+}
+
+test('列表缓存：60 秒内不重复请求，force 绕过；身份守卫先跑', async () => {
+  const { gh, git, calls } = fakeTools()
+  let guarded = 0
+  const lists = new GitHubLists({ gh, git, identity: { requireIdentity: async () => { guarded += 1 } }, now: () => 1000 })
+  const first = await lists.pullRequests('o/r')
+  const second = await lists.pullRequests('o/r')
+  assert.equal(first.items.length, 1)
+  assert.equal(second.fetchedAt, first.fetchedAt)
+  assert.equal(calls.gh.length, 1)
+  await lists.pullRequests('o/r', { force: true })
+  assert.equal(calls.gh.length, 2)
+  assert.equal(guarded, 2)
+  assert.ok(LIST_TTL_MS >= 30_000)
+})
+
+test('分支列表：默认分支 / 当前分支 / 已合并；fetch 清缓存', async () => {
+  const { gh, git, calls } = fakeTools()
+  const lists = new GitHubLists({ gh, git, now: () => 1000 })
+  const snapshot = await lists.branches('/repo', { repo: 'o/r' })
+  assert.equal(snapshot.current, 'main')
+  assert.equal(snapshot.defaultBranch, 'main')
+  assert.equal(snapshot.local[0].merged, true)
+  assert.equal(snapshot.remote[0].name, 'main')
+  await lists.fetch('/repo')
+  await lists.branches('/repo')
+  assert.equal(calls.git.filter((args) => args.join(' ').includes('for-each-ref')).length, 4, 'fetch 后重读一次本地 + 远端')
+})
+
+test('PR 写动作：approve / 评论 / 关闭重开带审计；缺正文拒绝', async () => {
+  const { gh, git, calls } = fakeTools()
+  const audits = []
+  const lists = new GitHubLists({ gh, git, audit: async (record) => { audits.push(record) }, now: () => 1000 })
+  await lists.prAction('o/r', 7, 'approve', { body: 'LGTM' })
+  assert.ok(calls.gh.some((args) => args.join(' ') === 'pr review 7 --repo o/r --approve --body LGTM'))
+  await assert.rejects(() => lists.prAction('o/r', 7, 'comment', { body: '  ' }), /不能为空/)
+  await assert.rejects(() => lists.prAction('o/r', 7, 'request-changes', {}), /请求修改/)
+  await lists.prAction('o/r', 7, 'close')
+  assert.deepEqual(audits.map((row) => row.event), ['pr-approve', 'pr-close'])
+})
+
+test('分支删除：当前 / 默认 / 未合并 / 远端确认名', async () => {
+  const { gh, git } = fakeTools()
+  const audits = []
+  const lists = new GitHubLists({ gh, git, audit: async (record) => { audits.push(record) }, now: () => 1000 })
+  await assert.rejects(() => lists.deleteBranch({ path: '/repo', name: 'main' }), /默认分支/)
+  // 远端删除：确认名不对拒绝；对了才执行
+  await assert.rejects(() => lists.deleteBranch({ path: '/repo', name: 'fix/y', remote: true, confirm: 'wrong' }), /输入分支名/)
+  await lists.deleteBranch({ path: '/repo', name: 'fix/y', remote: true, confirm: 'fix/y' })
+  assert.deepEqual(audits.at(-1), { event: 'branch-delete-remote', path: '/repo', branch: 'fix/y', force: false, stderr: '' })
+  // 本地未合并默认拒绝，force 才放行（fix/y 不在 merged 集合里）
+  await assert.rejects(() => lists.deleteBranch({ path: '/repo', name: 'fix/y' }), /还没合并/)
+  await lists.deleteBranch({ path: '/repo', name: 'fix/y', force: true })
+  assert.equal(audits.at(-1).event, 'branch-delete-local')
+})
+
+test('命令错误：只取 stderr 第一行', () => {
+  assert.equal(commandError({ stderr: 'fatal: x\ny' }), 'fatal: x')
+  assert.equal(commandError({}, '默认'), '默认')
+})
