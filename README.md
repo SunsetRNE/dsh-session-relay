@@ -68,6 +68,8 @@ npm test
 
 加载方式：`lib/index.js` 是外壳，逻辑在 `lib/impl.js` 及其依赖里。改实现文件后 `/relay reload` 即可生效；`lib/client.js`（面板）改动由宿主热更新，刷新即见；改 `lib/index.js`、`package.json` 的 `dsh` 字段或 `cordis.patch.yml` 需要重启 DSH。
 
+面板缓存注意：只改 `lib/client.panel.js` 必须同步改一行 `lib/client.js` 并把 `PANEL_KIT` / `KIT_VERSION` 一起 +1；只改 `lib/client.sidebar.js` 也要同步改一行 `lib/client.js`。改过 `client.js` 本身后 `/relay reload` 不够，需要重启 DSH 再整页刷新，否则会看到「reload 成功但页面没变」。
+
 ## 打包
 
 ```sh

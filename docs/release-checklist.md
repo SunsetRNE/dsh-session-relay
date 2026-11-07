@@ -16,6 +16,8 @@
 - [ ] `engines.dsh` / `peerDependencies` 范围与 README「运行环境」一致（2.0.0：`>=0.2.2-rc.1` 起）。
 - [ ] CHANGELOG 有对应版本段，且没有遗留「未发布」标题。
 - [ ] README 的功能、安装、发版段与代码一致（本次已按 2.0.0 更新）。
+- [ ] 本次改过 `lib/client.panel.js` / `lib/client.sidebar.js` 时，`lib/client.js` 有对应的 touch 行；`PANEL_KIT` 与 `client.panel.js` 的 `KIT_VERSION` 相等（测试覆盖）。
+- [ ] 若改过 `lib/client.js` / `lib/index.js`，发版前用「重启 DSH + 整页刷新」验证过面板，不只依赖 `/relay reload`。
 
 ## 1. 测试（必须串行）
 
