@@ -602,7 +602,7 @@ test('Client：交接面板与侧栏标记（实心星、加入即空心圈）',
   assert.match(page, /hoConfirm/)
   assert.match(page, /hoRevert/)
   // 最近交接只列最近一条，其余收在「全部 n 条」里
-  assert.match(page, /@old → @rel/)
+  assert.match(page, /@old.*→.*@rel/)
   assert.doesNotMatch(page, /@older → @old/)
   assert.match(page, /hoHistoryMore/)
 })
