@@ -369,7 +369,13 @@ test('Client：面板、状态点、悬停卡片、页头 ID 在有数据时渲�
   const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: { [id]: 'question' }, aliases: { [id]: ['rel'] }, attention: 1, coordinator: id, restart: 'off' }), refresh: async () => {} }
   const header = textOf(React.createElement(mod.HeaderId, { sessionId: id, marksStore: store, t }))
   assert.match(header, /★ @rel · 7ea4fd68/)
-  assert.match(textOf(React.createElement(mod.RowHover, { sessionId: id, marksStore: store, t })), new RegExp(id))
+  const hoverTree = React.createElement(mod.RowHover, { sessionId: id, marksStore: store, t })
+  const hoverText = textOf(hoverTree)
+  assert.match(hoverText, new RegExp(id), '悬停卡保留完整 id')
+  const hoverJson = JSON.stringify(hoverTree)
+  assert.ok(hoverJson.includes('dshaSr_hoverRow'), '悬停卡改结构化行')
+  assert.ok(hoverJson.includes('dshaSr_metaChip'), 'id 用等宽芯片')
+  assert.ok(hoverText.includes('@main') && hoverText.includes('@rel'), '主会话与别名用胶囊')
   assert.notEqual(React.createElement(mod.RowMark, { sessionId: id, marksStore: store, t }), null)
   assert.equal(React.createElement(mod.RowMark, { sessionId: 'session-other', marksStore: store, t }), null, '没有状态不渲染')
   assert.match(textOf(React.createElement(mod.PanelIcon, { size: 18, marksStore: store })), /1/)
@@ -691,6 +697,32 @@ test('Client：卡片「唤醒」表单显示预判，主会话新建时禁用�
   assert.equal(confirm().props.disabled, true)
 })
 
+test('Client：看板卡片与合并队列的 meta 用芯片，长摘要两行截断并带悬停全文', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => key
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const summary = 'S'.repeat(240)
+  const board = {
+    scope: 'workspace', workspace: null, hiddenByScope: 0, coordinator: null, line: null, others: [], othersTotal: 0,
+    entries: [
+      { sessionId: 'session-a', label: '@a', status: 'ready', state: 'idle', summary, updatedAt: 1, branch: 'feat/x', commit: 'abcdef1234', model: 'deepseek-flash', queue: 1, assigned: 'build301', files: 'a.js, b.js', declaration: { rel: '.agents/worktrees/feat/x', mergeLabel: '可合并', kind: 'done', build: 'build301', count: 2 } }
+    ],
+    restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a'
+  }
+  const original = React.useState
+  let calls = 0
+  React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+  const tree = React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' })
+  React.useState = original
+  const text = textOf(tree)
+  const json = JSON.stringify(tree)
+  assert.ok(json.includes('dshaSr_metaChip'), '分支 / 提交 / 模型 / 时间用芯片')
+  for (const part of ['feat/x', 'abcdef1234', 'deepseek-flash', 'build301', '可合并']) assert.ok(json.includes(part), '缺少 ' + part)
+  assert.ok(json.includes('dshaSr_metaChips'), 'meta 芯片成组渲染')
+  assert.ok(json.includes(summary), '摘要保留全文（悬停 title）')
+})
+
 test('Client：看板按插件分类分组，归档条目进右栏「归档」分区，原因标签显示', async () => {
   const { React } = fakeReact()
   const mod = await loadClient(React)
@@ -712,6 +744,31 @@ test('Client：看板按插件分类分组，归档条目进右栏「归档」�
   React.useState = original
   for (const key of ['catAttention', 'catReady', 'why_failed', 'archiveTitle', 'foldArchiveSum']) assert.match(page, new RegExp(key))
   assert.doesNotMatch(page, /catActive|boardEmpty/)
+})
+
+test('Client：核验记录用本地化状态胶囊（完成 / 已取消），未知状态显示原值', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => key
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const board = {
+    scope: 'workspace', workspace: null, hiddenByScope: 0, coordinator: null, line: null, entries: [], others: [], othersTotal: 0, taskBoard: undefined,
+    watches: [
+      { id: 'w1', state: 'done', line: 'CI 1 完成', what: 'CI 1', checkedAt: 1 },
+      { id: 'w2', state: 'cancelled', line: 'CI 2 已取消', what: 'CI 2', checkedAt: 1 },
+      { id: 'w3', state: 'failed', line: 'CI 3 失败', what: 'CI 3', checkedAt: 1 },
+      { id: 'w4', state: 'quarantined', line: 'CI 4 未知', what: 'CI 4', checkedAt: 1 }
+    ],
+    restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a'
+  }
+  globalThis.window = { localStorage: { getItem: () => JSON.stringify({ watch: true }), setItem() {} } }
+  const original = React.useState
+  let calls = 0
+  React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+  let text
+  try { text = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' })) } finally { React.useState = original; delete globalThis.window }
+  for (const part of ['verifyStateDone', 'verifyStateCancelled', 'verifyStateFailed', 'quarantined']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(!text.includes('>active<'), '不把未知状态当 active')
 })
 
 test('Client：卡片默认折叠（只留摘要与展开按钮），需要处理的自动展开；久未活动 / 空白分组默认收起', async () => {

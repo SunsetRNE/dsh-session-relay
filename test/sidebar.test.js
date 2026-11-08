@@ -89,6 +89,9 @@ test('卫星环：本会话没有守候时不渲染；有守候时显示状态�
     for (const part of ['o/r', 'rwStateOn', 'rwPause', 'rwCheck', 'watchRingTitle', 'watchRingOpen']) assert.ok(text.includes(part), '缺少 ' + part)
     assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSr_orb')), '卫星环按钮')
     assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSr_orbCount') && textOf(node) === '1'), '数量胶囊')
+    assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSr_orbRepo') && textOf(node) === 'o/r'), '浮层仓库用芯片')
+    assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSr_orbPopCount') && textOf(node) === '1'), '浮层头部计数胶囊')
+    assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSr_orbPopHead')), '浮层头部一行')
     await findButton(tree, (label) => label === 'watchRingOpen').props.onClick()
     assert.deepEqual(opened, [1])
   } finally { delete globalThis.window }
@@ -353,7 +356,7 @@ test('入口：设置页 / 协作标签 / 监督面板的正文在 client.panel.
   React.lazy = (factory) => { lazies.push(factory); return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 3 }
+  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 4 }
   const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve(reply) })
   assert.equal(asked.length, 0, '载入入口时不下载正文')
   const tree = React.createElement(mod.BoardPage, { t })
