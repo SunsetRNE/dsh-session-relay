@@ -122,6 +122,14 @@ test('列表缓存：60 秒内不重复请求，force 绕过；身份守卫先�
   assert.ok(LIST_TTL_MS >= 30_000)
 })
 
+test('列表缓存：并发同一 key 只跑一次 gh', async () => {
+  const { gh, git, calls } = fakeTools()
+  const lists = new GitHubLists({ gh, git, now: () => 1000 })
+  const [a, b] = await Promise.all([lists.pullRequests('o/r'), lists.pullRequests('o/r')])
+  assert.equal(calls.gh.length, 1, '并发请求共用一次 gh')
+  assert.equal(a, b, '两个调用拿到同一份结果')
+})
+
 test('分支列表：默认分支 / 当前分支 / 已合并；fetch 清缓存', async () => {
   const { gh, git, calls } = fakeTools()
   const lists = new GitHubLists({ gh, git, now: () => 1000 })

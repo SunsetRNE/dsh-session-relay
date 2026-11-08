@@ -48,7 +48,7 @@
 
 ### 3.3 PR（新）
 
-- 数据：只读视图 `pr-list`（`state=open|closed` 两个缓存键，60s）与 `pr-detail`（点「详情」按需拉正文、评审、评论与文件改动）。列表带 `additions` / `deletions` / `changedFiles`，详情带 `files`（路径、增删行、changeType）。
+- 数据：只读视图 `pr-list`（`state=open|closed` 两个缓存键，5 分钟；刷新强制、写后失效）与 `pr-detail`（点「详情」按需拉正文、评审、评论与文件改动，悬停「详情」预取）。列表带 `additions` / `deletions` / `changedFiles`，详情带 `files`（路径、增删行、changeType）。
 - 展示：编号 + 标题（可点开 GitHub）+ 作者 + 状态胶囊（草稿 / 待审 / 已请求修改 / 已批准 / 已合并）+ 更新时间 + 评论数 + `+A −D` / 文件数；关联任务号（若有）。打开 / 已关闭切换；打开列表另有「全部 / 待审 / 需处理 / 已批准 / 草稿」筛选与计数。冲突胶囊先不做：`gh pr list` 不保证给出可靠的 mergeable，要逐条读详情，留到后续。
 - 动作：标题 / 编号开 GitHub；刷新（保留当前打开 / 已关闭状态）；「处理」里批准、请求修改、评论、关闭 / 重开；「关联任务」输入任务号（沿用 `task-pr`，用户点击；成功后刷新看板）；行内「AI 审核」拉起只读审核会话（见下）。
 - **审批 / 评论 / 关闭 / 重开只由用户点击**：批准 / 关闭 / 重开二次确认，评论 / 请求修改点按钮即带正文发出（请求修改必须有说明）。写前校验 GitHub 身份与账号锁定，写后清列表 / 详情缓存、刷新列表并记一条审计。
@@ -99,8 +99,8 @@
 
 | 视图/动作 | 说明 |
 | --- | --- |
-| `view=pr-list` | 只读，`session=<id>` 取当前工作区仓库；`state=open|closed`；带 `additions/deletions/changedFiles`；返回 `{repo, state, items, error?}`；60s 缓存 |
-| `view=pr-detail` | 只读，按 PR 号取正文、评审、评论与 `files`（+`additions/deletions/changedFiles`）；点「详情」按需拉；60s 缓存 |
+| `view=pr-list` | 只读，`session=<id>` 取当前工作区仓库；`state=open|closed`；带 `additions/deletions/changedFiles`；返回 `{repo, state, items, error?}`；5 分钟缓存（并发合并、刷新强制、写后失效） |
+| `view=pr-detail` | 只读，按 PR 号取正文、评审、评论与 `files`（+`additions/deletions/changedFiles`）；点「详情」按需拉，悬停预取；5 分钟缓存 |
 | `action=task-pr` | 用户点击：PR 页把 PR 关联到本地任务（沿用任务页动作，可 clear 解除） |
 | `view=issue-list` | 只读，同上；返回 `{repo, items, error?}` |
 | `view=branch-list` | 只读，遍历所有已登记工作区，返回本地/远端分支；本地用 git，远端用 gh；60s 缓存 |

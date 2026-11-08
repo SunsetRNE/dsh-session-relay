@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 13 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 14 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -133,7 +133,7 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const loaded = await lazyFactory()
   assert.equal(textOf(loaded.default()), 'sideStale')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 13, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 14, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -936,7 +936,7 @@ const branchData = () => ({
 
 test('PR 页：远端列表、标题链接、状态与请求修改/评论/关联任务动作', async () => {
   const posted = []
-  const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
+  const kit = { ...kitFor(), request: async (...args) => { posted.push(args); return {} } }
   // PrTab 的 useState：data / error / busy / filter / openNo / comment / pending / running / prState / detailNo / linkTask
   const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, 'LGTM', undefined, undefined, 'open', undefined, 'T12'] }))
   const { mod } = await load('client.sidebar.js', React)
@@ -946,6 +946,10 @@ test('PR 页：远端列表、标题链接、状态与请求修改/评论/关联
   assert.ok(findNode(tree, (node) => node.props?.placeholder === 'sidePrTask'), '关联任务输入框')
   const titleLink = findNode(tree, (node) => node.type === 'a' && String(node.props?.className ?? '').includes('dshaSv_titleLink'))
   assert.equal(titleLink?.props?.href, 'https://github.com/o/r/pull/7', '标题可点开 GitHub')
+  await findButton(tree, (label) => label === 'prOpenDetail').props.onPointerEnter()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const prefetch = posted.filter(([method]) => method === 'GET').at(-1)
+  assert.deepEqual(prefetch?.[2], { view: 'pr-detail', session: 'session-self', number: 7 }, '悬停详情预取')
   await findButton(tree, (label) => label === 'prRequestChanges').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(lastPost(posted), { action: 'pr-review', number: 7, verdict: 'request-changes', body: 'LGTM', fromSession: 'session-self' })
