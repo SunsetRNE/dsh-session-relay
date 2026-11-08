@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 31 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 32 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -134,9 +134,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v31'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v32'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 31, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 32, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -250,10 +250,14 @@ test('正文 chunk：筛选「可合并」只留 ready 的卡片；空分组不�
 test('正文 chunk：点卡片进详情——返回、路径、状态、问题、信息表、冲突', async () => {
   const React = fakeReact(states(sampleBoard(), { selected: 'session-w1aaaaaa' }))
   const { mod } = await load('client.sidebar.js', React)
-  const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const text = textOf(tree)
   for (const part of ['sideBack', 'dsha-session-relay / @w1', '侧边栏改版', '● why_question', 'question', 'A 还是 B', 'sideDetailSummary', 'sideDetailInfo', 'sideBranch', 'feat/side', 'sideCommit', 'sideDetailIssues', 'sideOverlap']) {
     assert.ok(text.includes(part), '详情缺少 ' + part)
   }
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_fieldRow')), '信息字段按基线成行')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_sumFull')), '摘要用全文富文本')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_grid')), '详情块有卡片 / 间距包裹')
   assert.ok(!text.includes('sideCountAttention'), '详情页不显示列表计数')
 })
 
