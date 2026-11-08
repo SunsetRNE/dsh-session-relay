@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 20 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 21 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -134,9 +134,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v20'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v21'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 20, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 21, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -1013,13 +1013,13 @@ test('PR 页：已批准筛选与空态；批准 / 关闭走二次确认', async
 test('PR 页：已关闭列表可重开；关闭后的列表与打开的列表分开请求', async () => {
   const posted = []
   const kit = { ...kitFor(), request: async (...args) => { posted.push(args); return {} } }
-  const closed = { prs: { repo: 'o/r', state: 'closed', items: [{ number: 7, title: '修 bug', author: 'alice', url: 'https://github.com/o/r/pull/7', draft: false, merged: false, reviewDecision: '', updatedAt: '2026-11-07T00:00:00Z', comments: 0, head: 'fix/x', base: 'main' }, { number: 8, title: '已合并', author: 'bob', url: 'https://github.com/o/r/pull/8', draft: false, merged: true, reviewDecision: '', updatedAt: '2026-11-06T00:00:00Z', comments: 1, head: 'a', base: 'main' }] } }
+  const closed = { prs: { repo: 'o/r', state: 'closed', items: [{ number: 7, title: '修 bug', author: 'alice', url: 'https://github.com/o/r/pull/7', draft: false, merged: false, reviewDecision: 'CHANGES_REQUESTED', updatedAt: '2026-11-07T00:00:00Z', comments: 0, head: 'fix/x', base: 'main' }, { number: 8, title: '已合并', author: 'bob', url: 'https://github.com/o/r/pull/8', draft: false, merged: true, reviewDecision: '', updatedAt: '2026-11-06T00:00:00Z', comments: 1, head: 'a', base: 'main' }] } }
   // PrTab 的 9 个 useState：data / error / busy / filter / openNo / comment / pending / running / prState
   const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [closed, undefined, false, 'all', 7, '', { number: 7, kind: 'reopen' }, undefined, 'closed'] }))
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
-  for (const part of ['prStateOpen', 'prStateClosed', 'prReopen', 'prConfirmReopen', 'prMerged']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['prStateOpen', 'prStateClosed', 'prReopen', 'prConfirmReopen', 'prMerged', 'prReviewChanges']) assert.ok(text.includes(part), '缺少 ' + part)
   assert.equal((text.match(/prReopen/g) || []).length >= 1, true, '未合并的关闭 PR 可重开')
   await findButton(tree, (label) => label === 'prConfirm').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
