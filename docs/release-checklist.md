@@ -16,7 +16,7 @@
 - [ ] `engines.dsh` / `peerDependencies` 范围与 README「运行环境」一致（2.4.0：`>=0.2.2-rc.1` 起，未变）。
 - [ ] CHANGELOG 有对应版本段，且没有遗留「未发布」标题。
 - [ ] README 的功能、安装、发版段与代码一致（本次已按 2.4.0 更新）。
-- [ ] 本次改过 `lib/client.panel.js` / `lib/client.sidebar.js` 时，`lib/client.js` 有对应的 touch 行；`PANEL_KIT` 与 `client.panel.js` 的 `KIT_VERSION`、`SIDEBAR_KIT` 与 `client.sidebar.js` 的 `KIT_VERSION` 相等（测试覆盖；2.4.0 侧栏 38 / 面板 8，`client.panel.js` 未改）。
+- [ ] 本次改过 `lib/client.panel.js` / 侧栏正文时，`lib/client.js` 有对应的 touch 行；`PANEL_KIT` 与 `client.panel.js` 的 `KIT_VERSION` 相等；`SIDEBAR_KIT`、`SIDEBAR_CHUNK` 与 `lib/client.sidebar<KIT>.js` 的 `KIT_VERSION` 一致（测试覆盖；2.4.0 侧栏 40 / 面板 8，`client.panel.js` 未改）。
 - [ ] 若改过 `lib/client.js`，发版前整页刷新验过面板（本机宿主客户端热更新会直接生效）；改过 `lib/index.js` 则用「重启 DSH」验证。
 
 ## 1. 测试（必须串行）

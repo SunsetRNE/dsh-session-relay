@@ -90,7 +90,7 @@ npm test
 
 加载方式：`lib/index.js` 是外壳，逻辑在 `lib/impl.js` 及其依赖里。改实现文件后 `/relay reload` 即可生效；`lib/client.js`（面板）改动由宿主热更新，刷新即见；改 `lib/index.js`、`package.json` 的 `dsh` 字段或 `cordis.patch.yml` 需要重启 DSH。
 
-面板缓存注意：只改 `lib/client.panel.js` 必须同步改一行 `lib/client.js` 并把 `PANEL_KIT` / `KIT_VERSION` 一起 +1；只改 `lib/client.sidebar.js` 也要同步改一行 `lib/client.js`，并把 `SIDEBAR_KIT` / `KIT_VERSION` 一起 +1。改过 `client.js` 本身后本机实测宿主会热更新，等一两秒或刷新即见（2026-11-07 DSH 进程未重启也生效）；只有宿主没开客户端热更新且刷新无效时才重启 DSH。
+面板缓存注意：只改 `lib/client.panel.js` 必须同步改一行 `lib/client.js` 并把 `PANEL_KIT` / `KIT_VERSION` 一起 +1。改侧栏正文时，文件按当前 KIT 命名（如 `lib/client.sidebar40.js`），同步改 `lib/client.js` 的 `SIDEBAR_CHUNK` / `SIDEBAR_KIT` 与其 `KIT_VERSION`，并在 `client.js` touch 一行；KIT 一升就换文件名（`client.sidebar<新KIT>.js`），浏览器不会命中旧 chunk 的 immutable 缓存。改过 `client.js` 本身后本机实测宿主会热更新，等一两秒或刷新即见（2026-11-07 DSH 进程未重启也生效）；只有宿主没开客户端热更新且刷新无效时才重启 DSH。
 
 ## 打包
 
