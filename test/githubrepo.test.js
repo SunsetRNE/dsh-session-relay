@@ -97,6 +97,33 @@ test('探测失败记 error 且不猜能力；分支保护 403 记 unknown', asy
   } finally { await rm(base, { recursive: true, force: true }) }
 })
 
+test('探测：失败 15 秒后可重试，gh 身份提示行不当错误原因', async () => {
+  const base = await tmp()
+  try {
+    let now = 1_000
+    let calls = 0
+    const inner = fakeGh().gh
+    const gh = async (args) => {
+      calls += 1
+      if (args[1] === 'repos/o/r' && calls === 1) {
+        throw Object.assign(new Error('exit 1'), { stderr: 'gh: requests use the SunsetRNE GitHub identity configured in this DSHA environment\ngh: HTTP 502 Bad Gateway' })
+      }
+      return inner(args)
+    }
+    const store = new GithubRepoStore(base, { gh, now: () => now })
+    const first = await store.probe('o/r')
+    assert.equal(first.probe.source, 'error')
+    assert.equal(first.probe.error, 'gh: HTTP 502 Bad Gateway', '跳过身份提示行，取真实错误')
+    const before = calls
+    await store.probe('o/r')
+    assert.equal(calls, before, '失败后 15 秒内仍用缓存，不重复打 gh')
+    now += 16_000
+    const second = await store.probe('o/r')
+    assert.equal(second.probe.source, 'ok', '15 秒后自动重试成功')
+    assert.ok(calls > before, '重试真的打了 gh')
+  } finally { await rm(base, { recursive: true, force: true }) }
+})
+
 test('开关：按仓库存盘、只认已知键、能力不满足时拒绝开启', async () => {
   const base = await tmp()
   try {
