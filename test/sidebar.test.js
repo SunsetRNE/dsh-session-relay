@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 33 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 34 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -134,9 +134,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v33'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v34'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 33, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 34, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -208,6 +208,30 @@ test('会话卡片：汇报摘要按轻量富文本渲染（去 Markdown 记号�
   assert.ok(!text.includes('- 安全条件'), '列表记号被压成一行')
   assert.ok(findNode(tree, (node) => node.type === 'strong'), '粗体转成 strong')
   assert.ok(findNode(tree, (node) => node.type === 'code'), '行内代码转成 code')
+})
+
+test('版本线：两行预览走轻量富文本，tag / 测试胶囊，展开全文保留换行', async () => {
+  const board = sampleBoard()
+  board.line = { text: '**v2.3.0** 已发布（origin/main=73412a2、tag v2.3.0→73412a2、Release Latest、唯一附件 dsh-session-relay-2.3.0.tgz 511525 字节）；串行 410 全过；下一步：拆剩余长文本面板（PR/issue 评论、任务 note、版本线预览、设置说明），发版前整页刷新真机核对。' }
+  const React = fakeReact(states(board))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const text = textOf(tree)
+  assert.ok(!text.includes('**'), '两行预览不显示 Markdown 记号')
+  assert.ok(text.includes('v2.3.0 已发布'), '粗体文字保留')
+  assert.ok(text.includes('lineTagChip'), 'tag 胶囊')
+  assert.ok(text.includes('lineTests'), '「串行 410 全过」也识别成测试胶囊')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_linePreview')), '两行预览')
+  // 展开态：全文保留换行（richLines），仍不显示 Markdown 记号
+  const expandedStates = states(board)
+  expandedStates[4] = true
+  const React2 = fakeReact(expandedStates)
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const expandedTree = React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const expanded = textOf(expandedTree)
+  assert.ok(expanded.includes('下一步：拆剩余长文本面板'), '展开后看全文')
+  assert.ok(!expanded.includes('**'), '全文也不显示 Markdown 记号')
+  assert.ok(findNode(expandedTree, (node) => node.type === 'strong'), '全文里粗体转成 strong')
 })
 
 test('正文 chunk：任务页签渲染任务看板（懒挂载）；交接 / 动态页签各自的正文', async () => {
@@ -632,6 +656,9 @@ test('任务看板：点条目进详情，持有会话/任务号可点、派发�
   const tree = React.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), entries: [{ sessionId: 'session-w1aaaaaa', summary: '跑了真机，等合并' }], act: async () => ({}), busy: false, onCopied: () => {} })
   const text = textOf(tree)
   for (const part of ['sideTaskBack', 'T3', 'tasksHolder', '@w1', 'sideTaskWorktree', 'fix/t3', 'sideTaskStatus', 'sideTaskDepends', 'sideTaskLatest', '跑了真机，等合并', 'sideTaskCopyDispatch']) assert.ok(text.includes(part), '详情缺少 ' + part)
+  // 任务 note 与「最新」都收成两行截断，完整内容进 title；不再整段铺开
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_noteText') && node.props?.title === '进行中（@w1 认领）'), 'note 两行截断 + 悬停全文')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_sum')), '最新汇报两行截断')
   assert.ok(!text.includes('tasksOpenHolder') && !text.includes('sideTaskCopyId'), '打开会话/复制任务号已并进持有者行和任务号胶囊')
   assert.ok(JSON.stringify(tree).includes('dshaSv_split'), '宽屏主从布局：列表与详情同时渲染')
   await findButton(tree, (label) => label.includes('tasksHolder')).props.onClick()
@@ -896,7 +923,10 @@ test('设置页：GitHub 账号、仓库开关、同步与核验集中；返回�
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
-  for (const part of ['sideSettings', 'sideSettingsHint', 'ghTitle', 'repoTitle', 'issues 投影', 'syncTitle', 'sideVerifyTitle', 'sideVerifySum', 'declShow', 'CI 9 失败']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['sideSettings', 'sideSettingsHint', 'ghTitle', 'repoTitle', 'issues 投影', 'syncTitle', 'sideVerifyTitle', 'sideVerifySum', 'declShow', 'CI 9']) assert.ok(text.includes(part), '缺少 ' + part)
+  // 核验清单：状态胶囊 + 两行截断的核验说明，不再整行原文铺开
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_pill') && textOf(node) === 'verifyStateFailed'), '核验状态胶囊')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_watchLine')), '核验说明两行截断')
   assert.ok(!text.includes('T3 声明不符'), '声明原文默认收起（点「展开明细」才看）')
   assert.ok(!text.includes('sideTabTasks'), '设置打开时页签收起')
   const toggle = findNode(tree, (node) => node.type === 'input' && node.props?.type === 'checkbox' && typeof node.props?.onChange === 'function')
@@ -1077,12 +1107,19 @@ test('PR 详情：点详情展开评审与评论正文，空数据有说明', as
   const empty = textOf(React2.createElement(mod2.PrDetail, { kit: kitFor(), sessionId: 's1', number: 7 }))
   assert.ok(empty.includes('prNoReviews') && empty.includes('prNoComments'))
 
-  const long = { prDetail: { detail: { number: 7, body: '长'.repeat(200), reviews: [{ login: 'bob', state: 'approved', body: '长'.repeat(180), submittedAt: '2026-11-07T00:00:00Z' }], comments: [] } } }
+  const long = { prDetail: { detail: { number: 7, body: '**长正文** ' + '长'.repeat(200), reviews: [{ login: 'bob', state: 'approved', body: '**改一下**\n这里 `git` 有问题', submittedAt: '2026-11-07T00:00:00Z' }], comments: [{ login: 'carol', body: '**收到**，等 `CI`', createdAt: '2026-11-07T01:00:00Z' }] } } }
   const React3 = fakeReact([long, undefined, false])
   const mod3 = (await load('client.sidebar.js', React3)).mod
   const longTree = React3.createElement(mod3.PrDetail, { kit: kitFor(), sessionId: 's1', number: 7 })
-  assert.ok(textOf(longTree).includes('prExpand'), '长正文给展开按钮')
+  const longText = textOf(longTree)
+  assert.ok(longText.includes('prExpand'), '长正文给展开按钮')
   assert.ok(findNode(longTree, (node) => String(node.props?.className ?? '').includes('dshaSv_clampFold')), '长正文默认折叠')
+  // 评论 / 说明正文按散文 + 轻量富文本渲染：去 Markdown 记号，元信息（时间）用等宽芯片
+  assert.ok(!longText.includes('**'), '评论正文不显示 Markdown 记号')
+  assert.ok(findNode(longTree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_prose')), '正文用散文块而不是 pre 等宽块')
+  assert.ok(findNode(longTree, (node) => node.type === 'strong'), '粗体转成 strong')
+  assert.ok(findNode(longTree, (node) => node.type === 'code'), '行内代码转成 code')
+  assert.ok(findNode(longTree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_metaChip') && node.props?.title === '2026-11-07T01:00:00Z'), '评论时间用等宽芯片')
 })
 
 test('PR 页：AI 审核按钮拉起审核会话并打开', async () => {
@@ -1342,6 +1379,7 @@ test('设置页：仓库守候卡片显示状态、上次唤醒与过滤原因�
   const text = textOf(tree)
   assert.ok(text.includes('rwTitle') && text.includes('o/r') && text.includes('rwStateOn'), '守候卡片标题/仓库/状态')
   assert.ok(text.includes('rwDeferBusy') && text.includes('rwLastBatch'), '总览有延后原因与上次批次')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_metaChip') && node.props?.title === '#7 修 bug'), '上次批次用等宽芯片包裹')
   for (const part of ['rwTabOverview', 'rwTabJudge', 'rwTabTrigger', 'rwTabSettings']) assert.ok(text.includes(part), '缺少子页签 ' + part)
   await findButton(tree, (label) => label === 'rwPause').props.onClick()
   assert.deepEqual(posted.at(-1), { action: 'repo-watch-toggle', id: 'o/r#s', enabled: false, fromSession: 'session-self' })
