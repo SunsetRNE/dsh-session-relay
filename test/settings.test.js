@@ -261,15 +261,14 @@ test('面板概览：版本线用胶囊摘要 + 两行预览，全文按需展�
   assert.doesNotMatch(text, /后面是很长很长的说明。\n?后面/, '预览截断，不铺满整段')
 })
 
-test('面板看板：合并队列按队列号列出待合并会话与已分配构建号', async () => {
+test('面板看板：合并队列块已删除，队列号 / 构建号改由卡片 badge 表达', async () => {
   const { React } = fakeReact()
   const mod = await loadClient(React)
-  const t = (key) => key
+  const t = (key) => key === 'assignedTo' ? 'assigned {v}' : key
   const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
   const board = {
     scope: 'workspace', workspace: null, hiddenByScope: 0, coordinator: null, line: null, others: [], othersTotal: 0, restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a',
     entries: [
-      // 队列 #2 排在前面，验证是按队列号排序而不是数组顺序
       { sessionId: 'session-two', label: '@two', status: 'ready', category: 'ready', queue: 2, assigned: 'build301', branch: 'feat/two', commit: 'bbbbbbb1', state: 'idle', updatedAt: 1 },
       { sessionId: 'session-one', label: '@one', status: 'ready', category: 'ready', queue: 1, branch: 'feat/one', commit: 'aaaaaaa1', state: 'idle', updatedAt: 1, declaration: { rel: '.agents/worktrees/feat/one', mergeLabel: '可合并', kind: 'done' } },
       { sessionId: 'session-plain', label: '@plain', status: 'working', category: 'active', state: 'running', updatedAt: 1 }
@@ -280,15 +279,45 @@ test('面板看板：合并队列按队列号列出待合并会话与已分配�
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
   const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
   React.useState = original
-  assert.match(page, /mergeQueueTitle/)
-  // 展开时标题行不显示摘要，这里只校验内容是齐的
-  const firstOne = page.indexOf('@one'), firstTwo = page.indexOf('@two')
-  assert.ok(firstOne >= 0 && firstTwo >= 0 && firstOne < firstTwo, '按队列号排序：#1 在 #2 前面')
-  assert.match(page, /build301/, '已分配的构建号显示出来')
-  assert.match(page, /mergeQueueNoBuild/, '没构建号的给说明')
-  assert.match(page, /可合并/, '带声明状态')
-  const queuePart = page.slice(page.indexOf('mergeQueueTitle'), page.indexOf('catReady'))
-  assert.ok(!queuePart.includes('@plain'), '不在队列里的会话不进合并队列')
+  assert.ok(!page.includes('mergeQueueTitle'), '不再有独立的合并队列折叠块')
+  assert.match(page, /queueNo/, '队列号仍由卡片 badge 表达')
+  assert.match(page, /build301/, '已分配的构建号仍在卡片上')
+})
+
+test('Client：二轮压缩——概览操作行合并、归档移到底部默认收起、页签 inline', async () => {
+  const css = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
+  assert.match(css, /\.dshaSr_page \.dshaSr_tabs\{display:inline-flex/, '页签改成紧凑 inline 左对齐')
+  const panelSrc = await readFile(new URL('../lib/client.panel.js', import.meta.url), 'utf8')
+  assert.ok(!panelSrc.includes('dshaSr_idline'), '本会话卡不再有两行大号 id')
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => key
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const board = {
+    scope: 'workspace', workspace: { id: 'w', title: 'W', path: '/w' }, hiddenByScope: 0,
+    coordinator: { sessionId: 'session-main1', label: '@main', exists: true, model: 'm' },
+    self: { sessionId: 'session-self1', aliases: ['me'], isMain: false, participant: true, seesLine: true, model: 'deepseek-flash' },
+    line: { text: 'main=abc1234' },
+    entries: [
+      { sessionId: 'session-a', label: '@a', status: 'ready', category: 'ready', state: 'idle', summary: 's', updatedAt: 1 },
+      { sessionId: 'session-old', label: '@old', status: 'done', category: 'archived', state: 'idle', summary: 'old', updatedAt: 1 }
+    ],
+    others: [], othersTotal: 0, restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/w',
+    unattended: { wakesThisHour: 1, limit: 10, approxTokensThisHour: 1000 }
+  }
+  const render = (page) => {
+    const original = React.useState
+    let calls = 0
+    React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+    try { return textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: page })) } finally { React.useState = original }
+  }
+  const overview = render('overview')
+  for (const part of ['selfTitle', 'quickHandoffHint', 'overviewCounts', 'overviewToBoard', 'wakeLine', 'modelIs']) assert.ok(overview.includes(part), '概览缺少 ' + part)
+  const boardText = render('board')
+  assert.ok(boardText.includes('archiveTitle') && boardText.includes('foldArchiveSum'), '归档折叠在')
+  assert.ok(!boardText.includes('archiveHint'), '归档默认收起')
+  assert.ok(boardText.indexOf('archiveTitle') > boardText.indexOf('catReady'), '归档在页面底部')
+  assert.ok(!boardText.includes('mergeQueueTitle'), '合并队列块已删')
 })
 
 test('面板看板：分组只有一两条时强制展开（折叠态跨工作区继承会让新工作区看不到卡片）', async () => {
