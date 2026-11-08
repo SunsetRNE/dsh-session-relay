@@ -1,6 +1,8 @@
 # Changelog
 
-## 未发布
+## 2.4.1 - 2026-11-09
+
+2.4.1 收口侧栏刷新体验：进入侧栏先出页签框架与骨架，chunk 空闲预取；页面刷新 / 重开时先用上次快照渲染，再后台刷新；侧栏 chunk 改为按 KIT 命名（`client.sidebar40.js`），彻底绕开 WebView 对固定 chunk 名的旧缓存（修复卡在 stale 屏、反复刷新 / 重启不生效的问题）。串行测试 440 全过。
 
 ### 侧栏框架先出 + 上次快照 + 按版本命名的 chunk
 
@@ -9,6 +11,11 @@
 - 侧栏正文在宿主空闲时预取（`requestIdleCallback`）；预取完成后首次打开直接渲染，不再闪「正在加载协作面板」。嵌入面板同样复用已解析模块。
 - PR 页刷新期间在标题栏显示「正在重新加载…」，保留旧列表，不闪空白。
 - 侧栏 chunk 改为按 KIT 命名：`lib/client.sidebar40.js`，入口 `SIDEBAR_CHUNK` 指向新文件；KIT 一升就换文件名，绕开 WebView 对固定 chunk URL 的 immutable 缓存（旧版卡在 stale 屏的根治）。
+
+### 测试与文档
+
+- 串行测试 440 全过（`node --test --test-concurrency=1 test/*.test.js`）；新增框架先出、chunk 预取、sessionStorage 快照、PR 刷新状态与新版 KIT 断言。
+- README、发版清单与维护指南同步；`SIDEBAR_KIT 40` / chunk `client.sidebar40.js`，`PANEL_KIT 8` 未变。
 
 ## 2.4.0 - 2026-11-08
 
