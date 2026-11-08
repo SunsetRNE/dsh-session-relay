@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 30 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 31 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -134,9 +134,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v30'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v31'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 30, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 31, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -1247,6 +1247,16 @@ test('分支页：清理入口按工作树占用数显示，打开后是清理�
   for (const part of ['brCleanupTitle', 'brCleanupBack', 'brCleanupHint', 'wt/clean', 'brCleanupSelectAll']) assert.ok(text.includes(part), '缺少 ' + part)
 })
 
+test('邮箱：CI 通知标题拆成结构化行（标题/结果/仓库/CI 号/sha）', async () => {
+  const subject = 'build342 release · CI 42433629550 @SunsetRNE/DSHA-Sunset-mod · CI 42433629550 「DSH-A-Su production release」 成功（sha f5a2951234）'
+  const data = { mailbox: { unread: 1 }, items: [{ id: 'm1', subject, body: '正文', kind: 'build', at: 1, readBy: {} }] }
+  const React = fakeReact(states(sampleBoard(), { tab: 'mail', extra: [data, undefined, false] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  for (const part of ['build342 release', 'mailResultOk', 'mailKindBuild', 'SunsetRNE/DSHA-Sunset-mod', 'CI #42433629550', 'f5a2951']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(!text.includes('build342 release · CI 42433629550 @SunsetRNE'), '收起行不再整段铺标题')
+})
+
 test('邮箱页：独立页签直接用 MailBox 渲染公共通知', async () => {
   const data = { mailbox: { unread: 2 }, items: [{ id: 'm1', subject: '发版公告', body: '正文', kind: 'notice', at: 1, readBy: {} }] }
   // MailBox 的 3 个 useState：数据 / 错误 / busy
@@ -1373,6 +1383,22 @@ test('地图页：拆分子任务表单以用户身份提交 task-split', async 
   form.props.onSubmit({ preventDefault() {} })
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(posted.at(-1), { action: 'task-split', task: 'T10', subtasks: ['子一', '子二'], serial: true, fromSession: 'session-self' })
+})
+
+test('交接页：快照按结构化行渲染（计数行 + 会话行 + 摘要行）', async () => {
+  const snapshot = [
+    '看板（插件按事实分类：可合并 1 · 久未活动 1；工作区、版本线、main 进度、工作树声明见你的协作上下文，详情用 peer_inspect）',
+    '- @t121 「T121」 b27d0d4b · 可合并 · 分支 ui/card-wave-c · 提交 f664ae513',
+    '  T121 build343 Wave C 可合并: f664ae513（75265f3bb 组件+单测）',
+    '归档 24 个（已完成 21、已合入 main 2、提交本机已不存在 1）…'
+  ].join('\n')
+  const handoff = { coordinator: null, coordinatorFailure: null, draft: null, snapshot, history: [] }
+  const React = fakeReact(states({ ...sampleBoard(), handoff }, { tab: 'handoff', extra: ['', false, 'new', '', false, false, true] }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const text = textOf(tree)
+  for (const part of ['可合并', 'ui/card-wave-c', 'f664ae5', 'T121 build343 Wave C', '归档 24 个']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_snapItem')), '会话行结构化成行')
 })
 
 test('交接页：草稿、接手方与二次确认；确认以用户身份发出', async () => {
