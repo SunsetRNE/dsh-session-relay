@@ -359,6 +359,14 @@ test('额外页签：嵌入面板在两端插入概览 / 全文搜索，右侧�
   assert.ok(!text.includes('EXTRA_SEARCH'), '未打开的全文搜索不挂载')
   const order = ['sideUtilityOverview', 'sideTabSessions', 'sideTabMail', 'sideUtilitySearch', 'sideTabMore'].map((key) => text.indexOf(key))
   assert.ok(order.every((value, index) => value >= 0 && (index === 0 || value > order[index - 1])), '页签顺序正确')
+  // 切到其它页签后额外页签卸载（旧 BoardPage 自带 10s 轮询，不能留在后台）
+  const React3 = fakeReact(states(sampleBoard(), { tab: 'sessions' }))
+  const mod3 = (await load('client.sidebar.js', React3)).mod
+  const switched = textOf(React3.createElement(mod3.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', persistPrefix: 'embed-x:', extraTabs: [
+    { key: 'overview', render: () => React3.createElement('span', null, 'EXTRA_OVERVIEW') },
+    { key: 'search', render: () => React3.createElement('span', null, 'EXTRA_SEARCH') }
+  ] }))
+  assert.ok(!switched.includes('EXTRA_OVERVIEW') && !switched.includes('EXTRA_SEARCH'), '切走后额外页签卸载')
 })
 
 test('地图页：嵌入宽栏不传 onBack 时不渲染「返回更多」，窄栏传了仍保留', async () => {
