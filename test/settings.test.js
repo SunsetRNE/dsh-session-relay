@@ -220,7 +220,7 @@ test('面板概览：给出快速交接入口（主会话先整理快照再交�
     const original = React.useState
     let calls = 0
     React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-    const text = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'overview' }))
+    const text = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'overview' }))
     React.useState = original
     return text
   }
@@ -251,7 +251,7 @@ test('面板概览：版本线用胶囊摘要 + 两行预览，全文按需展�
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const text = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'overview' }))
+  const text = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'overview' }))
   React.useState = original
   for (const part of ['lineTitle', 'lineMainChip', 'lineHeadChip', 'lineCheckpoints', 'lineTests', 'lineUnreleased', 'lineExpand']) {
     assert.match(text, new RegExp(part), '缺少 ' + part)
@@ -277,7 +277,7 @@ test('面板看板：合并队列块已删除，队列号 / 构建号改由卡�
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
+  const page = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
   React.useState = original
   assert.ok(!page.includes('mergeQueueTitle'), '不再有独立的合并队列折叠块')
   assert.match(page, /queueNo/, '队列号仍由卡片 badge 表达')
@@ -309,7 +309,7 @@ test('Client：二轮压缩——概览操作行合并、归档移到底部默�
     const original = React.useState
     let calls = 0
     React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-    try { return textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: page })) } finally { React.useState = original }
+    try { return textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: page })) } finally { React.useState = original }
   }
   const overview = render('overview')
   for (const part of ['selfTitle', 'quickHandoffHint', 'overviewCounts', 'overviewToBoard', 'wakeLine', 'modelIs']) assert.ok(overview.includes(part), '概览缺少 ' + part)
@@ -390,6 +390,36 @@ test('Client：注册 settings.section；有数据时渲染公告、模板、速
   } finally { await h.cleanup() }
 })
 
+test('Client：左侧 / 协作面板默认嵌入 9 页签；无主会话给说明；旧 BoardPage 保留为 utility', async () => {
+  const { React } = fakeReact()
+  const seen = []
+  const StubSidebar = (props) => {
+    seen.push(props)
+    return React.createElement('div', null, 'EMBED:' + props.sessionId + ':' + props.persistPrefix)
+  }
+  let panel
+  globalThis.window = { __ModuleLoader__: { load: ({ factory }) => { panel = factory(() => React) } } }
+  try { new Function(await readFile(new URL('../lib/client.panel.js', import.meta.url), 'utf8'))() } finally { delete globalThis.window }
+  const kit = {
+    format: (text, values) => String(text).replace(/\{(\w+)\}/g, (_, key) => values?.[key] ?? ''),
+    formatTime: () => '', shortId: (id) => String(id).slice(8, 16), request: async () => ({}), copyText: async () => true,
+    errorText: () => '', Button: (props) => React.createElement('button', { onClick: props.onClick }, props.children), Status: () => null,
+    useFlash: () => [{}, () => {}], StarIcon: () => null, statusText: () => '', stateText: () => '', SidebarEmbedded: StubSidebar
+  }
+  const parts = panel.make(kit)
+  const storeOf = (snap) => ({ subscribe: () => () => {}, getSnapshot: () => snap, refresh: async () => {} })
+  const left = textOf(React.createElement(parts.BoardPage, { t: (key) => key, openSession: () => {}, marksStore: storeOf({ coordinator: 'session-main' }) }))
+  assert.match(left, /EMBED:session-main:embed-panel:/, '左栏用主会话视角、独立页签前缀')
+  const none = textOf(React.createElement(parts.BoardPage, { t: (key) => key, openSession: () => {}, marksStore: storeOf({}) }))
+  assert.match(none, /panelNoMain/, '没有主会话给一行说明')
+  assert.match(none, /sideUtilityOverview[\s\S]*sideUtilitySearch/, '说明页仍可进概览 / 全文搜索')
+  const tab = textOf(React.createElement(parts.ConversationRelayView, { t: (key) => key, openSession: () => {}, marksStore: storeOf({ coordinator: 'session-main' }), sessionId: 'session-cur' }))
+  assert.match(tab, /EMBED:session-cur:embed-tab:/, '对话标签用当前会话、另一套页签前缀')
+  assert.equal(typeof seen[0].onOpenUtility, 'function', 'utility 回调透传')
+  assert.equal(typeof seen[0].t, 'function', '文案函数透传')
+  assert.equal(typeof parts.LegacyBoardPage, 'function', '旧 BoardPage 仍导出给 utility 页')
+})
+
 test('Client：面板、状态点、悬停卡片、页头 ID 在有数据时渲染不抛错', async () => {
   const { React } = fakeReact()
   const mod = await loadClient(React)
@@ -416,7 +446,7 @@ test('Client：面板、状态点、悬停卡片、页头 ID 在有数据时渲�
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store }))
+  const page = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store }))
   React.useState = original
   // 默认概览：主会话、版本线、计数、新建；不铺开看板和次要分区；分页标签带“需要处理”角标
   assert.match(page, /mainIs/)
@@ -426,13 +456,13 @@ test('Client：面板、状态点、悬停卡片、页头 ID 在有数据时渲�
   assert.doesNotMatch(page, /要不要改|restartTitle/)
   calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const boardPage = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
+  const boardPage = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
   React.useState = original
   assert.match(boardPage, /要不要改/)
   assert.doesNotMatch(boardPage, /mainIs|restartTitle/)
   calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const ops = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' }))
+  const ops = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' }))
   React.useState = original
   // 次要分区默认收起：只有标题和一行摘要
   assert.match(ops, /restartTitlefoldRestartIdle/)
@@ -441,7 +471,7 @@ test('Client：面板、状态点、悬停卡片、页头 ID 在有数据时渲�
   globalThis.window = { localStorage: { getItem: () => JSON.stringify({ restart: true, open: true }), setItem: () => {} } }
   calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const opened = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' }))
+  const opened = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' }))
   React.useState = original
   delete globalThis.window
   assert.match(opened, /restartStart/)
@@ -463,7 +493,7 @@ test('Client：协作标签带本会话身份卡片与范围切换', async () =>
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const text = textOf(React.createElement(mod.ConversationRelayView, { sessionId: id, t, openSession: () => {}, marksStore: store }))
+  const text = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, sessionId: id, embedded: true }))
   React.useState = original
   assert.match(text, new RegExp(id))
   assert.match(text, /selfNotJoined/)
@@ -474,7 +504,7 @@ test('Client：协作标签带本会话身份卡片与范围切换', async () =>
   assert.match(text, /2b3fef60-00f7[\s\S]*2b3fef60/)
   calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const tab = textOf(React.createElement(mod.ConversationRelayView, { sessionId: id, t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
+  const tab = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, sessionId: id, embedded: true, initialPage: 'board' }))
   React.useState = original
   assert.match(tab, /scopeWorkspace/)
   assert.match(tab, /scopeHidden/)
@@ -517,7 +547,7 @@ test('Client 发出的看板请求能被路由正确解析（会话参数不被�
   try {
     const mod = await loadClient(React)
     const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
-    React.createElement(mod.ConversationRelayView, { sessionId: 'session-2b3fef60-00f7-4698-b7de-6111c3fdabd0', t: (k) => k, openSession() {}, marksStore: store })
+    React.createElement(mod.LegacyBoardPage, { t: (k) => k, openSession() {}, marksStore: store, sessionId: 'session-2b3fef60-00f7-4698-b7de-6111c3fdabd0', embedded: true })
   } finally {
     React.useEffect = original
     globalThis.setInterval = realInterval
@@ -546,7 +576,7 @@ test('Client：侧栏面板（无会话视角）按本机记住的工作区取�
     React.useEffect = (fn) => { fn() }
     globalThis.setInterval = () => 0
     const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
-    React.createElement(mod.BoardPage, { t: (k) => k, openSession() {}, marksStore: store })
+    React.createElement(mod.LegacyBoardPage, { t: (k) => k, openSession() {}, marksStore: store })
   } finally {
     React.useEffect = original
     globalThis.setInterval = realInterval
@@ -569,7 +599,7 @@ test('Client：侧栏面板（无会话视角）按本机记住的工作区取�
   globalThis.window = { localStorage: { getItem: () => null, setItem() {}, removeItem() {} } }
   let text
   try {
-    text = textOf(React.createElement(mod.BoardPage, { t: (k) => k, openSession() {}, marksStore: { subscribe: () => () => {}, getSnapshot: () => ({}), refresh: async () => {} } }))
+    text = textOf(React.createElement(mod.LegacyBoardPage, { t: (k) => k, openSession() {}, marksStore: { subscribe: () => () => {}, getSnapshot: () => ({}), refresh: async () => {} } }))
   } finally { React.useState = realState; delete globalThis.window }
   assert.match(text, /wsPick/)
   assert.match(text, /wsPickAwsPickMainBpageOverview/, '两个选项：A（有主会话）、B')
@@ -608,19 +638,19 @@ test('Client：设置页每个工作区一条版本线；协作标签列出未�
   }
   calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const view = textOf(React.createElement(mod.ConversationRelayView, { sessionId: id, t, openSession: () => {}, marksStore: store }))
+  const view = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, sessionId: id, embedded: true }))
   React.useState = original
   assert.match(view, /selfObserver/)
   calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const othersView = textOf(React.createElement(mod.ConversationRelayView, { sessionId: id, t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
+  const othersView = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, sessionId: id, embedded: true, initialPage: 'board' }))
   React.useState = original
   assert.match(othersView, /othersTitlefoldOthersSum/)
   assert.doesNotMatch(othersView, /扫一遍仓库/)
   globalThis.window = { localStorage: { getItem: () => JSON.stringify({ others: true }), setItem: () => {} } }
   calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const expanded = textOf(React.createElement(mod.ConversationRelayView, { sessionId: id, t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
+  const expanded = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, sessionId: id, embedded: true, initialPage: 'board' }))
   React.useState = original
   delete globalThis.window
   assert.match(expanded, /扫一遍仓库/)
@@ -648,7 +678,7 @@ test('Client：交接面板与侧栏标记（实心星、加入即空心圈）',
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' }))
+  const page = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' }))
   React.useState = original
   assert.match(page, /hoTitle/)
   assert.match(page, /hoDraftBy/)
@@ -677,7 +707,7 @@ test('Client：看板卡片显示已答复、队列号、已分配、占用重�
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
+  const page = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
   React.useState = original
   for (const key of ['answered', 'queueNo', 'assignedTo', 'conflict', 'assign']) assert.match(page, new RegExp(key))
 })
@@ -708,7 +738,7 @@ test('Client：卡片「唤醒」表单显示预判，主会话新建时禁用�
       }
       return original(initial)
     }
-    try { return textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' })) } finally { React.useState = original }
+    try { return textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' })) } finally { React.useState = original }
   }
   const confirm = () => rendered.find((node) => node.type === 'button' && node.children.includes('wakeConfirm'))
   const plans = (auto) => ({ auto, resume: { action: 'resume', reason: 'r' }, new: { action: 'new', reason: 'n' } })
@@ -743,7 +773,7 @@ test('Client：看板卡片与合并队列的 meta 用芯片，长摘要两行�
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const tree = React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' })
+  const tree = React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' })
   React.useState = original
   const text = textOf(tree)
   const json = JSON.stringify(tree)
@@ -774,7 +804,7 @@ test('Client：看板按插件分类分组，归档条目进右栏「归档」�
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
+  const page = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
   React.useState = original
   for (const key of ['catAttention', 'catReady', 'why_failed', 'archiveTitle', 'foldArchiveSum']) assert.match(page, new RegExp(key))
   assert.doesNotMatch(page, /catActive|boardEmpty/)
@@ -800,7 +830,7 @@ test('Client：核验记录用本地化状态胶囊（完成 / 已取消），�
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
   let text
-  try { text = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' })) } finally { React.useState = original; delete globalThis.window }
+  try { text = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' })) } finally { React.useState = original; delete globalThis.window }
   for (const part of ['verifyStateDone', 'verifyStateCancelled', 'verifyStateFailed', 'quarantined']) assert.ok(text.includes(part), '缺少 ' + part)
   assert.ok(!text.includes('>active<'), '不把未知状态当 active')
 })
@@ -823,7 +853,7 @@ test('Client：卡片默认折叠（只留摘要与展开按钮），需要处�
   const original = React.useState
   let calls = 0
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-  const page = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
+  const page = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board' }))
   React.useState = original
   assert.match(page, /cardMore/)
   assert.match(page, /conflictCount/)
@@ -875,7 +905,7 @@ test('Client：概览页的「等你决定」、唤醒暂停横幅 / 计数行�
     const original = React.useState
     let calls = 0
     React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
-    try { return textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'overview', ...props })) } finally { React.useState = original }
+    try { return textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'overview', ...props })) } finally { React.useState = original }
   }
   // 缺东西：初始化卡片逐项列出；没有会话视角时不给「设本会话为主会话」，改给提示
   let text = render({ ...base, setup: { hasMain: false, hasLine: false, hasTaskBoard: false, isGitRepo: false, root: '/p' } })
@@ -928,7 +958,7 @@ test('Client：概览页的「等你决定」、唤醒暂停横幅 / 计数行�
     const original = React.useState
     let calls = 0
     React.useState = (initial) => (++calls === 2 ? [{ ...base, unattended: { wakesThisHour: 3, limit: 16, approxTokensThisHour: 1_250_000, paused: false, pausedAt: null } }, () => {}] : original(initial))
-    try { return textOf(React.createElement(mod.BoardPage, { t: (key) => ({ wakeLine: '本小时自动唤醒 {n}/{limit} 次，约 {tokens} token' })[key] ?? key, openSession: () => {}, marksStore: store, initialPage: 'overview' })) } finally { React.useState = original }
+    try { return textOf(React.createElement(mod.LegacyBoardPage, { t: (key) => ({ wakeLine: '本小时自动唤醒 {n}/{limit} 次，约 {tokens} token' })[key] ?? key, openSession: () => {}, marksStore: store, initialPage: 'overview' })) } finally { React.useState = original }
   })()
   assert.match(zhLine, /本小时自动唤醒 3\/16 次，约 1\.3M token/)
   // 常设授权展开后：未设定时预填建议文字
@@ -970,7 +1000,7 @@ test('Client：模型下拉（跟随 / 全局默认 / 按服务商分组 / 推�
   }
   globalThis.window = { localStorage: { getItem: () => JSON.stringify({ models: true, open: true }), setItem() {}, removeItem() {} } }
   let text
-  try { text = textOf(React.createElement(mod.BoardPage, { t, openSession() {}, marksStore: store, initialPage: 'overview' })) } finally { React.useState = original; delete globalThis.window }
+  try { text = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession() {}, marksStore: store, initialPage: 'overview' })) } finally { React.useState = original; delete globalThis.window }
   assert.match(text, /modelRolesTitle/)
   assert.match(text, /modelRoleMain[\s\S]*modelRoleWorker/)
   assert.match(text, /modelIs/, '主会话卡片显示模型')
@@ -993,7 +1023,7 @@ test('Client：模型下拉（跟随 / 全局默认 / 按服务商分组 / 推�
     return original(initial)
   }
   globalThis.window = { localStorage: { getItem: () => JSON.stringify({ models: true, open: true }), setItem() {}, removeItem() {} } }
-  try { text = textOf(React.createElement(mod.BoardPage, { t, openSession() {}, marksStore: store, initialPage: 'overview' })) } finally { React.useState = original; delete globalThis.window }
+  try { text = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession() {}, marksStore: store, initialPage: 'overview' })) } finally { React.useState = original; delete globalThis.window }
   assert.match(text, /modelUnsupported/)
   // 不支持时以「一行说明」为准；渲染树里可能还留着上一轮的节点，不按节点数量断言
 })
@@ -1101,7 +1131,7 @@ test('面板 GitHub 仓库：显示能力探测与开关，不可用开关带原
     let calls = 0
     React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
     globalThis.window = { localStorage: { getItem: (key) => (key === 'dshaSr.fold.v1' ? JSON.stringify({ repo: true }) : null), setItem() {}, removeItem() {} } }
-    try { return textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' })) } finally { React.useState = original; delete globalThis.window }
+    try { return textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' })) } finally { React.useState = original; delete globalThis.window }
   }
   const ok = render({
     available: true, repo: 'o/r', source: 'ok', probedAt: 1_700_000_000_000,
@@ -1144,7 +1174,7 @@ test('协作面板 GitHub 仓库：同步队列只读展示', async () => {
   React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
   globalThis.window = { localStorage: { getItem: (key) => (key === 'dshaSr.fold.v1' ? JSON.stringify({ repo: true }) : null), setItem() {}, removeItem() {} } }
   let text
-  try { text = textOf(React.createElement(mod.BoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' })) } finally { React.useState = original; delete globalThis.window }
+  try { text = textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'ops' })) } finally { React.useState = original; delete globalThis.window }
   assert.match(text, /syncTitle/)
   assert.match(text, /T1/)
   assert.match(text, /#7/)

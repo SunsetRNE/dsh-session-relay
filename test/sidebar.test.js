@@ -115,7 +115,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 34 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 35 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -137,9 +137,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v34'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v35'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 34, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 35, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -235,6 +235,62 @@ test('版本线：两行预览走轻量富文本，tag / 测试胶囊，展开�
   assert.ok(expanded.includes('下一步：拆剩余长文本面板'), '展开后看全文')
   assert.ok(!expanded.includes('**'), '全文也不显示 Markdown 记号')
   assert.ok(findNode(expandedTree, (node) => node.type === 'strong'), '全文里粗体转成 strong')
+})
+
+test('嵌入面板：SidebarEmbedded 懒加载同一份侧栏正文并透传 kit / 页签前缀 / utility 入口', async () => {
+  const React = fakeReact()
+  const { mod } = await load('client.js', React)
+  const calls = []
+  const h = React.createElement
+  const StubSidebar = (props) => {
+    calls.push(props)
+    return h('span', null, props.sessionId + '|' + props.persistPrefix + '|' + typeof props.onOpenUtility + '|' + typeof props.kit.request + '|' + typeof props.kit.openSession)
+  }
+  const text = textOf(React.createElement(mod.SidebarEmbedded, { t: (key) => key, sessionId: 'session-42', openSession: () => {}, persistPrefix: 'embed-x:', onOpenUtility: () => {}, mod: { RelaySidebar: StubSidebar, KIT_VERSION: mod.SIDEBAR_KIT } }))
+  assert.match(text, /session-42\|embed-x:\|function\|function\|function/, '透传会话 / 前缀 / utility 与 kit')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].embedded, true, '嵌入实例标记')
+  assert.equal(calls[0].pollMs, 60000, '嵌入侧轮询降频')
+  // 测试环境没有 require.async / 真实组件：先显示读取中，不崩
+  const waiting = textOf(React.createElement(mod.SidebarEmbedded, { t: (key) => key, sessionId: 's', openSession: () => {} }))
+  assert.match(waiting, /sideLoading/)
+})
+
+test('邮箱：非主会话隐藏归档按钮，主会话保留', async () => {
+  const mail = { items: [{ id: 'm1', kind: 'notice', subject: '通知', body: '正文', at: 1, readBy: {} }], mailbox: { unread: 1 } }
+  const kit = { ...kitFor(), request: async () => mail }
+  const React = fakeReact([mail, undefined, false])
+  const { mod } = await load('client.sidebar.js', React)
+  const main = textOf(React.createElement(mod.MailBox, { kit, sessionId: 's1', isMain: true }))
+  assert.ok(main.includes('mailArchive'), '主会话有归档')
+  const React2 = fakeReact([mail, undefined, false])
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const other = textOf(React2.createElement(mod2.MailBox, { kit, sessionId: 's1', isMain: false }))
+  assert.ok(!other.includes('mailArchive'), '非主会话不露归档按钮')
+})
+
+test('更多页：嵌入面板才显示概览 / 全文搜索入口', async () => {
+  const board = { github: null, repo: null, sync: null, coordinator: null }
+  const React = fakeReact()
+  const { mod } = await load('client.sidebar.js', React)
+  const withUtility = textOf(React.createElement(mod.MoreTab, { kit: kitFor(), board, act: async () => ({}), busy: false, onOpen: () => {}, onSettings: () => {}, counts: {}, onOpenUtility: () => {} }))
+  for (const part of ['sideUtilityTitle', 'sideUtilityOverview', 'sideUtilitySearch']) assert.ok(withUtility.includes(part), '缺少 ' + part)
+  const React2 = fakeReact()
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const plain = textOf(React2.createElement(mod2.MoreTab, { kit: kitFor(), board, act: async () => ({}), busy: false, onOpen: () => {}, onSettings: () => {}, counts: {} }))
+  assert.ok(!plain.includes('sideUtilityOverview'), '独立右侧边栏不显示 utility 入口')
+})
+
+test('地图页：嵌入宽栏不传 onBack 时不渲染「返回更多」，窄栏传了仍保留', async () => {
+  const board = { taskBoard: { map: [], claimed: 0 }, sync: null, github: null }
+  const React = fakeReact()
+  const { mod } = await load('client.sidebar.js', React)
+  const bare = React.createElement(mod.MapTab, { kit: kitFor(), board, act: async () => ({}), busy: false })
+  assert.equal(findNode(bare, (node) => node.props?.['aria-label'] === 'sideBackMore'), undefined, '宽栏不渲染返回')
+  const React2 = fakeReact()
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const withBack = React2.createElement(mod2.MapTab, { kit: kitFor(), board, act: async () => ({}), busy: false, onBack: () => {} })
+  assert.ok(findNode(withBack, (node) => node.props?.['aria-label'] === 'sideBackMore') !== undefined, '窄栏保留返回更多')
 })
 
 test('正文 chunk：任务页签渲染任务看板（懒挂载）；交接 / 动态页签各自的正文', async () => {
@@ -356,7 +412,7 @@ test('入口：设置页 / 协作标签 / 监督面板的正文在 client.panel.
   React.lazy = (factory) => { lazies.push(factory); return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 5 }
+  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 6 }
   const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve(reply) })
   assert.equal(asked.length, 0, '载入入口时不下载正文')
   const tree = React.createElement(mod.BoardPage, { t })
