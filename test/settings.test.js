@@ -700,13 +700,14 @@ test('Client：卡片「唤醒」表单显示预判，主会话新建时禁用�
 test('Client：看板卡片与合并队列的 meta 用芯片，长摘要两行截断并带悬停全文', async () => {
   const { React } = fakeReact()
   const mod = await loadClient(React)
-  const t = (key) => key
+  // files 在字典里是带占位符的格式串：这里模拟真实 t，防止把 `占用：{v}` 直接渲染出来
+  const t = (key) => key === 'files' ? '占用：{v}' : key
   const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
   const summary = 'S'.repeat(240)
   const board = {
     scope: 'workspace', workspace: null, hiddenByScope: 0, coordinator: null, line: null, others: [], othersTotal: 0,
     entries: [
-      { sessionId: 'session-a', label: '@a', status: 'ready', state: 'idle', summary, updatedAt: 1, branch: 'feat/x', commit: 'abcdef1234', model: 'deepseek-flash', queue: 1, assigned: 'build301', files: 'a.js, b.js', declaration: { rel: '.agents/worktrees/feat/x', mergeLabel: '可合并', kind: 'done', build: 'build301', count: 2 } }
+      { sessionId: 'session-a', label: '@a', status: 'ready', category: 'attention', state: 'idle', summary, updatedAt: 1, branch: 'feat/x', commit: 'abcdef1234', model: 'deepseek-flash', queue: 1, assigned: 'build301', files: 'a.js, b.js', declaration: { rel: '.agents/worktrees/feat/x', mergeLabel: '可合并', kind: 'done', build: 'build301', count: 2 } }
     ],
     restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a'
   }
@@ -721,6 +722,10 @@ test('Client：看板卡片与合并队列的 meta 用芯片，长摘要两行�
   for (const part of ['feat/x', 'abcdef1234', 'deepseek-flash', 'build301', '可合并']) assert.ok(json.includes(part), '缺少 ' + part)
   assert.ok(json.includes('dshaSr_metaChips'), 'meta 芯片成组渲染')
   assert.ok(json.includes(summary), '摘要保留全文（悬停 title）')
+  assert.ok(text.includes('filesLabel'), '占用文件标签用纯标签 key')
+  assert.ok(text.includes('a.js') && text.includes('b.js'), '占用文件仍逐个显示')
+  assert.ok(!text.includes('{v}'), '不把带占位符的格式串直接渲染出来')
+  assert.ok(text.includes('.agents/worktrees/feat/x'), '工作树声明路径仍在')
 })
 
 test('Client：看板按插件分类分组，归档条目进右栏「归档」分区，原因标签显示', async () => {
