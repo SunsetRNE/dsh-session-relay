@@ -115,7 +115,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 38 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 39 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -137,9 +137,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v38'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v39'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 38, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 39, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -2260,4 +2260,48 @@ test('PR 页：行空白处点击打开详情，链接 / 按钮不抢占', async
   let stopped = 0
   title.props.onClick({ stopPropagation: () => { stopped += 1 } })
   assert.equal(stopped, 1, '标题链接自己 stopPropagation')
+})
+
+/* ---------------------------------------------------------------- 加载框架 / chunk 预取 / PR 刷新状态 */
+
+test('侧栏：看板未到时先出页签框架与骨架，不整块空白', async () => {
+  // useBoard 首个 state 还是 undefined；后面按父组件 useState 顺序补值（tab 设为 prs）
+  const React = fakeReact([{ board: undefined, error: undefined, at: undefined, hydrating: false }, 0, 'all', undefined, false, undefined, false, false, false, undefined, false, 'prs', false, undefined, undefined, {}, false])
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
+  const text = textOf(tree)
+  for (const part of ['sideTitle', 'sideTabSessions', 'sideTabPr', 'sideTabMore', 'loading']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_tabs')), '页签栏先出现')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_skel')), '列表位置用骨架占位')
+})
+
+test('入口：空闲时预取侧栏 chunk，首次打开不用再等下载', async () => {
+  const React = fakeReact()
+  let moduleRef
+  const asked = []
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: moduleRef.SIDEBAR_KIT }) })
+  moduleRef = mod
+  const pending = []
+  globalThis.requestIdleCallback = (fn) => { pending.push(fn); return 1 }
+  try {
+    const sub = { effect: () => () => {}, sidebarRightTabs: { register: () => () => {} }, slots: { inject: () => () => {}, register: () => () => {} } }
+    mod.registerSidebar(sub, (key) => key, () => {})
+    assert.equal(pending.length, 1, '登记侧栏时挂一次空闲预取')
+    pending[0]()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.deepEqual(asked, ['./client.sidebar.js'], '空闲时拉一次 chunk')
+    const Tab = mod.makeSidebarTab({ t })
+    assert.equal(textOf(React.createElement(Tab, { sessionId: 's' })), 'body', '预取完成后直接渲染正文，不再闪 Suspense')
+  } finally {
+    delete globalThis.requestIdleCallback
+  }
+})
+
+test('PR 页：旧列表刷新时显示「正在重新加载」，不整块空白', async () => {
+  const React = fakeReact([prData(), undefined, true, 'all', undefined, '', undefined, undefined, 'open', undefined, undefined])
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.PrTab, { kit: workItemKit(), board: sampleBoard(), act: async () => ({}), busy: false, sessionId: 'session-self' })
+  const text = textOf(tree)
+  assert.ok(text.includes('reloading'), '刷新期间有文字状态')
+  assert.ok(text.includes('修 bug'), '旧列表仍在，不闪空白')
 })
