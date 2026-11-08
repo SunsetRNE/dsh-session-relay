@@ -1,5 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   GitHubLists, LIST_TTL_MS, assertBranchDeletable, commandError, parseDefaultBranch, parseIssues,
   parseLocalBranches, parsePullDetail, parsePullRequests, parseRemoteBranches, parseWorktrees, requireRepo, validateBranchName
@@ -199,6 +202,48 @@ test('工作树：分支被 worktree 占用时标记并拒绝删除', async () =
     { path: '/a', branch: 'x', head: '1' },
     { path: '/b', head: '2', detached: true }
   ])
+})
+
+test('工作树：二次确认后移除干净工作树并删分支；活跃声明拒绝', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'relay-wt-'))
+  try {
+    const repo = join(dir, 'repo')
+    const wt = join(repo, '.agents', 'worktrees', 'wt', 'branch')
+    await mkdir(wt, { recursive: true })
+    const calls = []
+    const git = async (args) => {
+      const joined = args.join(' ')
+      calls.push(joined)
+      if (joined.includes('for-each-ref') && joined.includes('refs/heads')) return { stdout: ' \x00wt/branch\x00abc\x00\x00\x002026-11-07T00:00:00+08:00\x00x', stderr: '' }
+      if (joined.includes('for-each-ref') && joined.includes('refs/remotes/origin')) return { stdout: '', stderr: '' }
+      if (joined.includes('symbolic-ref')) return { stdout: '', stderr: '' }
+      if (joined.includes('worktree list --porcelain')) return { stdout: 'worktree ' + wt + '\nHEAD abc\nbranch refs/heads/wt/branch\n\n', stderr: '' }
+      if (joined.includes('status --porcelain')) return { stdout: '', stderr: '' }
+      if (joined.includes('worktree remove')) return { stdout: '', stderr: '' }
+      if (joined.includes('branch -D')) return { stdout: '', stderr: '' }
+      throw Object.assign(new Error('unknown git ' + joined), { stderr: 'unknown git' })
+    }
+    const lists = new GitHubLists({ gh: async () => ({ stdout: '' }), git, now: () => 1000 })
+    const done = await lists.deleteBranch({ path: repo, name: 'wt/branch', removeWorktree: true })
+    assert.equal(done.worktreeRemoved, wt)
+    assert.ok(calls.some((line) => line.includes('worktree remove ' + wt)), '移除了工作树')
+    assert.ok(calls.some((line) => line.includes('branch -D wt/branch')), '强制删了分支')
+
+    const wt2 = join(repo, '.agents', 'worktrees', 'active')
+    await mkdir(wt2, { recursive: true })
+    await writeFile(join(wt2, '.ACTIVE-SESSION'), '状态：活跃')
+    const git2 = async (args) => {
+      const joined = args.join(' ')
+      if (joined.includes('for-each-ref') && joined.includes('refs/heads')) return { stdout: ' \x00wt/active\x00abc\x00\x00\x002026-11-07T00:00:00+08:00\x00x', stderr: '' }
+      if (joined.includes('for-each-ref') && joined.includes('refs/remotes/origin')) return { stdout: '', stderr: '' }
+      if (joined.includes('symbolic-ref')) return { stdout: '', stderr: '' }
+      if (joined.includes('worktree list --porcelain')) return { stdout: 'worktree ' + wt2 + '\nHEAD abc\nbranch refs/heads/wt/active\n\n', stderr: '' }
+      if (joined.includes('status --porcelain')) return { stdout: '', stderr: '' }
+      throw Object.assign(new Error('unknown git ' + joined), { stderr: 'unknown git' })
+    }
+    const lists2 = new GitHubLists({ gh: async () => ({ stdout: '' }), git: git2, now: () => 1000 })
+    await assert.rejects(() => lists2.deleteBranch({ path: repo, name: 'wt/active', removeWorktree: true }), /ACTIVE-SESSION/)
+  } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
 test('分支删除：当前 / 默认 / 未合并 / 远端确认名', async () => {
