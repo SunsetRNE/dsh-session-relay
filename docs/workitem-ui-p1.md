@@ -1,7 +1,7 @@
 # 工作项共用 UI / 懒加载（P1a 共用层 + P1b 按页签拆 chunk）
 
-状态：T12 P1a 设计稿（未实现）；P1b 只做设计，不落地。
-基线：分支 `ui-longtext`，`SIDEBAR_KIT 37 / PANEL_KIT 8`。约束：不改服务端、不写 GitHub、右栏与嵌入面板共用同一套组件。
+状态：T12 P1a 已实现（SIDEBAR_KIT 38 / PANEL_KIT 8）；P1b 只做设计，不落地。
+基线：分支 `t12-workitem`（从 `ui-longtext` b9e60d6 起，含本设计稿），`SIDEBAR_KIT 38 / PANEL_KIT 8`。约束：不改服务端、不写 GitHub、右栏与嵌入面板共用同一套组件。
 
 ## 1. 目标
 
@@ -91,3 +91,16 @@ client.sidebar.settings.js
 3. MapTab / IssueTab 详情；PrTab 改共用外壳并回归审批/评论/关闭。
 4. `openWorkItem` 跨页；测试与文档。
 5. P1b 拆 chunk 另起任务，本轮不实现。
+
+
+## 7. P1a 实现记录（2026-11-08）
+
+已按第 3 节接入，实现与本文档的差异只有下面几点（都是落地时的必要取舍）：
+
+- `WorkItemChips` / `WorkItemDetail` / `useLazyDetail` 放在 `client.sidebar.js` 的 factory 内并随模块返回，右栏与嵌入面板共用；`client.panel.js` 未改，所以 `PANEL_KIT` 保持 8。
+- `WorkItemDetail` 用 fixed 底部抽屉（不是右侧浮层）：窄栏 / 手机更稳，遮罩点击与 ESC 都能关，关闭后把焦点还给打开前的元素。
+- `useLazyDetail` 模块级共享 `workItemCache` / `workItemInflight`：同 key 并发只发一份；最后一个调用方 release 时才 abort（`kit.request` 第 4 个参传 `AbortSignal`，服务端未改）；默认 TTL 60s。
+- 地图 / 问题详情直接用现有 `board.taskBoard.map` 与 `issue-list` 列表字段，不新增服务端视图；问题评论 `comments: null` 槽位留 P2。
+- PR 详情正文仍是 `PrDetail`（`view=pr-detail`），只是改成在共用外壳里挂载；列表 hover 预取改走同一个缓存，打开详情不再发第二次。
+- 跨页 `openWorkItem` 只接受 `task / map-ticket / issue / pr`，任务页 P1a 只切换页签；详情页打开后调用 `onFocusConsumed` 清空焦点，不留下“强制页签”状态。
+- 测试：`test/sidebar.test.js` 新增胶囊 / 外壳 / 懒加载 / 三页 focus / 跨页 7 条；全量 `node --test --test-concurrency=1 test/*.test.js` 432 全过（原 425 + 7）。

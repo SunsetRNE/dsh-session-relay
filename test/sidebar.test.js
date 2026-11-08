@@ -115,7 +115,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 37 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 38 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -137,9 +137,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v37'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v38'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 37, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 38, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -172,10 +172,10 @@ function kitFor(opened = []) {
 }
 
 // useState 顺序：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note
-// 父组件 14 个 useState：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note、doneOpen、tab、settingsOpen、updatedIds
+// 父组件 17 个 useState：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note、doneOpen、tab、settingsOpen、updatedIds、workItem、railCounts、wide
 // extra 接在父组件之后，给卡片 / 交接页等子组件用
-const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, extra = [] } = {}) =>
-  [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, {}, false, ...extra]
+const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, workItem = undefined, extra = [] } = {}) =>
+  [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, workItem, {}, false, ...extra]
 
 test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
   const React = fakeReact(states(sampleBoard()))
@@ -1966,4 +1966,213 @@ test('侧栏：先拉 light 首屏，再后台补完整快照；缺失的重字�
     for (const cleanup of cleanups) if (typeof cleanup === 'function') cleanup()
     globalThis.document = saved
   }
+})
+
+/* ---------------------------------------------------------------- P1a 工作项共用详情 / 懒加载 */
+
+const workItemKit = () => ({ ...kitFor(), t: (key) => key });
+
+test('工作项胶囊：kind / 状态 / owner / 分支 / 提交 / 链接统一展示，超过 6 个收成 +N', async () => {
+  const React = fakeReact()
+  const { mod } = await load('client.sidebar.js', React)
+  const item = { kind: 'pr', id: '#7', title: '修 bug', status: { text: 'prReviewChanges', tone: 'error' }, owner: '@alice', branch: 'fix/x → main', commit: 'abcdef1234567', link: { text: '#7', url: 'https://github.com/o/r/pull/7' } }
+  const tree = React.createElement(mod.WorkItemChips, { kit: workItemKit(), item })
+  const text = textOf(tree)
+  for (const part of ['workItemKindPr', 'prReviewChanges', '#7', '@alice', 'fix/x → main', 'abcdef1', '+1']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '') === 'dshaSv_pill' && textOf(node) === '+1') !== undefined, '超过 6 个收成 +1')
+  const lean = textOf(React.createElement(mod.WorkItemChips, { kit: workItemKit(), item: { kind: 'pr', id: '#8', link: { text: '#8', url: 'https://github.com/o/r/pull/8' } } }))
+  assert.ok(lean.includes('#8'), '链接文本保留')
+  const link = findNode(React.createElement(mod.WorkItemChips, { kit: workItemKit(), item: { kind: 'pr', id: '#8', link: { text: '#8', url: 'https://github.com/o/r/pull/8' } } }), (node) => node.type === 'a')
+  assert.equal(link?.props?.href, 'https://github.com/o/r/pull/8', '链接可点开 GitHub')
+  const issue = textOf(React.createElement(mod.WorkItemChips, { kit: workItemKit(), item: { kind: 'issue', id: '#9', status: { text: 'issueStateOpen', tone: 'ok' } } }))
+  assert.ok(issue.includes('workItemKindIssue') && issue.includes('issueStateOpen'), 'issue 映射')
+  const map = textOf(React.createElement(mod.WorkItemChips, { kit: workItemKit(), item: { kind: 'map-ticket', id: 'T1', status: { text: 'sideTaskActive', tone: 'brand' } } }))
+  assert.ok(map.includes('workItemKindMap') && map.includes('sideTaskActive'), '地图票映射')
+})
+
+test('工作项详情外壳：字段 / 正文 / 动作槽、关闭按钮、ESC、遮罩关闭', async () => {
+  const React = fakeReact()
+  const { mod } = await load('client.sidebar.js', React)
+  const closed = []
+  const item = { kind: 'map-ticket', id: 'T1', title: '父票', status: { text: 'review', tone: 'warn' }, owner: '@a', branch: 'b', commit: 'abcdef1234', link: { text: '#7', url: 'https://github.com/o/r/issues/7' } }
+  const tree = React.createElement(mod.WorkItemDetail, {
+    kit: workItemKit(), item,
+    fields: [['workItemStage', 'review'], ['workItemChildren', 'T1.1 子票']],
+    body: React.createElement('p', null, 'BODY'),
+    actions: React.createElement('button', null, 'ACT'),
+    onClose: () => closed.push(1)
+  })
+  const text = textOf(tree)
+  for (const part of ['workItemKindMap', 'review', 'T1', '父票', 'workItemStage', 'T1.1 子票', 'BODY', 'ACT']) assert.ok(text.includes(part), '缺少 ' + part)
+  const dialog = findNode(tree, (node) => node.props?.role === 'dialog')
+  assert.ok(dialog !== undefined, '有 dialog 外壳')
+  assert.equal(dialog.props['aria-modal'], 'true')
+  // 关闭按钮
+  const close = findNode(tree, (node) => node.type === 'button' && node.props?.['aria-label'] === 'workItemClose')
+  close.props.onClick()
+  // ESC（外壳内按键）
+  dialog.props.onKeyDown({ key: 'Escape', stopPropagation() {} })
+  // 点遮罩
+  const overlay = findNode(tree, (node) => String(node.props?.className ?? '') === 'dshaSv_workOverlay')
+  const ev = { target: {}, currentTarget: {} }
+  ev.target = ev
+  ev.currentTarget = ev
+  overlay.props.onClick(ev)
+  assert.deepEqual(closed, [1, 1, 1], '三种关闭路径都回调一次')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '') === 'dshaSv_workFields'), '字段成行')
+  assert.ok(findNode(tree, (node) => String(node.props?.className ?? '') === 'dshaSv_workActs'), '动作槽固定')
+})
+
+test('工作项懒加载：打开才拉、预取与缓存复用、invalidate 重拉、TTL 过期、并发去重', async () => {
+  const calls = []
+  const kit = { ...kitFor(), request: async (method, body, query, signal) => { calls.push({ method, query, signal }); return { ok: true, seq: calls.length } } }
+  let captured
+  let second
+  const React = fakeReact()
+  const { mod } = await load('client.sidebar.js', React)
+  function Probe({ number, ttlMs }) { captured = mod.useLazyDetail({ kit, params: { view: 'pr-detail', session: 's', number }, ttlMs }); return null }
+  React.createElement(Probe, { number: 7 })
+  assert.equal(calls.length, 0, '渲染但没打开时不请求')
+  await captured.open()
+  assert.equal(calls.length, 1, 'open 才拉')
+  assert.equal(calls[0].query.number, 7)
+  assert.ok(calls[0].signal !== undefined && typeof calls[0].signal.aborted === 'boolean', '请求带 abort signal')
+  await captured.open()
+  assert.equal(calls.length, 1, '同 key 缓存复用')
+  // 新实例预取：等 promise 收尾后 open 命中缓存
+  function Probe2() { second = mod.useLazyDetail({ kit, params: { view: 'pr-detail', session: 's', number: 8 } }); return null }
+  React.createElement(Probe2)
+  second.prefetch()
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(calls.length, 2, 'hover 预取只发一次')
+  await second.open()
+  assert.equal(calls.length, 2, '预取命中后打开不再请求')
+  second.invalidate()
+  await second.open()
+  assert.equal(calls.length, 3, 'invalidate 后重新拉')
+  // TTL 过期：新 key，ttlMs=1，睡过 1ms 再预取要重新拉
+  let third
+  function Probe3() { third = mod.useLazyDetail({ kit, params: { view: 'pr-detail', session: 's', number: 9 }, ttlMs: 1 }); return null }
+  React.createElement(Probe3)
+  third.prefetch()
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  const afterFirst = calls.length
+  third.prefetch()
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(calls.length, afterFirst + 1, 'TTL 过期后重拉')
+
+  // 同一 key 并发：两个实例的预取共用一份在途请求
+  let resolvePending
+  const pendingCalls = []
+  const slowKit = { ...kitFor(), request: () => { pendingCalls.push(1); return new Promise((resolve) => { resolvePending = resolve }) } }
+  let a
+  let b
+  function ProbeA() { a = mod.useLazyDetail({ kit: slowKit, params: { view: 'pr-detail', session: 's2', number: 11 } }); return null }
+  function ProbeB() { b = mod.useLazyDetail({ kit: slowKit, params: { view: 'pr-detail', session: 's2', number: 11 } }); return null }
+  React.createElement(ProbeA)
+  React.createElement(ProbeB)
+  a.prefetch()
+  b.prefetch()
+  assert.equal(pendingCalls.length, 1, '同 key 并发只发一份')
+  resolvePending({ ok: true, shared: true })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(pendingCalls.length, 1, '收尾后不重复发')
+})
+
+test('地图页：focus 打开共用详情，字段含依赖 / 子票 / 阶段，可跳问题页并保留拆分', async () => {
+  const board = {
+    taskBoard: {
+      map: [{ id: 'T1', title: '父票', kind: 'active', dependsOn: ['T0'], childTotal: 2, children: [{ id: 'T1.1', title: '子票一', kind: 'open' }] }],
+      claimed: 0
+    },
+    sync: { links: [{ id: 'T1', issue: 7, url: 'https://github.com/o/r/issues/7', state: 'synced' }] },
+    github: null
+  }
+  const opened = []
+  const React = fakeReact()
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.MapTab, {
+    kit: workItemKit(), board, act: async () => ({}), busy: false,
+    focus: { kind: 'map-ticket', id: 'T1', seq: 1 },
+    onFocusConsumed: () => {},
+    onOpenWorkItem: (target) => opened.push(target)
+  })
+  const text = textOf(tree)
+  for (const part of ['workItemKindMap', '父票', 'T1', 'workItemStage', 'workItemChildren', '子票一', 'workItemDepends', 'T0', 'workItemIssue']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(findNode(tree, (node) => node.props?.role === 'dialog') !== undefined, '打开共用详情')
+  const issueButton = findButton(tree, (label) => label === '#7')
+  assert.ok(issueButton !== undefined, '问题号可点')
+  issueButton.props.onClick()
+  assert.deepEqual(opened, [{ kind: 'issue', id: 7 }], '跳问题页')
+  assert.ok(findButton(tree, (label) => label === 'sideMapSplit') !== undefined, '保留拆分子任务')
+})
+
+test('问题页：focus 打开共用详情，标签 / 指派 / 关联任务可跳转', async () => {
+  const board = { ...sampleBoard(), github: { login: 'carol', state: 'ready' }, sync: { links: [{ id: 'T3', issue: 9 }] } }
+  const opened = []
+  const React = fakeReact([issueData(), undefined, false, '', 'all', undefined])
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.IssueTab, {
+    kit: workItemKit(), board, sessionId: 's1',
+    focus: { kind: 'issue', id: 9, seq: 1 },
+    onFocusConsumed: () => {},
+    onOpenWorkItem: (target) => opened.push(target)
+  })
+  const text = textOf(tree)
+  for (const part of ['workItemKindIssue', '崩溃', '#9', 'workItemAuthor', '@bob', 'workItemLabels', 'bug', 'workItemAssignees', '@carol', 'workItemLinkedTask', 'T3']) assert.ok(text.includes(part), '缺少 ' + part)
+  const taskButton = findButton(tree, (label) => label === 'T3')
+  assert.ok(taskButton !== undefined, '关联任务可点')
+  taskButton.props.onClick()
+  assert.deepEqual(opened, [{ kind: 'task', id: 'T3' }], '跳任务页')
+})
+
+test('PR 页：focus 打开共用外壳、正文走 PrDetail、审批动作保留、关联任务可跳转', async () => {
+  const prDetail = { prDetail: { repo: 'o/r', detail: { number: 7, body: 'PR 说明', url: 'https://github.com/o/r/pull/7', files: [], reviews: [], comments: [] } } }
+  const board = { ...sampleBoard(), taskBoard: { open: [{ id: 'T12', title: '任务', pr: { number: 7, url: 'https://github.com/o/r/pull/7' } }], claimed: 0 } }
+  const opened = []
+  const kit = { ...workItemKit(), request: async (method, body, query) => (query?.view === 'pr-detail' ? prDetail : {}) }
+  // PrTab 前 9 个 useState：data / error / busy / filter / openNo / comment / pending / running / prState；detailNo 由 focus 懒初始化
+  const React = fakeReact([prData(), undefined, false, 'all', undefined, '', undefined, undefined, 'open'])
+  const { mod } = await load('client.sidebar.js', React)
+  // 先用 hover 预取把详情放进缓存，正文挂载时直接命中（不发第二次请求）
+  mod.prefetchWorkItemDetail(kit, { view: 'pr-detail', session: 'session-self', number: 7 })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  const tree = React.createElement(mod.PrTab, {
+    kit, board, act: async () => ({}), busy: false, sessionId: 'session-self',
+    focus: { kind: 'pr', id: 7, seq: 1 },
+    onFocusConsumed: () => {},
+    onOpenWorkItem: (target) => opened.push(target)
+  })
+  const text = textOf(tree)
+  for (const part of ['workItemKindPr', '修 bug', '#7', 'workItemAuthor', '@alice', 'workItemLinkedTask', 'T12', 'PR 说明', 'prApprove', 'prClose', 'prAiReview']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(findNode(tree, (node) => node.props?.role === 'dialog') !== undefined, '打开共用外壳')
+  const taskButton = findButton(tree, (label) => label === 'T12')
+  assert.ok(taskButton !== undefined, '关联任务在详情字段里可点')
+  taskButton.props.onClick()
+  assert.deepEqual(opened, [{ kind: 'task', id: 'T12' }], '跳任务页')
+})
+
+test('跨页跳转：RelaySidebar 按 kind 强制目标页签并把 focus 交给页面', async () => {
+  const mapBoard = {
+    ...sampleBoard(),
+    taskBoard: { map: [{ id: 'T1', title: '父票', kind: 'active', children: [], childTotal: 0 }], claimed: 0 },
+    sync: { links: [] }
+  }
+  const React = fakeReact(states(mapBoard, { workItem: { kind: 'map-ticket', id: 'T1', seq: 1 } }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit: workItemKit(), sessionId: 'session-self' })
+  const text = textOf(tree)
+  assert.ok(text.includes('sideTabMap') && text.includes('workItemKindMap') && text.includes('父票'), '切到地图页并打开详情')
+  assert.ok(findNode(tree, (node) => node.props?.role === 'dialog') !== undefined, '详情抽屉已开')
+
+  const React2 = fakeReact(states(sampleBoard(), { workItem: { kind: 'issue', id: 9, seq: 1 }, extra: [issueData(), undefined, false] }))
+  const mod2 = (await load('client.sidebar.js', React2)).mod
+  const tree2 = React2.createElement(mod2.RelaySidebar, { kit: workItemKit(), sessionId: 'session-self' })
+  const text2 = textOf(tree2)
+  assert.ok(text2.includes('workItemKindIssue') && text2.includes('崩溃') && text2.includes('#9'), '问题页焦点打开详情')
+  assert.equal(mod2.workItemTabKey('map-ticket'), 'map')
+  assert.equal(mod2.workItemTabKey('issue'), 'issues')
+  assert.equal(mod2.workItemTabKey('pr'), 'prs')
+  assert.equal(mod2.workItemTabKey('task'), 'tasks')
+  assert.equal(mod2.workItemTabKey('nope'), undefined)
 })

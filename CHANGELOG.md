@@ -2,6 +2,16 @@
 
 ## 未发布
 
+### P1a 工作项共用详情 / 状态 / 跨页跳转 + 详情懒加载
+
+- 新增共用件（右侧边栏与嵌入面板同一份）：`WorkItemChips` 统一 kind / 状态 / owner / 分支 / 提交 / issue·PR 链接，超过 6 个收成 `+N`；`WorkItemDetail` 底部抽屉（标题 + chips + 字段行 + 正文槽 + 动作槽 + 关闭），ESC / 点遮罩关闭并把焦点还给触发元素。
+- `useLazyDetail`：挂载（即打开详情）才拉，hover / focus 预取只填缓存；同 key 并发只发一份，卸载 / 关闭 release 并在最后一个调用方释放时 abort；60s 短 TTL，`invalidate` 后重拉。PR 详情改走它（`view=pr-detail` 原请求不变），与列表 hover 预取共用缓存。
+- 地图页：票卡 / 子票 / 同步票行可点开详情，展示阶段 / 审批 / 依赖 / 子票 / 父任务 / issue 链接，保留「拆分子任务」；问题号可在问题页打开或外链 GitHub。
+- 问题页：行或「详情」打开详情（作者 / 标签 / 指派 / 更新时间 / 评论数 / 关联任务 / GitHub 外链）；评论正文留 P2 槽位，不新增服务端请求。
+- PR 页：详情收进共用外壳，正文复用 `PrDetail`；审批 / 请求修改 / 评论 / 关闭重开 / AI 审核动作与二次确认保留；关联任务可跳任务页。
+- 跨页 `openWorkItem({ kind, id })`：同一边栏切到 map / issues / prs 并打开目标详情，任务页只切页签；不新开页面、不丢当前会话。
+- SIDEBAR_KIT 38；PANEL_KIT 8 不变（嵌入面板复用同一份侧栏 chunk）。P1b 按页签拆 chunk 本轮只出设计，见 `docs/workitem-ui-p1.md`。
+
 ### 页签细节与概览/搜索视觉收口
 
 - 嵌入面板 11 页签不挤压、横向滚动并有滚动条提示；多页签收紧 padding / badge；概览页签带 attention 计数（与「会话」同源），右侧边栏仍 9 页签。
