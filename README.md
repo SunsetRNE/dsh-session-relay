@@ -4,7 +4,7 @@ DeepSeek Harness（DSHA）平级会话互通插件：一个主会话协调多个
 
 ## English
 
-A DeepSeek Harness plugin for coordinating several root sessions. One session is the main (coordinator) session; others report to it with `peer_report`, and reports are batched into a single wake-up. Version 2.0 adds a four-tab sidebar (sessions / tasks / handoff / activity), local task stages and approvals, one-way GitHub issue projection (off by default), PR / Projects read-only links and Status write-back, command templates and full-text search. Version 2.2 expands the sidebar to nine tabs (sessions / tasks / handoff / map / PR / branches / issues / mailbox / more); version 2.3 adds PR file changes and AI review, branch worktree cleanup, and a denser, structured sidebar. The plugin adds a `/relay` command, 14 `peer_*` model tools, a notification mailbox (public notices land in a per-workspace mailbox; notices are batched per session within 5 minutes, and `/relay mail` lists/reads/archives them with a 7-day token ledger), `peer_send mode=interrupt` (main-only nudge), a version-line notice every worker sees, a `.agents/TASKS.md` task board with claims, main-session handoff and session wake/takeover, read-only session inspection and search, and a web panel. Subagent reports are filed separately and never change the parent session's status. Phone notifications use the DSHA device bridge and are unavailable elsewhere. Run `/relay help` for the full command reference.
+A DeepSeek Harness plugin for coordinating several root sessions. One session is the main (coordinator) session; others report to it with `peer_report`, and reports are batched into a single wake-up. Version 2.0 adds a four-tab sidebar (sessions / tasks / handoff / activity), local task stages and approvals, one-way GitHub issue projection (off by default), PR / Projects read-only links and Status write-back, command templates and full-text search. Version 2.2 expands the sidebar to nine tabs (sessions / tasks / handoff / map / PR / branches / issues / mailbox / more); version 2.3 adds PR file changes and AI review, branch worktree cleanup, and a denser, structured sidebar; version 2.4 adds a shared work-item layer (chips / bottom-sheet detail / lazy loading) across map tickets, issues and PRs, and an 11-tab embedded panel (overview and full-text search as their own tabs). The plugin adds a `/relay` command, 14 `peer_*` model tools, a notification mailbox (public notices land in a per-workspace mailbox; notices are batched per session within 5 minutes, and `/relay mail` lists/reads/archives them with a 7-day token ledger), `peer_send mode=interrupt` (main-only nudge), a version-line notice every worker sees, a `.agents/TASKS.md` task board with claims, main-session handoff and session wake/takeover, read-only session inspection and search, and a web panel. Subagent reports are filed separately and never change the parent session's status. Phone notifications use the DSHA device bridge and are unavailable elsewhere. Run `/relay help` for the full command reference.
 
 ## 功能
 
@@ -16,7 +16,8 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - 模型工具（14 个）：`peer_list`、`peer_report`、`peer_send`、`peer_spawn`、`peer_alias`、`peer_inspect`、`peer_tasks`、`peer_task`、`peer_mail`，主会话另有 `peer_line`、`peer_assign`、`peer_handoff`、`peer_ask_user`、`peer_watch`。`peer_send` 的 `mode=interrupt`（主会话专用，`stop:true` 用「停止并汇报」信封）取代了 1.4.0 的独立工具 `peer_interrupt`。`peer_list` 默认只列本工作区（`scope=workspace`）；`scope=host` 看本机全部会话需要开发者模式（只读、审计）；主会话用 `declarations=true` 对照工作树声明（原 `peer_workspace` 已并入）。DSH 侧栏归档的会话在工具面按归档处理：`peer_list` 不列，`peer_inspect` / 工作区搜索默认拒绝或跳过，`peer_send` 明确报已归档；要读加 `include_archived=true`。
 - 协作邮箱（1.5.0）：核验成功这类公共通知只写进工作区邮箱（插件数据目录 `mailbox.json`），同一会话 5 分钟窗口内的多条通知合并成一条短通知（带最新 id）；需要细节时用 `peer_mail` read，主会话可用 `send`/`force` 推送。用户可用 `/relay mail` 看未读、读全文、归档和查看最近 7 天「短通知 / 全文」统计。失败/超时仍直接送达并响手机。
 - 协作面板（Web 客户端）：看板、交接预览、会话唤醒、等你决定的提问、自动置顶、开发者模式开关。
-- 右侧边栏「协作」标签（懒加载）：首屏先拉轻量快照，任务看板 / 声明 / 仓库 / 同步等重字段后台补水；之后轮询只拉轻量并合并保留重字段，完整快照在首次 / 5 分钟 / 手动刷新 / 写操作后补一次。正文是 9 个页签「会话 / 任务 / 交接 / 地图 / PR / 分支 / 问题 / 邮箱 / 更多」，窄栏把地图 / PR / 分支 / 问题折进「更多」（视觉参考 [Deck](https://github.com/FeatherHunter/dsh-mattpocock-skills-deck)（MIT）的 chip 页签、状态胶囊与列表行），只挂载看过的页签；会话页是本工作区的主会话、版本线、筛选与看板卡片，交接页是起草 / 二次确认 / 历史；地图页放地图票卡（顶层任务与子任务，带 #issue、OPEN/CLOSED、阶段与依赖；可直接拆分子任务）、票子列表、关联 PR、仓库状态与同步（同步在更多 / 设置，仓库开关仍只在设置页）；任务页切过去 / 打开详情只补轻量任务板，不触发远端校验。顶栏只留工作区、GitHub 胶囊、刷新与 ⚙ 设置；设置页集中版本线、新建会话模型、常设授权、自动置顶、开发者模式、空闲重启、指令模板、GitHub 账号、仓库开关、同步与核验。
+- 右侧边栏「协作」标签（懒加载）：首屏先拉轻量快照，任务看板 / 声明 / 仓库 / 同步等重字段后台补水；之后轮询只拉轻量并合并保留重字段，完整快照在首次 / 5 分钟 / 手动刷新 / 写操作后补一次。正文是 9 个页签「会话 / 任务 / 交接 / 地图 / PR / 分支 / 问题 / 邮箱 / 更多」，窄栏把地图 / PR / 分支 / 问题折进「更多」（视觉参考 [Deck](https://github.com/FeatherHunter/dsh-mattpocock-skills-deck)（MIT）的 chip 页签、状态胶囊与列表行），只挂载看过的页签；会话页是本工作区的主会话、版本线、筛选与看板卡片，交接页是起草 / 二次确认 / 历史；地图页放地图票卡（顶层任务与子任务，带 #issue、OPEN/CLOSED、阶段与依赖；可直接拆分子任务）、票子列表、关联 PR、仓库状态与同步（同步在更多 / 设置，仓库开关仍只在设置页）；任务页切过去 / 打开详情只补轻量任务板，不触发远端校验。顶栏只留工作区、GitHub 胶囊、刷新与 ⚙ 设置；设置页集中版本线、新建会话模型、常设授权、自动置顶、开发者模式、空闲重启、指令模板、GitHub 账号、仓库开关、同步与核验。2.4.0 起左栏 / 对话「协作」嵌入面板扩到 11 页签（概览 / 全文搜索独立），嵌入 max-width 1080px 居中；地图 / 问题 / PR 共用详情抽屉与懒加载。
+- 工作项共用详情（2.4.0 P1a）：地图票 / 子票、问题、PR 共用同一套状态胶囊与底部详情抽屉；打开才拉、hover 预取、同 key 并发去重、60s 缓存，PR 审批 / 评论 / 关闭重开 / AI 审核后清缓存重拉；`openWorkItem({ kind, id })` 在同一边栏切页签并打开目标，问题 / PR 行点标题或空白即可开详情。
 - 指令模板与全文搜索（2.0 T3）：`/relay tpl save|list|show|rm`（设置页同一份存储，可编辑 / 重命名 / 删除、复制用法，模板名小写校验、正文带字数）；`/relay search [--in|--re|--case|--kind|--tool|--turn|--limit] <内容>` 搜本工作区最近 25 个会话的原始日志，按会话分组显示命中并可打开。都只由用户操作。
 - UI 基准线（`docs/ui-copy.md`）：全插件文案压缩、语义合并、边界提示独立；成功 / 进行中反馈用动画（脉冲 / 转圈 / ✓），错误仍用文字；数据变化只给变化的行 1.5s 高亮，`prefers-reduced-motion` 下关闭。
 - 会话在哪个 checkout：卡片自动显示每个会话的目录、分支、是否在 git 工作树里、从哪个分支哪个提交分叉（worker 没汇报也能看到；官方「更改请求与工作树」新建的会话尤其需要）。只读，按目录缓存 60 秒。
@@ -68,10 +69,11 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - 存量补报（2.2.0）：登记时可选 `backlogHours`（0–720，默认关），第一次成功轮询把最近 N 小时的存量报一次，之后只报新动态。
 - 2.1.0 起只支持 GitHub；Gitee、自动隔离 worktree 仍在 2.2.0 后续。
 
-## 右侧边栏（2.2.0 起，2.3.0 继续打磨）
+## 右侧边栏（2.2.0 起，2.3.0 继续打磨，2.4.0 共用工作项详情）
 
 - 9 个页签：会话 / 任务 / 交接 / 地图 / PR / 分支 / 问题 / 邮箱 / 更多；侧栏压到 620px 以下时，地图 / PR / 分支 / 问题 折进「更多」，以列表入口打开，邮箱保持独立。
 - 2.3.0：页签与第一块内容连成一块（去掉分隔线与白缝），列表与卡片整体再压缩两档；折叠改用 `ResizeObserver` 宽度 class（`dshaSv_wide` / `dshaSv_narrow`），旋转后重算，修掉宽屏露快捷入口 / 窄屏露折叠页签的回归；stale 屏提示整页刷新并显示实际 / 期望 KIT。
+- 2.4.0：嵌入面板 11 页签（概览 / 全文搜索独立、滚动提示、概览 attention 计数、max-width 1080 居中）；地图票 / 问题 / PR 共用详情抽屉与懒加载；`/relay drop` 原始 id 快路径（需 `/relay reload`）；侧栏列表与看板加载提速（kit 引用稳定、只订阅主会话 id、挂载不重复拉取、并发去重）。
 - 地图：任务地图票子 + 本地票子，标题栏带计数、与其它页同一套间距；问题：远端 issue 列表（搜索 / 指派给我 / 标签筛选）；PR：远端 PR 列表（打开 / 已关闭、筛选与计数、行内看 `+A −D` 改动量，标题可开 GitHub），详情看文件改动、评审与评论（长文折叠、作者可点），审批 / 评论 / 关闭 / 重开只由用户点击，可把 PR 关联到本地任务、点「AI 审核」拉起只读审核会话审最新改动；分支：全部登记工作区的本地 / 远端分支，删除逐条确认（远端要输入分支名，默认分支和当前分支不可删）；「遗留分支清理」子页可多选后一次确认批量移除工作树分支（只清 .agents/worktrees 下、干净、无 .ACTIVE-SESSION；未合并要额外勾选）。
 - 邮箱：公共通知全文、标已读 / 归档；更多：窄屏快捷入口（地图 / PR / 分支 / 问题 / 设置，带计数）、同步队列、仓库探测；GitHub 账号与登录只在「设置」里。
 - 模型没有 PR 审批 / 评论 / 分支删除 / 批量清理的入口；推送、合并、发版仍由用户决定。
@@ -109,7 +111,7 @@ git tag v<版本> && git push origin v<版本>
 gh release create v<版本> dist/dsh-session-relay-<版本>.tgz --title v<版本> --notes-file <说明文件>
 ```
 
-每个 Release 只挂一个 `.tgz`：插件管理器按 Release 安装时只认唯一一个压缩包附件。逐项走 [发版清单](docs/release-checklist.md)（测试、版本号、tag、Release 说明、市场条目、发版后核对）；2.3.0 的 Release 说明在 [docs/release-notes-2.3.0.md](docs/release-notes-2.3.0.md)。
+每个 Release 只挂一个 `.tgz`：插件管理器按 Release 安装时只认唯一一个压缩包附件。逐项走 [发版清单](docs/release-checklist.md)（测试、版本号、tag、Release 说明、市场条目、发版后核对）；2.4.0 的 Release 说明在 [docs/release-notes-2.4.0.md](docs/release-notes-2.4.0.md)（2.3.0 见 [docs/release-notes-2.3.0.md](docs/release-notes-2.3.0.md)）。
 
 **已发布的 Release 和 tag 一律保留，永远不删、不改写**（用户 2026-11-06 定）：插件市场条目、别人的安装记录都可能钉在某个具体版本上，删掉或改写历史版本等于让那些安装直接断链。要修正内容就发新版本，不做撤回。
 
