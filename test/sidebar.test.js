@@ -269,6 +269,26 @@ test('邮箱：非主会话隐藏归档按钮，主会话保留', async () => {
   assert.ok(!other.includes('mailArchive'), '非主会话不露归档按钮')
 })
 
+test('旧 BoardPage 邮箱：非主会话不显示归档按钮，标已读保留', async () => {
+  const mail = { items: [{ id: 'm1', kind: 'notice', subject: '通知', body: '正文', at: 1, readBy: {} }], mailbox: { unread: 1 } }
+  const kitForReact = (React) => ({
+    format: (x) => x, formatTime: () => '', shortId: (id) => id, request: async () => mail, copyText: async () => true, errorText: () => '',
+    Button: (props) => React.createElement('button', { onClick: props.onClick }, props.children), Status: () => null,
+    useFlash: () => [{}, () => {}], StarIcon: () => null, statusText: () => '', stateText: () => '', SidebarEmbedded: () => null
+  })
+  const React = fakeReact([mail, undefined, false])
+  const { mod } = await load('client.panel.js', React)
+  const parts = mod.make(kitForReact(React))
+  const worker = textOf(React.createElement(parts.MailSection, { t: (key) => key, sessionId: 'session-worker', workspace: {}, isMain: false }))
+  assert.ok(!worker.includes('mailArchive'), '非主会话不露归档')
+  assert.ok(worker.includes('mailMarkRead'), '标已读保留')
+  const React2 = fakeReact([mail, undefined, false])
+  const { mod: mod2 } = await load('client.panel.js', React2)
+  const parts2 = mod2.make(kitForReact(React2))
+  const main = textOf(React2.createElement(parts2.MailSection, { t: (key) => key, sessionId: 'session-main', workspace: {}, isMain: true }))
+  assert.ok(main.includes('mailArchive'), '主会话保留归档')
+})
+
 test('更多页：嵌入面板才显示概览 / 全文搜索入口', async () => {
   const board = { github: null, repo: null, sync: null, coordinator: null }
   const React = fakeReact()
