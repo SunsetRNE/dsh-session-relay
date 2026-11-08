@@ -935,6 +935,31 @@ test('设置页：GitHub 账号、仓库开关、同步与核验集中；返回�
   assert.deepEqual(posted.at(-1), { action: 'repo-switch', key: 'issues', enabled: true, workspaceId: 'ws1', fromSession: 'session-self' })
 })
 
+test('设置页核验清单：done / cancelled 各有文案，未知状态不冒充核验中', async () => {
+  const board = {
+    ...sampleBoard(),
+    workspace: { id: 'ws1', title: 'dsha-session-relay', path: '/root/dsha-session-relay' },
+    declarations: { active: 1, mismatches: 0, text: '' },
+    watches: [
+      { id: 'w-done', state: 'done', line: 'done line', what: 'CI 1 完成', checkedAt: Date.now() },
+      { id: 'w-cancel', state: 'cancelled', line: 'cancel line', what: 'CI 2 已取消', checkedAt: Date.now() },
+      { id: 'w-unknown', state: 'quarantined', line: 'unknown line', what: 'CI 3 未知', checkedAt: Date.now() }
+    ]
+  }
+  const React = fakeReact(states(board, { settingsOpen: true }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const text = textOf(tree)
+  assert.ok(text.includes('verifyStateDone'), 'done 显示「完成」')
+  assert.ok(text.includes('verifyStateCancelled'), 'cancelled 显示「已取消」')
+  assert.ok(text.includes('quarantined'), '未知状态显示服务端原值')
+  assert.ok(!text.includes('verifyStateActive'), '未知状态不 fallback 成「核验中」')
+  const donePill = findNode(tree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_pill') && textOf(node) === 'verifyStateDone')
+  assert.equal(donePill?.props?.['data-tone'], 'ok', 'done 用 ok 色调')
+  const cancelPill = findNode(tree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_pill') && textOf(node) === 'verifyStateCancelled')
+  assert.equal(cancelPill?.props?.['data-tone'], undefined, 'cancelled 用中性色调')
+})
+
 test('地图页：已登录显示地图任务树与本地票子；不再出现登录卡', async () => {
   const github = { state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 }, scopes: ['repo'], loginFlow: null, error: null }
   const repo = { available: true, source: 'ok', repo: 'o/r' }
