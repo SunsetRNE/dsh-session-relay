@@ -546,6 +546,67 @@ test('参与范围收紧：同目录不算；工作树里的、/relay new 建的
   } finally { await h.cleanup() }
 })
 
+test('/relay drop 原始 id / 短前缀 / @别名走本地快路径，不 list 全部会话', async () => {
+  const h = await setup()
+  try {
+    await h.run('main here')
+    await h.call('peer_report', { status: 'working', summary: '开始' }, h.peer)
+    const p2 = h.makeAgent('cccccccc-0000-0000-0000-000000000011', { cwd: h.dir })
+    const p3 = h.makeAgent('cccccccc-0000-0000-0000-000000000012', { cwd: h.dir })
+    h.agents.set(p2.id, p2)
+    h.agents.set(p3.id, p3)
+    await h.call('peer_report', { status: 'working', summary: 'p2' }, p2)
+    await h.call('peer_report', { status: 'working', summary: 'p3' }, p3)
+    await h.run('alias rel ' + h.peer.id)
+    const original = h.relay.ctx.sessionController.list
+    let listed = 0
+    h.relay.ctx.sessionController.list = async (...args) => { listed += 1; return original(...args) }
+    try {
+      // 多重前缀：报错，不列会话
+      listed = 0
+      const amb = await h.run('drop cccccccc', h.caller)
+      assert.equal(amb.kind, 'error')
+      assert.match(amb.text, /匹配到 2 个/)
+      assert.equal(listed, 0, 'ambiguous 不 list 会话')
+      // 唯一短前缀
+      await h.call('peer_report', { status: 'working', summary: '回来' }, h.peer)
+      listed = 0
+      const byPrefix = await h.run('drop bbbbbbbb', h.caller)
+      assert.match(byPrefix.text, /已退出协作/)
+      assert.ok(h.relay.coord.state.optOut.includes(h.peer.id), '记下 optOut')
+      assert.equal(h.relay.coord.state.board[h.peer.id], undefined, '移出看板')
+      assert.equal(listed, 0, '唯一前缀不 list 会话')
+      // 完整 id
+      await h.call('peer_report', { status: 'working', summary: '再来' }, h.peer)
+      listed = 0
+      const byId = await h.run('drop ' + h.peer.id, h.caller)
+      assert.match(byId.text, /已退出协作/)
+      assert.equal(listed, 0, '完整 id 不 list')
+      // 完整 session-uuid 不在看板也直接用
+      const ghost = 'session-12345678-1234-1234-1234-123456789abc'
+      listed = 0
+      const byGhost = await h.run('drop ' + ghost, h.caller)
+      assert.match(byGhost.text, /已退出协作/)
+      assert.ok(h.relay.coord.state.optOut.includes(ghost))
+      assert.equal(listed, 0, '完整 uuid 不 list')
+      // @别名
+      await h.call('peer_report', { status: 'working', summary: '别名' }, h.peer)
+      listed = 0
+      const byAlias = await h.run('drop @rel', h.caller)
+      assert.match(byAlias.text, /已退出协作/)
+      assert.equal(listed, 0, '别名不 list')
+      // 短前缀找不到：明确错误，不退回全量
+      listed = 0
+      const miss = await h.run('drop eeeeee', h.caller)
+      assert.equal(miss.kind, 'error')
+      assert.match(miss.text, /看板里没有匹配的 id|用完整 id/)
+      assert.equal(listed, 0, '找不到也不 list')
+    } finally {
+      h.relay.ctx.sessionController.list = original
+    }
+  } finally { await h.cleanup() }
+})
+
 test('版本线：用户设定后主会话与工作会话上下文都可见；只有主会话模型能用 peer_line', async () => {
   const h = await setup()
   try {
