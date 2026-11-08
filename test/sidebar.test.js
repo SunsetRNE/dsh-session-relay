@@ -115,7 +115,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 36 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 37 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -137,9 +137,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v36'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v37'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 36, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 37, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -359,6 +359,12 @@ test('额外页签：嵌入面板在两端插入概览 / 全文搜索，右侧�
   assert.ok(!text.includes('EXTRA_SEARCH'), '未打开的全文搜索不挂载')
   const order = ['sideUtilityOverview', 'sideTabSessions', 'sideTabMail', 'sideUtilitySearch', 'sideTabMore'].map((key) => text.indexOf(key))
   assert.ok(order.every((value, index) => value >= 0 && (index === 0 || value > order[index - 1])), '页签顺序正确')
+  // 概览页签带 attention 计数 badge；右侧边栏没有
+  const overviewTab = findNode(tree, (node) => node.type === 'button' && node.props?.title === 'sideUtilityOverview')
+  assert.ok(overviewTab !== undefined && JSON.stringify(overviewTab).includes('sideTabAttention'), '概览页签带 attention 计数')
+  assert.ok(overviewTab !== undefined && textOf(overviewTab).includes('1'), '计数显示数字')
+  assert.ok(JSON.stringify(tree).includes('dshaSv_manyTabs'), '11 页签挂多页签紧凑类')
+  assert.ok(!JSON.stringify(fakeReact(states(sampleBoard())).createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })).includes('dshaSv_manyTabs'), '右侧边栏不挂多页签类')
   // 切到其它页签后额外页签卸载（旧 BoardPage 自带 10s 轮询，不能留在后台）
   const React3 = fakeReact(states(sampleBoard(), { tab: 'sessions' }))
   const mod3 = (await load('client.sidebar.js', React3)).mod
@@ -500,7 +506,7 @@ test('入口：设置页 / 协作标签 / 监督面板的正文在 client.panel.
   React.lazy = (factory) => { lazies.push(factory); return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 7 }
+  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 8 }
   const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve(reply) })
   assert.equal(asked.length, 0, '载入入口时不下载正文')
   const tree = React.createElement(mod.BoardPage, { t })
