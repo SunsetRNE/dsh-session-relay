@@ -117,4 +117,5 @@ client.sidebar.settings.js
 - 失败回退：`require.async` 失败给最小一行 + 刷新按钮；chunk `KIT_VERSION` 不配套显示现有 stale 文案（实际 / 期望版本）+ 刷新；加载中给同高骨架。
 - 共享依赖经 `make(deps)` 传入（`React` / `h` / 图标 / 外壳工具 / 共享件）；DSH 模块协议不支持 chunk 之间同步 `require`，因此没有跨 chunk 同步引用。`client.js` 的 `SIDEBAR_CHUNK` 指向 `client.sidebar41.js`，`SIDEBAR_KIT 41`；`PANEL_KIT 8` 与 `client.panel.js` 未改。
 - 测试：`test/sidebar.test.js` 额外覆盖「只拉共享件 + 当前页签 / 每个 chunk 带 KIT / 右栏与嵌入复用同一缓存 / hover 200ms 预取与移出取消 / saveData 抑制 / 旧版与加载失败回退」；串行 446 全过（原 440 + 6）。
-- 真机 11 页签首次打开：用户 2026-11-09 在 stage 预览（整页刷新）中确认可用；量化耗时对比未做。
+- 真机 11 页签首次打开：用户 2026-11-09 在 stage 预览（整页刷新）中确认可用；设备计时未做。
+- 发布包首开载荷（gzip）：外壳 23.3 KB + shared 9.8 KB + 当前页签 2.0–12.5 KB，合计 **35.9–45.6 KB**；对比 2.4.1 单 chunk 69.0 KB，约 **−34%…−49%**（传输口径，非设备计时）。

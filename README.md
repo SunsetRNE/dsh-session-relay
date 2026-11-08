@@ -95,6 +95,10 @@ npm test
 
 面板缓存注意：只改 `lib/client.panel.js` 必须同步改一行 `lib/client.js` 并把 `PANEL_KIT` / `KIT_VERSION` 一起 +1。改侧栏正文时，外壳与每个 chunk 都按当前 KIT 命名（如 `lib/client.sidebar41.js`、`lib/client.sidebar.tasks41.js`），同步改 `lib/client.js` 的 `SIDEBAR_CHUNK` / `SIDEBAR_KIT`、外壳与全部 chunk 的 `KIT_VERSION`，并在 `client.js` touch 一行；KIT 一升就换文件名（`client.sidebar<新KIT>.js` / `client.sidebar.<name><新KIT>.js`），浏览器不会命中旧 chunk 的 immutable 缓存。只改某一个 chunk 也要整体 bump（外壳会校验每个 chunk 的 KIT_VERSION）。改过 `client.js` 本身后本机实测宿主会热更新，等一两秒或刷新即见（2026-11-07 DSH 进程未重启也生效）；只有宿主没开客户端热更新且刷新无效时才重启 DSH。
 
+## 协作流程
+
+主会话 / 工作会话 / 发版 / 交接的流程写在 [docs/coordination-playbook.md](docs/coordination-playbook.md)；对应的项目技能在 [`.dsh/skills/`](.dsh/skills/)（`relay-main`、`relay-worker`、`relay-release`），在本仓库里工作的会话会自动看到并按需加载。
+
 ## 打包
 
 ```sh
