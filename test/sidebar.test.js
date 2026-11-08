@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 32 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 33 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -134,9 +134,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v32'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v33'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 32, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 33, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -172,7 +172,7 @@ function kitFor(opened = []) {
 // 父组件 14 个 useState：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note、doneOpen、tab、settingsOpen、updatedIds
 // extra 接在父组件之后，给卡片 / 交接页等子组件用
 const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, extra = [] } = {}) =>
-  [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, {}, ...extra]
+  [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, {}, false, ...extra]
 
 test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
   const React = fakeReact(states(sampleBoard()))
@@ -282,8 +282,8 @@ test('正文 chunk：样式随标签注入，不在入口里；不用 backdrop-f
   const withoutBusy = cssText.replace(/\.dshaSv_icon\[data-busy\][^}]*}/g, '')
   assert.ok(!/animation:[^;}]*infinite/.test(withoutBusy), '不要常驻动画')
   assert.ok(/@keyframes dshaSv_fadeIn/.test(cssText), '状态切换有短动画')
-  assert.ok(cssText.includes('@container (min-width:620px){.dshaSv .dshaSv_foldOnly{display:none}}'), '宽屏隐藏折叠入口，双类名压过 .dshaSv_sec')
-  assert.ok(cssText.includes('@container (max-width:619px){.dshaSv .dshaSv_foldTab{display:none}}'), '窄屏隐藏折叠页签')
+  assert.ok(cssText.includes('.dshaSv_wide .dshaSv_foldOnly{display:none}'), '宽屏隐藏折叠入口，双类名压过 .dshaSv_sec')
+  assert.ok(cssText.includes('.dshaSv_narrow .dshaSv_foldTab{display:none}'), '窄屏隐藏折叠页签')
 })
 
 test('正文 chunk：空白会话按服务端分类显示「空白」，不算进行中；没有待领任务给提示；不用黑色 brand-primary', async () => {
@@ -1308,7 +1308,12 @@ test('更多页：窄屏快捷入口，点条目切页 / 打开设置', async ()
 
 test('侧栏折叠：更多页快捷入口只在窄屏显示，隐藏规则用双类名', async () => {
   const source = await readFile(new URL('../lib/client.sidebar.js', import.meta.url), 'utf8')
-  assert.ok(source.includes('@container (min-width:620px){.dshaSv .dshaSv_foldOnly{display:none}}'), '宽屏隐藏规则用 .dshaSv .dshaSv_foldOnly 双类名')
+  assert.ok(source.includes('.dshaSv_wide .dshaSv_foldOnly{display:none}'), '宽屏隐藏规则用宽度 class + 双类名')
+  assert.ok(source.includes('ResizeObserver') && source.includes('dshaSv_wide'), '旋转后由 ResizeObserver 重新量宽度')
+  const ReactR = fakeReact(states(sampleBoard()))
+  const modR = (await load('client.sidebar.js', ReactR)).mod
+  const treeR = ReactR.createElement(modR.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  assert.ok(findNode(treeR, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_narrow')), '默认按窄栏加 dshaSv_narrow class')
   const React = fakeReact()
   const { mod } = await load('client.sidebar.js', React)
   const board = { ...sampleBoard(), github: { state: 'ready' }, repo: null, sync: { available: false } }
