@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 15 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 16 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -134,9 +134,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v15'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v16'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 15, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 16, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -949,6 +949,9 @@ test('PR 页：远端列表、标题链接、状态与请求修改/评论/关联
   assert.ok(findNode(tree, (node) => node.props?.placeholder === 'sidePrTask'), '关联任务输入框')
   const titleLink = findNode(tree, (node) => node.type === 'a' && String(node.props?.className ?? '').includes('dshaSv_titleLink'))
   assert.equal(titleLink?.props?.href, 'https://github.com/o/r/pull/7', '标题可点开 GitHub')
+  const back = findNode(tree, (node) => node.type === 'button' && node.props?.['aria-label'] === 'sideBackMore')
+  assert.ok(back !== undefined && String(back.props?.className ?? '').includes('dshaSv_foldOnly'), '返回按钮并进页头、仅窄栏显示')
+  assert.equal(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_backBar')), undefined, '返回不再单独占一行')
   await findButton(tree, (label) => label === 'prOpenDetail').props.onPointerEnter()
   await new Promise((resolve) => setTimeout(resolve, 0))
   const prefetch = posted.filter(([method]) => method === 'GET').at(-1)
