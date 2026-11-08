@@ -54,6 +54,7 @@
   - `lib/client.js` 本身：2026-11-07 本机实测，DSH 进程 11:23Z 启动、11:29–11:32 改的 `client.js` / 侧栏 / 面板都在页面里直接生效，**没有重启 DSH**；先等热更新或整页刷新，不要默认要求重启。宿主没开客户端热更新、页面仍旧时才重启。
   - `lib/index.js`、`package.json` 的 `dsh` 字段、`cordis.patch.yml`：仍然必须重启 DSH（服务端外壳 / 启动期注册）。
   - 验证顺序：等客户端热更新 / 整页刷新（需要时 `/relay reload` 换实现）→ 仍旧则重启 DSH；不要反复改业务文件“试”。`PANEL_KIT === client.panel.js KIT_VERSION`、`SIDEBAR_KIT === client.sidebar.js KIT_VERSION` 已有测试覆盖。
+  - **stale 屏（2026-11-08 补）**：提示「协作面板刚更新过」时，入口 `client.js` 已热更新、页面里的侧栏 chunk 还是旧版；**关掉右侧栏标签不会重载已加载的 chunk**，必须**整页刷新**。整页刷新后仍提示 → `/relay reload` → 再整页刷新；仍不行才重启 DSH。stale 屏现在显示实际 / 期望 KIT（如 v14 → v15）并提供「刷新整个网页」按钮。
 - **侧栏折叠入口（2026-11-08 复发）**：地图 / PR / 分支 / 问题折进「更多」的入口只能在窄侧栏（容器 <620px）出现；宽侧栏已经有这些页签，再列一遍就是重复。入口 section 必须挂 `dshaSv_foldOnly`，隐藏规则必须是 `.dshaSv .dshaSv_foldOnly{display:none}` 双类名——单类名的优先级会被后面的 `.dshaSv_sec{display:grid}` 覆盖，宽屏又会显示（2026-11-07 修过，2026-11-08 把入口改成「常驻快捷入口」时复发）。`test/sidebar.test.js` 同时断言渲染类名与 CSS 规则；改这块先跑侧栏用例。
 - **发布物约束**：不发 npm；每个 GitHub Release 只挂一个 `.tgz`，插件管理器按唯一附件安装。
 - **每步注入的上下文要短且稳定**：协作上下文每一步都进模型提示，慢模型尤其吃亏。
