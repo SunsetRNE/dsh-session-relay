@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 17 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 18 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -134,9 +134,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v17'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v18'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 17, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 18, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -973,6 +973,13 @@ test('PR 页：已批准筛选与空态；批准 / 关闭走二次确认', async
   const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'approved', 7, '', undefined, undefined] }))
   const mod = (await load('client.sidebar.js', React)).mod
   assert.ok(textOf(React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })).includes('prNoMatch'), '筛选后无条目给「没有匹配」空态')
+
+  const emptyOpen = { prs: { repo: 'o/r', items: [] } }
+  const ReactEmpty = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [emptyOpen, undefined, false, 'all', undefined] }))
+  const modEmpty = (await load('client.sidebar.js', ReactEmpty)).mod
+  const emptyText = textOf(ReactEmpty.createElement(modEmpty.RelaySidebar, { kit, sessionId: 'session-self' }))
+  assert.ok(emptyText.includes('prEmpty'), '空仓库给空态')
+  assert.ok(!emptyText.includes('prFilterAll'), '没有 PR 时不显示筛选行')
 
   const emptyClosed = { prs: { repo: 'o/r', state: 'closed', items: [] } }
   const ReactClosed = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [emptyClosed, undefined, false, 'all', undefined, '', undefined, undefined, 'closed'] }))
