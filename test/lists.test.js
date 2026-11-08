@@ -108,6 +108,73 @@ test('侧栏分支：聚合全部登记工作区；单工作区失败不影响�
   } finally { await h.cleanup(); await rm(base, { recursive: true, force: true }) }
 })
 
+test('遗留清理视图：聚合各工作区的工作树分支并给出可清理计数', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'relay-ws-cleanup-'))
+  const one = await makeRepo(base, 'one')
+  const two = await makeRepo(base, 'two')
+  const calls = []
+  const lists = {
+    worktreeBranches: async (path) => {
+      calls.push(path)
+      return {
+        path, defaultBranch: 'main', current: 'main',
+        branches: path === one
+          ? [{ name: 'wt/a', worktree: join(one, '.agents/worktrees/a'), merged: true, clean: true, declaration: 'done', cleanable: true, reason: null }]
+          : [{ name: 'wt/b', worktree: join(two, '.agents/worktrees/b'), merged: false, clean: false, declaration: 'none', cleanable: false, reason: '工作树有未提交改动' }]
+      }
+    }
+  }
+  const workspaces = [
+    { id: 'ws2', title: 'B', path: two, sessionIds: ['s2'] },
+    { id: 'ws1', title: 'A', path: one, sessionIds: ['s1'] }
+  ]
+  const h = await makeRelay({ lists, workspaces })
+  try {
+    const view = await h.relay.branchCleanupView()
+    assert.deepEqual(calls, [two, one])
+    assert.equal(view.total, 2)
+    assert.equal(view.cleanable, 1)
+    assert.deepEqual(view.workspaces.map((row) => row.workspace.title), ['A', 'B'])
+    assert.equal(view.workspaces[0].branches[0].name, 'wt/a')
+  } finally { await h.cleanup(); await rm(base, { recursive: true, force: true }) }
+})
+
+test('遗留清理动作：必须用户点击 + 二次确认；按工作区分组、逐条回传结果', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'relay-ws-cleanup-run-'))
+  const one = await makeRepo(base, 'one')
+  const two = await makeRepo(base, 'two')
+  const written = []
+  const lists = {
+    cleanupWorktreeBranches: async ({ path, names }) => {
+      written.push([path, names])
+      const results = names.map((name) => name === 'wt/bad' ? { name, ok: false, reason: '工作树有未提交改动' } : { name, ok: true })
+      return { results, removed: results.filter((row) => row.ok === true).length, skipped: results.filter((row) => row.ok !== true).length }
+    }
+  }
+  const workspaces = [
+    { id: 'ws1', title: '甲', path: one, sessionIds: ['s1'] },
+    { id: 'ws2', title: '乙', path: two, sessionIds: ['s2'] }
+  ]
+  const h = await makeRelay({ lists, workspaces })
+  try {
+    const items = [
+      { workspaceId: 'ws1', name: 'wt/a' },
+      { workspaceId: 'ws1', name: 'wt/bad' },
+      { workspaceId: 'ws1', name: 'wt/a' },
+      { workspaceId: 'ws2', name: 'wt/c' }
+    ]
+    await assert.rejects(() => h.relay.cleanupBranches({ items, confirm: true }), /只能由用户/)
+    await assert.rejects(() => h.relay.cleanupBranches({ items, user: true }), /二次确认/)
+    await assert.rejects(() => h.relay.cleanupBranches({ items: [], confirm: true, user: true }), /先选/)
+    const done = await h.relay.cleanupBranches({ items, confirm: true, user: true })
+    assert.deepEqual(written, [[one, ['wt/a', 'wt/bad']], [two, ['wt/c']]])
+    assert.equal(done.removed, 2)
+    assert.equal(done.skipped, 1)
+    assert.equal(done.results.find((row) => row.name === 'wt/bad').reason, '工作树有未提交改动')
+    assert.ok(done.results.every((row) => typeof row.workspaceId === 'string'))
+  } finally { await h.cleanup(); await rm(base, { recursive: true, force: true }) }
+})
+
 test('页签计数：当前工作区 PR / 问题数量 + 邮箱未读', async () => {
   const base = await mkdtemp(join(tmpdir(), 'relay-ws-counts-'))
   const repo = await makeRepo(base, 'counts')

@@ -246,6 +246,90 @@ test('工作树：二次确认后移除干净工作树并删分支；活跃声�
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
+/** 遗留清理夹具：clean（干净 + .SESSION-DONE）、dirty（有改动）、active（.ACTIVE-SESSION）、outside（不在 .agents/worktrees）。 */
+async function cleanupFixture(dir, calls = []) {
+  const repo = join(dir, 'repo')
+  const paths = {
+    clean: join(repo, '.agents', 'worktrees', 'clean'),
+    dirty: join(repo, '.agents', 'worktrees', 'dirty'),
+    active: join(repo, '.agents', 'worktrees', 'active'),
+    outside: join(dir, 'outside')
+  }
+  for (const path of Object.values(paths)) await mkdir(path, { recursive: true })
+  await writeFile(join(paths.clean, '.SESSION-DONE'), '状态：已结束\n会话：session-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n')
+  await writeFile(join(paths.dirty, 'a.txt'), 'a\n')
+  await writeFile(join(paths.active, '.ACTIVE-SESSION'), '状态：活跃\n会话：session-11111111-2222-3333-4444-555555555555\n')
+  const names = { clean: 'wt/clean', dirty: 'wt/dirty', active: 'wt/active', outside: 'wt/outside' }
+  const git = async (args) => {
+    const joined = args.join(' ')
+    calls.push(joined)
+    if (joined.includes('for-each-ref') && joined.includes('refs/heads')) {
+      return { stdout: [
+        '*\x00main\x00aaa\x00origin/main\x00\x002026-11-07T00:00:00+08:00\x00m',
+        ' \x00wt/clean\x00bbb\x00\x00\x002026-11-06T00:00:00+08:00\x00c',
+        ' \x00wt/dirty\x00ccc\x00\x00\x002026-11-05T00:00:00+08:00\x00d',
+        ' \x00wt/active\x00ddd\x00\x00\x002026-11-04T00:00:00+08:00\x00e',
+        ' \x00wt/outside\x00eee\x00\x00\x002026-11-03T00:00:00+08:00\x00f'
+      ].join('\n'), stderr: '' }
+    }
+    if (joined.includes('for-each-ref') && joined.includes('refs/remotes/origin')) return { stdout: '', stderr: '' }
+    if (joined.includes('symbolic-ref')) return { stdout: '', stderr: '' }
+    if (joined.includes('worktree list --porcelain')) {
+      return { stdout: ['worktree ' + repo + '\nHEAD main\nbranch refs/heads/main\n', ...Object.entries(paths).map(([key, path]) => 'worktree ' + path + '\nHEAD ' + key + '\nbranch refs/heads/' + names[key] + '\n')].join('\n'), stderr: '' }
+    }
+    if (joined.includes('branch --merged')) return { stdout: '* main\n  wt/clean\n  wt/active\n', stderr: '' }
+    if (joined.includes('status --porcelain')) return { stdout: joined.includes(paths.dirty) ? '?? a.txt\n' : '', stderr: '' }
+    if (joined.includes('worktree remove') || joined.includes('branch -D')) return { stdout: '', stderr: '' }
+    throw Object.assign(new Error('unknown git ' + joined), { stderr: 'unknown git' })
+  }
+  return { repo, paths, git }
+}
+
+test('遗留清理：列出工作树分支的干净 / 声明 / 合并状态，只标出可清理的', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'relay-cleanup-'))
+  try {
+    const { repo, git } = await cleanupFixture(dir)
+    const lists = new GitHubLists({ gh: async () => ({ stdout: '' }), git, now: () => 1000 })
+    const view = await lists.worktreeBranches(repo)
+    assert.equal(view.branches.length, 4, '主 checkout 的当前分支不算遗留工作树')
+    assert.ok(!view.branches.some((branch) => branch.name === 'main'), '不列主 checkout')
+    const byName = new Map(view.branches.map((branch) => [branch.name, branch]))
+    assert.equal(byName.get('wt/clean').clean, true)
+    assert.equal(byName.get('wt/clean').declaration, 'done')
+    assert.equal(byName.get('wt/clean').session, 'session-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')
+    assert.equal(byName.get('wt/clean').merged, true)
+    assert.equal(byName.get('wt/clean').cleanable, true)
+    assert.equal(byName.get('wt/dirty').cleanable, false)
+    assert.match(byName.get('wt/dirty').reason, /未提交改动/)
+    assert.equal(byName.get('wt/active').cleanable, false)
+    assert.match(byName.get('wt/active').reason, /会话未结束/)
+    assert.equal(byName.get('wt/outside').cleanable, false)
+    assert.match(byName.get('wt/outside').reason, /\.agents\/worktrees/)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('遗留清理：批量只移除干净且无活跃声明的工作树，其余逐条跳过并记审计', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'relay-cleanup-run-'))
+  try {
+    const calls = []
+    const audits = []
+    const { repo, paths, git } = await cleanupFixture(dir, calls)
+    const lists = new GitHubLists({ gh: async () => ({ stdout: '' }), git, audit: async (record) => { audits.push(record) }, now: () => 1000 })
+    const done = await lists.cleanupWorktreeBranches({ path: repo, names: ['wt/clean', 'wt/dirty', 'wt/active', 'wt/outside', 'wt/clean'] })
+    assert.equal(done.removed, 1)
+    assert.equal(done.skipped, 3)
+    assert.deepEqual(done.results.map((row) => [row.name, row.ok]), [['wt/clean', true], ['wt/dirty', false], ['wt/active', false], ['wt/outside', false]])
+    assert.ok(calls.some((line) => line.includes('worktree remove ' + paths.clean)), '干净工作树被移除')
+    assert.ok(calls.some((line) => line.includes('branch -D wt/clean')), '分支被删除')
+    assert.ok(!calls.some((line) => line.includes('worktree remove ' + paths.dirty)), '有改动的工作树不动')
+    assert.ok(!calls.some((line) => line.includes('worktree remove ' + paths.active)), '活跃会话的工作树不动')
+    assert.equal(audits.filter((row) => row.event === 'branch-delete-worktree').length, 1)
+    assert.equal(audits.at(-1).event, 'branch-cleanup')
+    assert.equal(audits.at(-1).removed, 1)
+    assert.equal(audits.at(-1).skipped, 3)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
 test('分支删除：当前 / 默认 / 未合并 / 远端确认名', async () => {
   const { gh, git } = fakeTools()
   const audits = []

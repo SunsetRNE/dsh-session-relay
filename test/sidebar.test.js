@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 24 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 25 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -134,9 +134,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v24'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v25'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 24, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 25, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -574,6 +574,14 @@ const findNode = (node, pred) => {
 
 const lastPost = (rows) => rows.filter(([method]) => method === 'POST').at(-1)?.[1]
 
+const findDisabledInputs = (node, out = []) => {
+  if (!node || typeof node !== 'object') return out
+  if (Array.isArray(node)) { node.forEach((child) => findDisabledInputs(child, out)); return out }
+  if (node.type === 'input' && node.props?.disabled === true) out.push(node)
+  findDisabledInputs(node.children, out)
+  return out
+}
+
 const findButton = (node, pred) => {
   if (!node || typeof node !== 'object') return undefined
   if (Array.isArray(node)) { for (const child of node) { const hit = findButton(child, pred); if (hit) return hit } return undefined }
@@ -929,7 +937,7 @@ const branchData = () => ({
     workspaces: [{
       workspace: { id: 'ws1', title: 'relay', path: '/repo' }, repo: 'o/r', current: 'main', defaultBranch: 'main', error: null,
       local: [
-        { name: 'main', sha: 'a', current: true, upstream: 'origin/main', ahead: 0, behind: 0, at: '2026-11-07T00:00:00Z', subject: 'chore', merged: true },
+        { name: 'main', sha: 'a', current: true, upstream: 'origin/main', ahead: 0, behind: 0, at: '2026-11-07T00:00:00Z', subject: 'chore', merged: true, worktree: '/repo' },
         { name: 'fix/y', sha: 'b', current: false, upstream: null, ahead: 2, behind: 1, at: '2026-11-06T00:00:00Z', subject: 'fix', merged: false },
         { name: 'wt/branch', sha: 'c', current: false, upstream: null, ahead: 0, behind: 0, at: '2026-11-05T00:00:00Z', subject: 'wt', merged: false, worktree: '/repo/.agents/worktrees/wt/branch' }
       ],
@@ -1126,7 +1134,8 @@ test('分支页：全工作区列表、当前/默认/合并状态与拉取', asy
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
-  for (const part of ['sideTabBranches', 'relay', 'o/r', 'main', 'fix/y', 'brCurrent', 'brDefault', 'brUnmerged', 'brAhead', 'brBehind', 'brLocal', 'brRemote', 'brDelete', 'brDeleteRemote', 'brWorktree', 'brRemoveWorktree']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['sideTabBranches', 'relay', 'o/r', 'main', 'fix/y', 'brCurrent', 'brDefault', 'brUnmerged', 'brAhead', 'brBehind', 'brLocal', 'brRemote', 'brDelete', 'brDeleteRemote', 'brWorktree', 'brRemoveWorktree', 'brCleanupOpen{"n":1}']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.ok(!text.includes('brCleanupOpen{"n":2}'), '主 checkout 的当前分支不算遗留')
   await findButton(tree, (label) => label === 'brFetch').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(lastPost(posted), { action: 'branch-fetch', workspaceId: 'ws1', fromSession: 'session-self' })
@@ -1162,6 +1171,66 @@ test('分支页：移除工作树并删除走二次确认', async () => {
   await findButton(tree, (label) => label === 'brConfirm').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(lastPost(posted), { action: 'branch-delete', workspaceId: 'ws1', name: 'wt/branch', force: false, removeWorktree: true, fromSession: 'session-self' })
+})
+
+const cleanupData = () => ({
+  cleanup: {
+    fetchedAt: 1, total: 4, cleanable: 2, skipped: 0,
+    workspaces: [{
+      workspace: { id: 'ws1', title: 'relay', path: '/repo' }, repo: 'o/r', current: 'main', defaultBranch: 'main', error: null,
+      branches: [
+        { name: 'wt/clean', worktree: '/repo/.agents/worktrees/clean', merged: true, clean: true, declaration: 'done', session: 'session-a', cleanable: true, reason: null },
+        { name: 'wt/unmerged', worktree: '/repo/.agents/worktrees/unmerged', merged: false, clean: true, declaration: 'none', session: null, cleanable: true, reason: null },
+        { name: 'wt/dirty', worktree: '/repo/.agents/worktrees/dirty', merged: false, clean: false, declaration: 'none', session: null, cleanable: false, reason: '工作树有未提交改动' },
+        { name: 'wt/active', worktree: '/repo/.agents/worktrees/active', merged: true, clean: true, declaration: 'active', session: 'session-b', cleanable: false, reason: '会话未结束（.ACTIVE-SESSION：session-b）' }
+      ]
+    }]
+  }
+})
+
+test('遗留清理页：状态胶囊、跳过原因与上次清理结果', async () => {
+  const result = { removed: 1, skipped: 1, results: [{ workspaceId: 'ws1', name: 'wt/dirty', ok: false, reason: '工作树有未提交改动' }] }
+  const React = fakeReact([cleanupData(), undefined, false, [], false, false, false, result])
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.BranchCleanup, { kit: kitFor(), act: async () => ({}), busy: false })
+  const text = textOf(tree)
+  for (const part of ['brCleanupHint', 'brCleanupCount', 'wt/clean', 'brMerged', 'brCleanupClean', 'brCleanupDoneDecl',
+    'wt/unmerged', 'brUnmerged', 'brCleanupNoDecl', 'wt/dirty', 'brCleanupDirty', '工作树有未提交改动', 'wt/active', 'brCleanupActive',
+    'brCleanupSelectAll', 'brCleanupRun', 'brCleanupDone']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.equal(findDisabledInputs(tree).length, 2, '有改动 / 会话未结束的不能勾选')
+  assert.ok(findNode(tree, (node) => String(node.props?.title ?? '').includes('.agents/worktrees/clean')), '工作树路径可悬停查看')
+})
+
+test('遗留清理页：含未合并分支要先勾选确认，确认后一次性提交选中项', async () => {
+  const picked = ['ws1\u0000wt/clean', 'ws1\u0000wt/unmerged']
+  const blocked = fakeReact([cleanupData(), undefined, false, picked, true, false, false, undefined])
+  const modBlocked = (await load('client.sidebar.js', blocked)).mod
+  const treeBlocked = blocked.createElement(modBlocked.BranchCleanup, { kit: kitFor(), act: async () => ({}), busy: false })
+  const text = textOf(treeBlocked)
+  for (const part of ['brCleanupConfirm', 'wt/clean', 'wt/unmerged', 'brCleanupUnmerged', 'brCleanupUnmergedAck', 'brCleanupConfirmRun']) assert.ok(text.includes(part), '缺少 ' + part)
+  assert.equal(findButton(treeBlocked, (label) => label === 'brCleanupConfirmRun').props.disabled, true, '未勾选确认时不能删未合并分支')
+
+  const posted = []
+  const act = async (body) => { posted.push(body); return { result: { removed: 2, skipped: 0, results: [] } } }
+  const ready = fakeReact([cleanupData(), undefined, false, picked, true, true, false, undefined])
+  const modReady = (await load('client.sidebar.js', ready)).mod
+  const treeReady = ready.createElement(modReady.BranchCleanup, { kit: kitFor(), act, busy: false })
+  await findButton(treeReady, (label) => label === 'brCleanupConfirmRun').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(posted, [{
+    action: 'branch-cleanup', confirm: true,
+    items: [{ workspaceId: 'ws1', name: 'wt/clean' }, { workspaceId: 'ws1', name: 'wt/unmerged' }]
+  }])
+})
+
+test('分支页：清理入口按工作树占用数显示，打开后是清理子页', async () => {
+  // BranchTab 10 个 useState：data / error / busy / confirm / typed / force / running / query / showAll / mode；之后是 BranchCleanup 的 8 个
+  const extra = [branchData(), undefined, false, undefined, '', false, undefined, '', false, 'cleanup', cleanupData(), undefined, false, [], false, false, false, undefined]
+  const React = fakeReact(states(sampleBoard(), { tab: 'branches', extra }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const text = textOf(tree)
+  for (const part of ['brCleanupTitle', 'brCleanupBack', 'brCleanupHint', 'wt/clean', 'brCleanupSelectAll']) assert.ok(text.includes(part), '缺少 ' + part)
 })
 
 test('邮箱页：独立页签直接用 MailBox 渲染公共通知', async () => {
