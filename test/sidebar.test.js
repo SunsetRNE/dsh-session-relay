@@ -1,4 +1,4 @@
-// 右侧边栏「协作」标签：入口只登记类型与空壳，正文在 client.sidebar40.js 里按需加载
+// 右侧边栏「协作」标签：入口只登记类型与空壳，正文在 client.sidebar41.js 外壳 + 各页签 chunk 里按需加载
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -20,6 +20,22 @@ function fakeReact(states = []) {
     }
   }
   return React
+}
+
+// T13：侧栏按页签拆 chunk（KIT 41）。测试里把外壳 + 全部 chunk 一次性登记进同一加载器缓存，
+// 这样 `mod.Xxx` 的原有断言不用改；按需 / 预取 / 失败回退另由「按需拆 chunk」用例直接测加载器。
+const KIT = 41
+const CHUNK_NAMES = ['shared', 'sessions', 'tasks', 'handoff', 'map', 'prs', 'branches', 'issues', 'mail', 'more', 'settings']
+async function loadSidebar(React) {
+  const { mod: shell, chunk } = await load('client.sidebar' + KIT + '.js', React)
+  const chunks = {}
+  for (const name of CHUNK_NAMES) chunks[name] = (await load('client.sidebar.' + name + KIT + '.js', React)).mod
+  shell.__registerChunks(chunks)
+  const merged = { ...shell }
+  for (const name of CHUNK_NAMES) Object.assign(merged, shell.__chunkParts(name))
+  merged.__shell = shell
+  merged.__chunks = chunks
+  return { mod: merged, chunk, shell, chunks }
 }
 
 async function load(file, React, requireAsync) {
@@ -121,21 +137,21 @@ test('入口：没有 ctx.inject（旧宿主）时不登记右侧边栏、不报
   assert.ok(!names.includes('sidebar.right.pane.tab'))
 })
 
-test('入口：空壳不同步加载正文；用 require.async 拉 client.sidebar40.js', async () => {
+test('入口：空壳不同步加载正文；用 require.async 拉 client.sidebar41.js', async () => {
   const React = fakeReact()
   let lazyFactory
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 40 }) })
-  assert.equal(mod.SIDEBAR_CHUNK, 'client.sidebar40.js', '入口指向按版本命名的 chunk')
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 41 }) })
+  assert.equal(mod.SIDEBAR_CHUNK, 'client.sidebar41.js', '入口指向按版本命名的 chunk')
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
   assert.equal(tree.type, 'suspense')
   assert.equal(textOf(tree.props.fallback), 'sideLoading')
   const loaded = await lazyFactory()
-  assert.deepEqual(asked, ['./client.sidebar40.js'])
+  assert.deepEqual(asked, ['./client.sidebar41.js'])
   assert.equal(loaded.default(), 'body')
 })
 
@@ -150,9 +166,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v40'), '显示实际 / 期望版本')
-  const { mod: chunk } = await load('client.sidebar40.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 40, '正文与入口的 kit 版本一致')
+  assert.ok(staleText.includes('v? → v41'), '显示实际 / 期望版本')
+  const { mod: chunk } = await loadSidebar(fakeReact())
+  assert.equal(chunk.KIT_VERSION, 41, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -184,17 +200,16 @@ function kitFor(opened = []) {
   }
 }
 
-// useState 顺序：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note
-// 父组件 17 个 useState：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note、doneOpen、tab、settingsOpen、updatedIds、workItem、railCounts、wide
+// 父组件 18 个 useState：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note、doneOpen、tab、settingsOpen、updatedIds、workItem、railCounts、wide、chunkTick（T13 按需 chunk 的触发位）
 // extra 接在父组件之后，给卡片 / 交接页等子组件用
 const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, workItem = undefined, extra = [] } = {}) =>
-  [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, workItem, {}, false, ...extra]
+  [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, workItem, {}, false, 0, ...extra]
 
-test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar40.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
+test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar41.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
   const React = fakeReact(states(sampleBoard()))
-  const { mod, chunk } = await load('client.sidebar40.js', React)
-  assert.equal(chunk, 'client.sidebar40.js')
-  assert.equal(mod.KIT_VERSION, 40)
+  const { mod, chunk } = await loadSidebar(React)
+  assert.equal(chunk, 'client.sidebar41.js')
+  assert.equal(mod.KIT_VERSION, 41)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
   const text = textOf(tree)
   for (const part of ['dsha-session-relay', 'sideTabSessions', 'sideTabTasks', 'sideTabHandoff', 'sideTabMap', 'sideTabPr', 'sideTabBranches', 'sideTabIssues', 'sideTabMail', 'sideTabMore', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
@@ -217,7 +232,7 @@ test('会话卡片：汇报摘要按轻量富文本渲染（去 Markdown 记号�
   const board = sampleBoard()
   board.entries[0].summary = '**1. 分支页**：`git worktree` 已处理\n- 安全条件不变'
   const React = fakeReact(states(board, { tab: 'sessions' }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const text = textOf(tree)
   assert.ok(text.includes('1. 分支页'), '粗体文字保留')
@@ -231,7 +246,7 @@ test('版本线：两行预览走轻量富文本，tag / 测试胶囊，展开�
   const board = sampleBoard()
   board.line = { text: '**v2.3.0** 已发布（origin/main=73412a2、tag v2.3.0→73412a2、Release Latest、唯一附件 dsh-session-relay-2.3.0.tgz 511525 字节）；串行 410 全过；下一步：拆剩余长文本面板（PR/issue 评论、任务 note、版本线预览、设置说明），发版前整页刷新真机核对。' }
   const React = fakeReact(states(board))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const text = textOf(tree)
   assert.ok(!text.includes('**'), '两行预览不显示 Markdown 记号')
@@ -243,7 +258,7 @@ test('版本线：两行预览走轻量富文本，tag / 测试胶囊，展开�
   const expandedStates = states(board)
   expandedStates[4] = true
   const React2 = fakeReact(expandedStates)
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const expandedTree = React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const expanded = textOf(expandedTree)
   assert.ok(expanded.includes('下一步：拆剩余长文本面板'), '展开后看全文')
@@ -302,7 +317,7 @@ test('嵌入面板：同一会话并发 light 请求共享一份（左右栏去�
   globalThis.setInterval = () => 0
   const kit = { ...kitFor(), request: async (method, body, params) => { calls.push(params); return { entries: [], partial: true } } }
   try {
-    const { mod } = await load('client.sidebar40.js', React)
+    const { mod } = await loadSidebar(React)
     React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-same', persistPrefix: 'a:' })
     React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-same', persistPrefix: 'b:' })
     // 让 request 的 .finally 在 mock 定时器生效期内跑完，避免恢复后留下真实轮询
@@ -320,11 +335,11 @@ test('邮箱：非主会话隐藏归档按钮，主会话保留', async () => {
   const mail = { items: [{ id: 'm1', kind: 'notice', subject: '通知', body: '正文', at: 1, readBy: {} }], mailbox: { unread: 1 } }
   const kit = { ...kitFor(), request: async () => mail }
   const React = fakeReact([mail, undefined, false])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const main = textOf(React.createElement(mod.MailBox, { kit, sessionId: 's1', isMain: true }))
   assert.ok(main.includes('mailArchive'), '主会话有归档')
   const React2 = fakeReact([mail, undefined, false])
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const other = textOf(React2.createElement(mod2.MailBox, { kit, sessionId: 's1', isMain: false }))
   assert.ok(!other.includes('mailArchive'), '非主会话不露归档按钮')
 })
@@ -352,7 +367,7 @@ test('旧 BoardPage 邮箱：非主会话不显示归档按钮，标已读保留
 test('额外页签：嵌入面板在两端插入概览 / 全文搜索，右侧边栏保持 9 页签', async () => {
   const board = { github: null, repo: null, sync: null, coordinator: null }
   const React = fakeReact(states(sampleBoard()))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   // 右侧边栏（不传 extraTabs）：不出现额外页签
   const plain = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(!plain.includes('sideUtilityOverview') && !plain.includes('sideUtilitySearch'), '右栏不出现额外页签')
@@ -361,7 +376,7 @@ test('额外页签：嵌入面板在两端插入概览 / 全文搜索，右侧�
   assert.ok(!more.includes('sideUtilityTitle') && !more.includes('sideUtilityOverview'), '更多页没有面板工具')
   // 嵌入面板：概览 → 会话 … 邮箱 → 全文搜索 → 更多
   const React2 = fakeReact(states(sampleBoard(), { tab: 'overview' }))
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const h = React2.createElement
   const tree = React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', persistPrefix: 'embed-x:', extraTabs: [
     { key: 'overview', render: () => h('span', null, 'EXTRA_OVERVIEW') },
@@ -381,7 +396,7 @@ test('额外页签：嵌入面板在两端插入概览 / 全文搜索，右侧�
   assert.ok(!JSON.stringify(fakeReact(states(sampleBoard())).createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })).includes('dshaSv_manyTabs'), '右侧边栏不挂多页签类')
   // 切到其它页签后额外页签卸载（旧 BoardPage 自带 10s 轮询，不能留在后台）
   const React3 = fakeReact(states(sampleBoard(), { tab: 'sessions' }))
-  const mod3 = (await load('client.sidebar40.js', React3)).mod
+  const mod3 = (await loadSidebar(React3)).mod
   const switched = textOf(React3.createElement(mod3.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', persistPrefix: 'embed-x:', extraTabs: [
     { key: 'overview', render: () => React3.createElement('span', null, 'EXTRA_OVERVIEW') },
     { key: 'search', render: () => React3.createElement('span', null, 'EXTRA_SEARCH') }
@@ -392,29 +407,29 @@ test('额外页签：嵌入面板在两端插入概览 / 全文搜索，右侧�
 test('地图页：嵌入宽栏不传 onBack 时不渲染「返回更多」，窄栏传了仍保留', async () => {
   const board = { taskBoard: { map: [], claimed: 0 }, sync: null, github: null }
   const React = fakeReact()
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const bare = React.createElement(mod.MapTab, { kit: kitFor(), board, act: async () => ({}), busy: false })
   assert.equal(findNode(bare, (node) => node.props?.['aria-label'] === 'sideBackMore'), undefined, '宽栏不渲染返回')
   const React2 = fakeReact()
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const withBack = React2.createElement(mod2.MapTab, { kit: kitFor(), board, act: async () => ({}), busy: false, onBack: () => {} })
   assert.ok(findNode(withBack, (node) => node.props?.['aria-label'] === 'sideBackMore') !== undefined, '窄栏保留返回更多')
 })
 
 test('正文 chunk：任务页签渲染任务看板（懒挂载）；交接 / 动态页签各自的正文', async () => {
   const React = fakeReact(states(sampleBoard(), { tab: 'tasks' }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   for (const part of ['sideTaskBoard', 'sideTaskSummary', 'T1', 'P1', '侧边栏', 'sideTaskOpen']) assert.ok(text.includes(part), '任务页缺少 ' + part)
   assert.ok(!text.includes('lineTitle'), '会话内容不在任务页')
   // 交接页：没有交接数据时给读取中（重字段由完整快照补）
   const ReactH = fakeReact(states({ ...sampleBoard(), handoff: undefined }, { tab: 'handoff' }))
-  const modH = (await load('client.sidebar40.js', ReactH)).mod
+  const modH = (await loadSidebar(ReactH)).mod
   const handoff = textOf(ReactH.createElement(modH.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(handoff.includes('loadingDetails'))
   // 更多页：未登录 GitHub 时给「账号在设置」提示，不出现地图 / PR 空态
   const ReactA = fakeReact(states({ ...sampleBoard(), github: { state: 'missing', match: 'missing', login: null, pinned: null, scopes: [], loginFlow: null } }, { tab: 'more' }))
-  const modA = (await load('client.sidebar40.js', ReactA)).mod
+  const modA = (await loadSidebar(ReactA)).mod
   const more = textOf(ReactA.createElement(modA.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(more.includes('sideMoreGhHint') && more.includes('sideGoSettings'))
   assert.ok(!more.includes('sideMapTitle') && !more.includes('sidePrTitle'), '更多页不渲染地图 / PR 段')
@@ -422,17 +437,17 @@ test('正文 chunk：任务页签渲染任务看板（懒挂载）；交接 / �
 
 test('正文 chunk：筛选「可合并」只留 ready 的卡片；空分组不占一行提示', async () => {
   const React = fakeReact(states(sampleBoard(), { filter: 'ready' }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(text.includes('@w2'))
   assert.ok(!text.includes('要不要改'), '待答复的卡片不在「可合并」里')
   const React2 = fakeReact(states(sampleBoard(), { filter: 'active' }))
-  const { mod: mod2 } = await load('client.sidebar40.js', React2)
+  const { mod: mod2 } = await loadSidebar(React2)
   const empty = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(!empty.includes('@w1') && !empty.includes('@w2'), '空白会话不算进行中，空分组不再渲染提示行')
   // 会话不到 3 个：不给筛选，即使记着旧筛选也全列
   const React3 = fakeReact(states({ ...sampleBoard(), entries: sampleBoard().entries.slice(0, 2) }, { filter: 'ready' }))
-  const { mod: mod3 } = await load('client.sidebar40.js', React3)
+  const { mod: mod3 } = await loadSidebar(React3)
   const few = textOf(React3.createElement(mod3.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(few.includes('@w1') && few.includes('@w2') && few.includes('sideBoard'))
   assert.ok(!few.includes('sideCountReady'))
@@ -440,7 +455,7 @@ test('正文 chunk：筛选「可合并」只留 ready 的卡片；空分组不�
 
 test('正文 chunk：点卡片进详情——返回、路径、状态、问题、信息表、冲突', async () => {
   const React = fakeReact(states(sampleBoard(), { selected: 'session-w1aaaaaa' }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['sideBack', 'dsha-session-relay / @w1', '侧边栏改版', '● why_question', 'question', 'A 还是 B', 'sideDetailSummary', 'sideDetailInfo', 'sideBranch', 'feat/side', 'sideCommit', 'sideDetailIssues', 'sideOverlap']) {
@@ -454,14 +469,14 @@ test('正文 chunk：点卡片进详情——返回、路径、状态、问题�
 
 test('正文 chunk：还没数据时显示读取中；没有会话时不渲染', async () => {
   const React = fakeReact()
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const kit = kitFor()
   assert.match(textOf(React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })), /loading/)
   assert.equal(React.createElement(mod.RelaySidebar, { kit, sessionId: '' }), null)
 })
 
 test('正文 chunk：样式随标签注入，不在入口里；不用 backdrop-filter 和常驻动画', async () => {
-  const chunk = await readFile(new URL('../lib/client.sidebar40.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar41.js', import.meta.url), 'utf8')
   const entry = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   assert.ok(chunk.includes('.dshaSv_card'))
   assert.ok(!entry.includes('.dshaSv_'), '入口不带侧边栏样式')
@@ -480,27 +495,27 @@ test('正文 chunk：样式随标签注入，不在入口里；不用 backdrop-f
 test('正文 chunk：空白会话按服务端分类显示「空白」，不算进行中；没有待领任务给提示；不用黑色 brand-primary', async () => {
   const board = { ...sampleBoard(), entries: [{ sessionId: 'session-f4ada307', label: 'f4ada307', status: 'working', category: 'blank', state: 'idle', summary: '空白会话，等待用户输入第一句' }], taskBoard: { open: [], claimed: 0 } }
   const React = fakeReact(states(board))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(text.includes('catBlank 1'), '合成一行显示分组名')
   // 没有待领任务给提示：任务在任务页
   const ReactT = fakeReact(states(board, { tab: 'tasks' }))
-  const modT = (await load('client.sidebar40.js', ReactT)).mod
+  const modT = (await loadSidebar(ReactT)).mod
   assert.ok(textOf(ReactT.createElement(modT.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })).includes('sideNoOpenTasks'))
   // 展开后列卡片：胶囊显示分组名，不显示过时的汇报状态
   const React2 = fakeReact(states(board, { quietOpen: true }))
-  const { mod: mod2 } = await load('client.sidebar40.js', React2)
+  const { mod: mod2 } = await loadSidebar(React2)
   const open = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(open.includes('catBlank') && open.includes('f4ada307'))
   assert.ok(!open.includes('status_working'))
-  const chunk = await readFile(new URL('../lib/client.sidebar40.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar41.js', import.meta.url), 'utf8')
   assert.ok(!chunk.includes('brand-primary'), '强调色用链接蓝，不用主题里接近黑白的 brand-primary')
 })
 
 test('正文 chunk：顶栏 GitHub 胶囊只在已登录时出现；换号标红，未登录/读不到不占位置', async () => {
   const pill = async (github) => {
     const React = fakeReact(states({ ...sampleBoard(), github }))
-    const { mod } = await load('client.sidebar40.js', React)
+    const { mod } = await loadSidebar(React)
     return textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   }
   const ok = await pill({ state: 'ready', match: 'ok', login: 'alice', pinned: { login: 'alice' } })
@@ -552,13 +567,13 @@ test('正文 chunk：等你决定直接点选项（以用户身份回答）；�
     taskBoard: { open: ['T1', 'T2', 'T3', 'T4', 'T5'].map((id) => ({ id, title: id + ' 标题' })), claimed: 0 }
   }
   const React = fakeReact(states(board))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['askTitle', 'build281 给谁', 'lint', 'adb', 'askDismiss', 'sideAlertWake', 'wakeResume', 'sideAlertDecl', 'CI 123 失败', 'sideWatching']) assert.ok(text.includes(part), '缺少 ' + part)
   // 任务只在任务页；可接默认只露 3 条
   const ReactT = fakeReact(states(board, { tab: 'tasks' }))
-  const modT = (await load('client.sidebar40.js', ReactT)).mod
+  const modT = (await loadSidebar(ReactT)).mod
   const tasksText = textOf(ReactT.createElement(modT.RelaySidebar, { kit, sessionId: 'session-self' }))
   assert.ok(tasksText.includes('T3 标题') && tasksText.includes('sideMoreTasks'))
   assert.ok(!tasksText.includes('T4 标题'))
@@ -574,32 +589,32 @@ test('正文 chunk：等你决定直接点选项（以用户身份回答）；�
   assert.equal(posted[1][1].action, 'unattended-resume')
   // 没事：不出现提醒区
   const React2 = fakeReact(states(sampleBoard()))
-  const { mod: mod2 } = await load('client.sidebar40.js', React2)
+  const { mod: mod2 } = await loadSidebar(React2)
   const calm = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(!/askTitle|sideAlert|sideWatching/.test(calm))
 })
 
 test('正文 chunk：读取中给同高占位；数据旧了顶栏变色；已结束收在底部；复制失败也提示', async () => {
   const React0 = fakeReact()
-  const { mod: mod0 } = await load('client.sidebar40.js', React0)
+  const { mod: mod0 } = await loadSidebar(React0)
   const loading = React0.createElement(mod0.RelaySidebar, { kit: kitFor(), sessionId: 'session-none' })
   assert.ok(JSON.stringify(loading).includes('dshaSv_skel'))
 
   const board = { ...sampleBoard(), entries: [...sampleBoard().entries, { sessionId: 'session-d1dddddd', label: '@d1', status: 'done', category: 'archived', state: 'idle' }] }
   const old = [{ board, error: undefined, at: Date.now() - 40 * 60000 }, 0, 'all', undefined, false, undefined, false, false, false, undefined]
   const React = fakeReact(old)
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const json = JSON.stringify(tree)
   assert.ok(json.includes('"data-tone":"error"') && json.includes('sideMinAgo'), '超过 30 分钟：新鲜度圆点标红（时间在 title 里）')
   assert.ok(textOf(tree).includes('sideDoneN') && !textOf(tree).includes('@d1'), '已结束默认收起')
   const React2 = fakeReact([...old.slice(0, 10), true])
-  const { mod: mod2 } = await load('client.sidebar40.js', React2)
+  const { mod: mod2 } = await loadSidebar(React2)
   assert.ok(textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })).includes('@d1'), '展开后列出')
 
   const failing = [{ board: sampleBoard(), error: undefined, at: Date.now() }, 0, 'all', undefined, false, 'fail:session-main1234', false, false, false, undefined]
   const React3 = fakeReact(failing)
-  const { mod: mod3 } = await load('client.sidebar40.js', React3)
+  const { mod: mod3 } = await loadSidebar(React3)
   const failed = React3.createElement(mod3.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   assert.ok(textOf(failed).includes('!') && JSON.stringify(failed).includes('copyFailed'), '复制失败显示「!」并提示')
 })
@@ -610,7 +625,7 @@ test('正文 chunk：折叠与筛选记在本机，换会话 / 重开标签后�
   let tree
   const saved = globalThis.window
   try {
-    const { mod } = await load('client.sidebar40.js', React)
+    const { mod } = await loadSidebar(React)
     globalThis.window = { localStorage: { getItem: (key) => stored[key] ?? null, setItem: (key, value) => { stored[key] = value } } }
     stored['dshaSv.ui.v1'] = JSON.stringify({ quiet: true })
     // 第一个 useState 是看板状态：用缓存里没有的会话 id，手动给看板
@@ -645,7 +660,7 @@ test('正文 chunk：轮询带上次的 since；notModified 时不换看板对�
       ?? values.find((value) => value && typeof value === 'object' && 'board' in value);
   }
   try {
-    const { mod } = await load('client.sidebar40.js', React)
+    const { mod } = await loadSidebar(React)
     React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-poll', useTabInfo: () => ({ tab: { visible: true } }) })
     cleanups.push(...effects.map((fn) => fn()))
     await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
@@ -686,7 +701,7 @@ test('正文 chunk：需要处理的卡片胶囊说原因（最后一轮出错 /
     othersTotal: 0
   })
   const React = fakeReact(states(board()))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const text = textOf(tree)
   assert.ok(text.includes('why_failed'), '出错说原因')
@@ -723,7 +738,7 @@ test('正文 chunk：卡片主操作随状态——待答复回复、可合并�
   const sidebarStates = (board, cardStates, quietOpen = false) => states(board, { quietOpen, extra: [false, '', undefined, undefined, undefined, 'session', undefined, ...cardStates] })
   const q = sampleBoard().entries[0]
   let React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [q] }, ['reply', '先做 A', false]))
-  let m = (await load('client.sidebar40.js', React)).mod
+  let m = (await loadSidebar(React)).mod
   let tree = React.createElement(m.RelaySidebar, { kit: { ...kit, request: async (method, body) => { posted.push(body); return {} } }, sessionId: 'session-self' })
   assert.ok(find(tree, button('reply')), '待答复卡片有「回复」')
   assert.ok(find(tree, (n) => n.type === 'textarea'), '展开后是输入框')
@@ -732,7 +747,7 @@ test('正文 chunk：卡片主操作随状态——待答复回复、可合并�
   assert.deepEqual(posted.at(-1), { action: 'reply', target: q.sessionId, text: '先做 A', mode: 'followup', fromSession: 'session-self' })
   const r = sampleBoard().entries[1]
   React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [r] }, ['assign', 'build281', false]))
-  m = (await load('client.sidebar40.js', React)).mod
+  m = (await loadSidebar(React)).mod
   tree = React.createElement(m.RelaySidebar, { kit: { ...kit, request: async (method, body) => { posted.push(body); return {} } }, sessionId: 'session-self' })
   await find(tree, button('assignSend')).props.onClick({ stopPropagation() {} })
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -740,7 +755,7 @@ test('正文 chunk：卡片主操作随状态——待答复回复、可合并�
   const idle = { sessionId: 'session-i1iiiiii', label: '@i1', status: 'working', category: 'idle', state: 'idle' }
   // 久未活动默认收在一行里：展开后才有卡片
   React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [idle] }, ['wake', '', false], true))
-  m = (await load('client.sidebar40.js', React)).mod
+  m = (await loadSidebar(React)).mod
   tree = React.createElement(m.RelaySidebar, { kit: { ...kit, request: async (method, body) => { posted.push(body); return {} } }, sessionId: 'session-self' })
   assert.ok(textOf(tree).includes('sideWakeAsk'), '唤醒先问一句')
   await find(tree, button('wakeConfirm')).props.onClick({ stopPropagation() {} })
@@ -749,7 +764,7 @@ test('正文 chunk：卡片主操作随状态——待答复回复、可合并�
   // 进行中的卡片只有「打开」
   const working = { sessionId: 'session-k1kkkkkk', label: '@k1', status: 'working', category: 'active', state: 'running' }
   React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [working] }, [undefined]))
-  m = (await load('client.sidebar40.js', React)).mod
+  m = (await loadSidebar(React)).mod
   tree = React.createElement(m.RelaySidebar, { kit, sessionId: 'session-self' })
   assert.ok(!find(tree, button('reply')) && !find(tree, button('assign')) && !find(tree, button('wake')))
 })
@@ -810,7 +825,7 @@ const findButton = (node, pred) => {
 test('任务看板：可接 / 进行中 / 已结束分组，进行中显示持有者，已结束默认收起', async () => {
   const { kit } = taskKit()
   const React = fakeReact([])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), act: async () => ({}), busy: false })
   const text = textOf(tree)
   for (const part of ['sideTaskBoard', 'sideTaskSummary', 'sideTaskOpen', 'T1', 'P1', '改侧栏', 'T2', 'sideTaskActive', 'T3', 'P2', '@w1', 'sideTaskEnded']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -820,7 +835,7 @@ test('任务看板：可接 / 进行中 / 已结束分组，进行中显示持�
   assert.ok(endedButton !== undefined, '有「已结束」分组入口（默认收起）')
 
   const expanded = fakeReact([undefined, { 'g:ended': true }])
-  const mod2 = (await load('client.sidebar40.js', expanded)).mod
+  const mod2 = (await loadSidebar(expanded)).mod
   const open = textOf(expanded.createElement(mod2.TaskBoard, { kit, tasks: tasksFixture(), act: async () => ({}), busy: false }))
   assert.ok(open.includes('T0') && open.includes('sideTaskDone'), '展开后列出已结束任务和结论')
 })
@@ -828,7 +843,7 @@ test('任务看板：可接 / 进行中 / 已结束分组，进行中显示持�
 test('任务看板：点条目进详情，持有会话/任务号可点、派发指令可复制', async () => {
   const { kit, opened, copied } = taskKit()
   const React = fakeReact(['T3'])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), entries: [{ sessionId: 'session-w1aaaaaa', summary: '跑了真机，等合并' }], act: async () => ({}), busy: false, onCopied: () => {} })
   const text = textOf(tree)
   for (const part of ['sideTaskBack', 'T3', 'tasksHolder', '@w1', 'sideTaskWorktree', 'fix/t3', 'sideTaskStatus', 'sideTaskDepends', 'sideTaskLatest', '跑了真机，等合并', 'sideTaskCopyDispatch']) assert.ok(text.includes(part), '详情缺少 ' + part)
@@ -850,7 +865,7 @@ test('任务看板：点条目进详情，持有会话/任务号可点、派发�
 test('任务看板：详情显示关联 PR 的只读状态', async () => {
   const { kit } = taskKit()
   const React = fakeReact(['T3'])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tasks = tasksFixture()
   tasks.claimedRows = [{
     ...tasks.claimedRows[0],
@@ -866,7 +881,7 @@ test('任务详情：待审核任务给通过 / 打回入口，以用户身份�
   tasks.open = [{ ...tasks.open[0], stage: 'review', approval: 'pending', stageLabel: '待审查', approvalLabel: '待审批' }]
   // TaskBoard 4 个 useState 之后：ApprovalBox 的说明输入框
   const React = fakeReact(['T1', {}, undefined, '', undefined, ''])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const { kit } = taskKit()
   const tree = React.createElement(mod.TaskBoard, {
     kit, tasks, busy: false,
@@ -887,7 +902,7 @@ test('任务详情：待审核任务给通过 / 打回入口，以用户身份�
 test('任务详情：projectStatus 开关打开时显示 Projects 状态读取行', async () => {
   const sync = { available: true, repo: 'o/r', switches: { projectStatus: true }, links: [] }
   const React = fakeReact(['T1'])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const { kit } = taskKit()
   const text = textOf(React.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), sync, busy: false, sessionId: 'session-self', act: async () => ({}) }))
   assert.ok(text.includes('projectStatusTitle') && text.includes('projectStatusLoading'))
@@ -896,13 +911,13 @@ test('任务详情：projectStatus 开关打开时显示 Projects 状态读取�
 test('任务看板：可接任务进详情后拉起认领会话，成功直接打开新会话', async () => {
   const { kit, opened } = taskKit()
   const React = fakeReact(['T1'])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), act: async () => ({}), busy: false })
   assert.ok(!textOf(tree).includes('sideTaskCopyClaim'), '复制认领指令已并进「拉起认领」一个入口')
 
   const posted = []
   const select = fakeReact(['T1', undefined, 'T1', ''])
-  const mod2 = (await load('client.sidebar40.js', select)).mod
+  const mod2 = (await loadSidebar(select)).mod
   const detail = select.createElement(mod2.TaskBoard, {
     kit, tasks: tasksFixture(), busy: false,
     act: async (body) => { posted.push(body); return { result: { sessionId: 'session-new1234' } } }
@@ -916,7 +931,7 @@ test('任务看板：可接任务进详情后拉起认领会话，成功直接�
 test('任务看板：旧快照只有 open / claimed 计数时不崩，仍给待领列表和计数', async () => {
   const { kit } = taskKit()
   const React = fakeReact([])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.TaskBoard, { kit, tasks: { open: [{ id: 'T9', title: '旧数据' }], claimed: 2 }, act: async () => ({}), busy: false })
   const text = textOf(tree)
   assert.ok(text.includes('T9') && text.includes('sideDoneMore'))
@@ -931,7 +946,7 @@ test('GitHub 登录卡：设置页未登录显示登录卡并可直接登录；�
   const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
   const missing = { state: 'missing', match: 'missing', login: null, accountId: null, pinned: null, scopes: [], loginFlow: null, error: null }
   const React = fakeReact(states({ ...sampleBoard(), github: missing }, { settingsOpen: true, extra: ['repo'] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
   assert.ok(text.includes('ghStateMissing') && text.includes('ghTier') && text.includes('ghLogin'))
@@ -942,7 +957,7 @@ test('GitHub 登录卡：设置页未登录显示登录卡并可直接登录；�
   const pending = { ...missing, loginFlow: { state: 'pending', userCode: 'ABCD-1234', verificationUri: 'https://github.com/login/device', opened: true, startedAt: 1, expiresAt: 2 } }
   const copied = []
   const React2 = fakeReact(['repo'])
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const card = React2.createElement(mod2.GitHubCard, {
     kit: { ...kit, copyText: async (value) => { copied.push(value); return true } },
     github: pending, busy: false, act: async (body) => { posted.push(body); return {} }
@@ -961,7 +976,7 @@ test('GitHub 登录卡：已登录未锁定给「锁定」；锁错号给「重�
   const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
   const ready = { state: 'ready', match: 'unpinned', login: 'alice', accountId: 1, pinned: null, scopes: ['repo', 'workflow'], loginFlow: null, error: null }
   const React = fakeReact(['all'])
-  const mod = (await load('client.sidebar40.js', React)).mod
+  const mod = (await loadSidebar(React)).mod
   const tree = React.createElement(mod.GitHubCard, { kit, github: ready, busy: false, act: async (body) => { posted.push(body); return {} } })
   assert.ok(textOf(tree).includes('ghPinUnpinned'))
   const chips = findScopeChips(tree)
@@ -974,7 +989,7 @@ test('GitHub 登录卡：已登录未锁定给「锁定」；锁错号给「重�
 
   const mismatch = { ...ready, match: 'mismatch', login: 'mallory', pinned: { login: 'alice', accountId: 1 } }
   const React2 = fakeReact(['all'])
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const tree2 = React2.createElement(mod2.GitHubCard, { kit, github: mismatch, busy: false, act: async (body) => { posted.push(body); return {} } })
   assert.ok(textOf(tree2).includes('ghPinMismatch'))
   await findButton(tree2, (label) => label === 'ghRepin').props.onClick()
@@ -986,7 +1001,7 @@ test('GitHub 登录卡：三档权限胶囊可选，动作带上所选档位', a
   const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
   const missing = { state: 'missing', match: 'missing', login: null, accountId: null, pinned: null, scopes: [], loginFlow: null, error: null }
   const React = fakeReact(['basic'])
-  const mod = (await load('client.sidebar40.js', React)).mod
+  const mod = (await loadSidebar(React)).mod
   const tree = React.createElement(mod.GitHubCard, { kit, github: missing, busy: false, act: async (body) => { posted.push(body); return {} } })
   const text = textOf(tree)
   for (const part of ['ghTier', 'ghTierBasic', 'ghTierRepo', 'ghTierAll', 'ghTierHintBasic', 'ghTierNote']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -997,7 +1012,7 @@ test('GitHub 登录卡：三档权限胶囊可选，动作带上所选档位', a
 
   const ready = { state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 }, scopes: ['repo'], loginFlow: null, error: null }
   const React2 = fakeReact(['repo'])
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const tree2 = React2.createElement(mod2.GitHubCard, { kit, github: ready, busy: false, act: async (body) => { posted.push(body); return {} } })
   await findButton(tree2, (label) => label.includes('ghTierUpgrade')).props.onClick()
   assert.equal(posted.at(-1).action, 'github-relogin')
@@ -1007,7 +1022,7 @@ test('GitHub 登录卡：三档权限胶囊可选，动作带上所选档位', a
 test('GitHub 登录卡：当前权限显示为一颗颗小胶囊，不再出现 {v} 占位符', async () => {
   const github = { state: 'ready', match: 'ok', login: 'alice', accountId: 1, pinned: { login: 'alice', accountId: 1 }, scopes: ['repo', 'workflow', 'gist', 'admin:repo_hook'], loginFlow: null, error: null }
   const React = fakeReact(['repo'])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.GitHubCard, { kit: kitFor(), github, busy: false, act: async () => ({}) })
   const text = textOf(tree)
   assert.ok(!text.includes('{v}'), '不再显示未替换的占位符')
@@ -1025,7 +1040,7 @@ test('GitHub 登录卡：授权缺 scope 时明确告警，并提供「退出后
   const posted = []
   const kit = { ...kitFor(), request: async (method, body) => { posted.push(body); return {} } }
   const React = fakeReact(['repo', true])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.GitHubCard, { kit, github, busy: false, act: async (body) => { posted.push(body); return {} } })
   const text = textOf(tree)
   for (const part of ['ghGrantedMissing', 'admin:org', 'delete_repo', 'ghGrantedMissingHint', 'ghResetAsk', 'ghResetConfirm']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1046,7 +1061,7 @@ test('GitHub 登录卡：档位已补足时显示「已补足」状态，档位�
   }
   const React = fakeReact(['all', false])
   const kit = kitFor()
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.GitHubCard, { kit, github, busy: false, act: async () => ({}) })
   const text = textOf(tree)
   assert.ok(text.includes('ghTierCovered'), '显示已补足状态')
@@ -1060,7 +1075,7 @@ test('GitHub 登录卡：档位已补足时显示「已补足」状态，档位�
 test('GitHub 登录卡：还没读到身份时显示「正在读取账号…」，不给登录按钮，读取中不能重复点', async () => {
   const github = { state: null, reading: true, match: 'unknown', pinned: null, scopes: [], loginFlow: null, error: null, lastReady: null }
   const React = fakeReact(['repo'])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.GitHubCard, { kit: kitFor(), github, busy: false, act: async () => ({}) })
   const text = textOf(tree)
   assert.ok(text.includes('ghStateReading') && text.includes('ghReadingHint'), '有读取中状态和说明')
@@ -1076,7 +1091,7 @@ test('GitHub 登录卡：读取失败给原因、自动重试提示和上次成�
     pinned: null, scopes: [], loginFlow: null
   }
   const React = fakeReact(['repo'])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.GitHubCard, { kit: kitFor(), github, busy: false, act: async () => ({}) })
   const text = textOf(tree)
   assert.ok(text.includes('ghStateError') && text.includes('ghError'), '失败状态和原因都在')
@@ -1096,7 +1111,7 @@ test('设置页：GitHub 账号、仓库开关、同步与核验集中；返回�
     watches: [{ id: 'w1', state: 'failed', line: 'CI 9 失败', what: 'CI 9', checkedAt: Date.now() }]
   }
   const React = fakeReact(states(board, { settingsOpen: true, extra: ['repo'] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['sideSettings', 'sideSettingsHint', 'ghTitle', 'repoTitle', 'issues 投影', 'syncTitle', 'sideVerifyTitle', 'sideVerifySum', 'declShow', 'CI 9']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1123,7 +1138,7 @@ test('设置页核验清单：done / cancelled 各有文案，未知状态不冒
     ]
   }
   const React = fakeReact(states(board, { settingsOpen: true }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const text = textOf(tree)
   assert.ok(text.includes('verifyStateDone'), 'done 显示「完成」')
@@ -1154,7 +1169,7 @@ test('地图页：已登录显示地图任务树与本地票子；不再出现�
     mapMore: 1
   }
   const React = fakeReact(states({ ...sampleBoard(), github, repo, sync, taskBoard }, { tab: 'map' }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['sideMapTitle', 'sideMapHint', 'sideMapGroups', 'T10', '父任务', 'T10.1', '子任务一', 'sideMapDepends', '#12', 'sideMapNoTicket', 'OPEN', 'sideMapMore',
@@ -1200,7 +1215,7 @@ test('PR 页：远端列表、标题链接、状态与请求修改/评论/关联
   const kit = { ...kitFor(), request: async (...args) => { posted.push(args); return {} } }
   // PrTab 的 useState：data / error / busy / filter / openNo / comment / pending / running / prState / detailNo / linkTask
   const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, 'LGTM', undefined, undefined, 'open', undefined, 'T12'] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['sideTabPr', '#7', '修 bug', 'prReviewChanges', 'o/r', 'prCommentCount', 'prRequestChanges', 'prApprove', 'prClose', 'prLinkTask', '+12 −3', 'prDiffFiles', 'prAiReview']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1229,12 +1244,12 @@ test('PR 页：已批准筛选与空态；批准 / 关闭走二次确认', async
   const posted = []
   const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
   const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'approved', 7, '', undefined, undefined] }))
-  const mod = (await load('client.sidebar40.js', React)).mod
+  const mod = (await loadSidebar(React)).mod
   assert.ok(textOf(React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })).includes('prNoMatch'), '筛选后无条目给「没有匹配」空态')
 
   const emptyOpen = { prs: { repo: 'o/r', items: [] } }
   const ReactEmpty = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [emptyOpen, undefined, false, 'all', undefined] }))
-  const modEmpty = (await load('client.sidebar40.js', ReactEmpty)).mod
+  const modEmpty = (await loadSidebar(ReactEmpty)).mod
   const emptyText = textOf(ReactEmpty.createElement(modEmpty.RelaySidebar, { kit, sessionId: 'session-self' }))
   assert.ok(emptyText.includes('prEmpty'), '空仓库给空态')
   assert.ok(emptyText.includes('prFilterAll'), '空仓库也保留「全部」')
@@ -1242,18 +1257,18 @@ test('PR 页：已批准筛选与空态；批准 / 关闭走二次确认', async
 
   const emptyClosed = { prs: { repo: 'o/r', state: 'closed', items: [] } }
   const ReactClosed = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [emptyClosed, undefined, false, 'all', undefined, '', undefined, undefined, 'closed'] }))
-  const modClosed = (await load('client.sidebar40.js', ReactClosed)).mod
+  const modClosed = (await loadSidebar(ReactClosed)).mod
   assert.ok(textOf(ReactClosed.createElement(modClosed.RelaySidebar, { kit, sessionId: 'session-self' })).includes('prClosedEmpty'), '已关闭列表空态单独文案')
 
   const errorView = { prs: { repo: 'o/r', items: [], error: '当前工作区没有 GitHub origin' } }
   const ReactErr = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [errorView, undefined, false, 'all', undefined] }))
-  const modErr = (await load('client.sidebar40.js', ReactErr)).mod
+  const modErr = (await loadSidebar(ReactErr)).mod
   const errorText = textOf(ReactErr.createElement(modErr.RelaySidebar, { kit, sessionId: 'session-self' }))
   assert.ok(errorText.includes('没有 GitHub origin'), '错误原因照常显示')
   assert.ok(!errorText.includes('prEmpty'), '有错误时不再叠一句「没有打开的 PR」')
 
   const React2 = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, '附言', { number: 7, kind: 'approve' }, undefined] }))
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const tree2 = React2.createElement(mod2.RelaySidebar, { kit, sessionId: 'session-self' })
   assert.ok(textOf(tree2).includes('prConfirmApprove'))
   await findButton(tree2, (label) => label === 'prConfirm').props.onClick()
@@ -1261,7 +1276,7 @@ test('PR 页：已批准筛选与空态；批准 / 关闭走二次确认', async
   assert.deepEqual(lastPost(posted), { action: 'pr-review', number: 7, verdict: 'approve', body: '附言', fromSession: 'session-self' })
 
   const React3 = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, '', { number: 7, kind: 'close' }, undefined] }))
-  const mod3 = (await load('client.sidebar40.js', React3)).mod
+  const mod3 = (await loadSidebar(React3)).mod
   const tree3 = React3.createElement(mod3.RelaySidebar, { kit, sessionId: 'session-self' })
   await findButton(tree3, (label) => label === 'prConfirm').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -1274,7 +1289,7 @@ test('PR 页：已关闭列表可重开；关闭后的列表与打开的列表�
   const closed = { prs: { repo: 'o/r', state: 'closed', items: [{ number: 7, title: '修 bug', author: 'alice', url: 'https://github.com/o/r/pull/7', draft: false, merged: false, reviewDecision: 'CHANGES_REQUESTED', updatedAt: '2026-11-07T00:00:00Z', comments: 0, head: 'fix/x', base: 'main' }, { number: 8, title: '已合并', author: 'bob', url: 'https://github.com/o/r/pull/8', draft: false, merged: true, reviewDecision: '', updatedAt: '2026-11-06T00:00:00Z', comments: 1, head: 'a', base: 'main' }] } }
   // PrTab 的 9 个 useState：data / error / busy / filter / openNo / comment / pending / running / prState
   const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [closed, undefined, false, 'all', 7, '', { number: 7, kind: 'reopen' }, undefined, 'closed'] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['prStateOpen', 'prStateClosed', 'prReopen', 'prConfirmReopen', 'prMerged', 'prReviewChanges']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1298,19 +1313,19 @@ test('PR 详情：点详情展开评审与评论正文，空数据有说明', as
   } } }
   // PrDetail 的 3 个 useState：data / error / busy
   const React = fakeReact([detail, undefined, false])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const text = textOf(React.createElement(mod.PrDetail, { kit: kitFor(), sessionId: 's1', number: 7 }))
   for (const part of ['PR 说明', 'prReviewsTitle', '改一下', 'prReviewChanges', 'prCommentsTitle', '收到', 'prDiffTitle', 'lib/x.js', '+12', '−3', 'prChangeModified', 'prOpenPr']) assert.ok(text.includes(part), '缺少 ' + part)
   assert.equal(text.includes('prDiffEmpty'), false, '有文件改动时不显示空态')
 
   const React2 = fakeReact([{ prDetail: { detail: { number: 7, reviews: [], comments: [] } } }, undefined, false])
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const empty = textOf(React2.createElement(mod2.PrDetail, { kit: kitFor(), sessionId: 's1', number: 7 }))
   assert.ok(empty.includes('prNoReviews') && empty.includes('prNoComments'))
 
   const long = { prDetail: { detail: { number: 7, body: '**长正文** ' + '长'.repeat(200), reviews: [{ login: 'bob', state: 'approved', body: '**改一下**\n这里 `git` 有问题', submittedAt: '2026-11-07T00:00:00Z' }], comments: [{ login: 'carol', body: '**收到**，等 `CI`', createdAt: '2026-11-07T01:00:00Z' }] } } }
   const React3 = fakeReact([long, undefined, false])
-  const mod3 = (await load('client.sidebar40.js', React3)).mod
+  const mod3 = (await loadSidebar(React3)).mod
   const longTree = React3.createElement(mod3.PrDetail, { kit: kitFor(), sessionId: 's1', number: 7 })
   const longText = textOf(longTree)
   assert.ok(longText.includes('prExpand'), '长正文给展开按钮')
@@ -1336,7 +1351,7 @@ test('PR 页：AI 审核按钮拉起审核会话并打开', async () => {
     }
   }
   const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', undefined, '', undefined, undefined] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const button = findButton(tree, (label) => label === 'prAiReview')
   assert.ok(button !== undefined, 'PR 行有 AI 审核按钮')
@@ -1349,7 +1364,7 @@ test('PR 页：AI 审核按钮拉起审核会话并打开', async () => {
 test('问题页：issue 列表与标签 / 指派，不混入地图', async () => {
   // IssueTab 的 3 个 useState：data / error / busy
   const React = fakeReact(states(sampleBoard(), { tab: 'issues', extra: [issueData(), undefined, false] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   for (const part of ['sideTabIssues', '#9', '崩溃', 'bug', 'ui', '@carol', 'prCommentCount']) assert.ok(text.includes(part), '缺少 ' + part)
   assert.ok(!text.includes('sideMapTitle'), '问题页不混入地图')
@@ -1365,19 +1380,19 @@ test('问题页：搜索 / 指派给我 / 标签筛选与关联任务', async ()
   const board = { ...sampleBoard(), github: { login: 'carol', state: 'ready' }, sync: { links: [{ id: 'T3', issue: 9 }] } }
   // IssueTab 的 6 个 useState：data / error / busy / query / filter / label
   const React = fakeReact([issueData2, undefined, false, '', 'all', undefined])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.IssueTab, { kit: kitFor(), board, sessionId: 's1' })
   const text = textOf(tree)
   for (const part of ['#9', '#10', 'bug', 'ui', 'issueFilterMine', 'T3']) assert.ok(text.includes(part), '缺少 ' + part)
   assert.ok(findNode(tree, (node) => node.type === 'input' && node.props?.placeholder === 'issueSearch') !== undefined, '搜索框带占位')
 
   const React2 = fakeReact([issueData2, undefined, false, '', 'mine', undefined])
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const mine = textOf(React2.createElement(mod2.IssueTab, { kit: kitFor(), board, sessionId: 's1' }))
   assert.ok(mine.includes('#9') && !mine.includes('#10'), '指派给我只留 carol 的 issue')
 
   const React3 = fakeReact([issueData2, undefined, false, '界面', 'all', undefined])
-  const mod3 = (await load('client.sidebar40.js', React3)).mod
+  const mod3 = (await loadSidebar(React3)).mod
   const searched = textOf(React3.createElement(mod3.IssueTab, { kit: kitFor(), board, sessionId: 's1' }))
   assert.ok(searched.includes('#10') && !searched.includes('#9'), '搜索标题命中')
 })
@@ -1387,7 +1402,7 @@ test('分支页：全工作区列表、当前/默认/合并状态与拉取', asy
   const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
   // BranchTab 的 7 个 useState：data / error / busy / confirm / typed / force / running
   const React = fakeReact(states(sampleBoard(), { tab: 'branches', extra: [branchData(), undefined, false, undefined, '', false, undefined] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['sideTabBranches', 'relay', 'o/r', 'main', 'fix/y', 'brCurrent', 'brDefault', 'brUnmerged', 'brAhead', 'brBehind', 'brLocal', 'brRemote', 'brDelete', 'brDeleteRemote', 'brWorktree', 'brRemoveWorktree', 'brCleanupOpen{"n":1}']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1401,14 +1416,14 @@ test('分支页：本地删除与远端删除各自确认后提交', async () =>
   const posted = []
   const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
   const React = fakeReact(states(sampleBoard(), { tab: 'branches', extra: [branchData(), undefined, false, { workspaceId: 'ws1', name: 'fix/y', remote: false }, '', false, undefined] }))
-  const mod = (await load('client.sidebar40.js', React)).mod
+  const mod = (await loadSidebar(React)).mod
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   await findButton(tree, (label) => label === 'brConfirm').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(lastPost(posted), { action: 'branch-delete', workspaceId: 'ws1', name: 'fix/y', force: false, fromSession: 'session-self' })
 
   const React2 = fakeReact(states(sampleBoard(), { tab: 'branches', extra: [branchData(), undefined, false, { workspaceId: 'ws1', name: 'fix/y', remote: true }, 'fix/y', false, undefined] }))
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const tree2 = React2.createElement(mod2.RelaySidebar, { kit, sessionId: 'session-self' })
   await findButton(tree2, (label) => label === 'brConfirm').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -1420,7 +1435,7 @@ test('分支页：移除工作树并删除走二次确认', async () => {
   const kit = { ...kitFor(), request: async (method, body) => { posted.push([method, body]); return {} } }
   const confirm = { workspaceId: 'ws1', name: 'wt/branch', remote: false, removeWorktree: true }
   const React = fakeReact(states(sampleBoard(), { tab: 'branches', extra: [branchData(), undefined, false, confirm, '', false, undefined] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['brConfirmWorktree', '/repo/.agents/worktrees/wt/branch']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1447,7 +1462,7 @@ const cleanupData = () => ({
 test('遗留清理页：状态胶囊、跳过原因与上次清理结果', async () => {
   const result = { removed: 1, skipped: 1, results: [{ workspaceId: 'ws1', name: 'wt/dirty', ok: false, reason: '工作树有未提交改动' }] }
   const React = fakeReact([cleanupData(), undefined, false, [], false, false, false, result])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.BranchCleanup, { kit: kitFor(), act: async () => ({}), busy: false })
   const text = textOf(tree)
   for (const part of ['brCleanupHint', 'brCleanupCount', 'wt/clean', 'brMerged', 'brCleanupClean', 'brCleanupDoneDecl',
@@ -1460,7 +1475,7 @@ test('遗留清理页：状态胶囊、跳过原因与上次清理结果', async
 test('遗留清理页：含未合并分支要先勾选确认，确认后一次性提交选中项', async () => {
   const picked = ['ws1\u0000wt/clean', 'ws1\u0000wt/unmerged']
   const blocked = fakeReact([cleanupData(), undefined, false, picked, true, false, false, undefined])
-  const modBlocked = (await load('client.sidebar40.js', blocked)).mod
+  const modBlocked = (await loadSidebar(blocked)).mod
   const treeBlocked = blocked.createElement(modBlocked.BranchCleanup, { kit: kitFor(), act: async () => ({}), busy: false })
   const text = textOf(treeBlocked)
   for (const part of ['brCleanupConfirm', 'wt/clean', 'wt/unmerged', 'brCleanupUnmerged', 'brCleanupUnmergedAck', 'brCleanupConfirmRun']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1469,7 +1484,7 @@ test('遗留清理页：含未合并分支要先勾选确认，确认后一次�
   const posted = []
   const act = async (body) => { posted.push(body); return { result: { removed: 2, skipped: 0, results: [] } } }
   const ready = fakeReact([cleanupData(), undefined, false, picked, true, true, false, undefined])
-  const modReady = (await load('client.sidebar40.js', ready)).mod
+  const modReady = (await loadSidebar(ready)).mod
   const treeReady = ready.createElement(modReady.BranchCleanup, { kit: kitFor(), act, busy: false })
   await findButton(treeReady, (label) => label === 'brCleanupConfirmRun').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -1483,7 +1498,7 @@ test('分支页：清理入口按工作树占用数显示，打开后是清理�
   // BranchTab 10 个 useState：data / error / busy / confirm / typed / force / running / query / showAll / mode；之后是 BranchCleanup 的 8 个
   const extra = [branchData(), undefined, false, undefined, '', false, undefined, '', false, 'cleanup', cleanupData(), undefined, false, [], false, false, false, undefined]
   const React = fakeReact(states(sampleBoard(), { tab: 'branches', extra }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['brCleanupTitle', 'brCleanupBack', 'brCleanupHint', 'wt/clean', 'brCleanupSelectAll']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1493,7 +1508,7 @@ test('邮箱：CI 通知标题拆成结构化行（标题/结果/仓库/CI 号/s
   const subject = 'build342 release · CI 42433629550 @SunsetRNE/DSHA-Sunset-mod · CI 42433629550 「DSH-A-Su production release」 成功（sha f5a2951234）'
   const data = { mailbox: { unread: 1 }, items: [{ id: 'm1', subject, body: '正文', kind: 'build', at: 1, readBy: {} }] }
   const React = fakeReact(states(sampleBoard(), { tab: 'mail', extra: [data, undefined, false] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   for (const part of ['build342 release', 'mailResultOk', 'mailKindBuild', 'SunsetRNE/DSHA-Sunset-mod', 'CI #42433629550', 'f5a2951']) assert.ok(text.includes(part), '缺少 ' + part)
   assert.ok(!text.includes('build342 release · CI 42433629550 @SunsetRNE'), '收起行不再整段铺标题')
@@ -1503,7 +1518,7 @@ test('邮箱页：独立页签直接用 MailBox 渲染公共通知', async () =>
   const data = { mailbox: { unread: 2 }, items: [{ id: 'm1', subject: '发版公告', body: '正文', kind: 'notice', at: 1, readBy: {} }] }
   // MailBox 的 3 个 useState：数据 / 错误 / busy
   const React = fakeReact(states(sampleBoard(), { tab: 'mail', extra: [data, undefined, false] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   for (const part of ['sideTabMail', 'pageMail', '发版公告', '正文', 'mailUnread']) assert.ok(text.includes(part), '缺少 ' + part)
 })
@@ -1513,7 +1528,7 @@ test('更多页：已登录显示仓库与同步；不再出现登录卡', async
   const repo = { available: true, source: 'ok', repo: 'o/r' }
   const sync = { available: true, repo: 'o/r', paused: false, queue: 1, switches: { issues: true }, links: [{ id: 'T3', issue: 9, url: 'https://github.com/o/r/issues/9', state: 'synced', remoteState: 'OPEN' }] }
   const React = fakeReact(states({ ...sampleBoard(), github, repo, sync, taskBoard: { open: [], claimed: 0, claimedRows: [], endedRows: [], map: [] } }, { tab: 'more' }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['repoTitle', 'repoProbeOk', 'syncTitle', 'sideRepoInSettings', 'sideMoreQuick', 'sideTabMap', 'sideTabPr', 'sideTabBranches', 'sideTabIssues', 'sideMoreSettings']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1527,7 +1542,7 @@ test('更多页：已登录显示仓库与同步；不再出现登录卡', async
 test('更多页：窄屏快捷入口，点条目切页 / 打开设置', async () => {
   const board = { ...sampleBoard(), github: { state: 'ready' }, repo: { available: true, source: 'ok', repo: 'o/r' }, sync: { available: false } }
   const React = fakeReact()
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const opened = []
   let settings = 0
   const tree = React.createElement(mod.MoreTab, {
@@ -1545,15 +1560,15 @@ test('更多页：窄屏快捷入口，点条目切页 / 打开设置', async ()
 })
 
 test('侧栏折叠：更多页快捷入口只在窄屏显示，隐藏规则用双类名', async () => {
-  const source = await readFile(new URL('../lib/client.sidebar40.js', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../lib/client.sidebar41.js', import.meta.url), 'utf8')
   assert.ok(source.includes('.dshaSv_wide .dshaSv_foldOnly{display:none}'), '宽屏隐藏规则用宽度 class + 双类名')
   assert.ok(source.includes('ResizeObserver') && source.includes('dshaSv_wide'), '旋转后由 ResizeObserver 重新量宽度')
   const ReactR = fakeReact(states(sampleBoard()))
-  const modR = (await load('client.sidebar40.js', ReactR)).mod
+  const modR = (await loadSidebar(ReactR)).mod
   const treeR = ReactR.createElement(modR.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   assert.ok(findNode(treeR, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_narrow')), '默认按窄栏加 dshaSv_narrow class')
   const React = fakeReact()
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const board = { ...sampleBoard(), github: { state: 'ready' }, repo: null, sync: { available: false } }
   const tree = React.createElement(mod.MoreTab, { kit: kitFor(), board, act: async () => ({}), busy: false, onOpen: () => {}, onSettings: () => {}, counts: {} })
   assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_quick')) !== undefined, '窄屏入口列表还在')
@@ -1575,7 +1590,7 @@ test('设置页：仓库守候卡片显示状态、上次唤醒与过滤原因�
     }]
   }
   const React = fakeReact(states({ ...sampleBoard(), github, repo, sync, taskBoard: { open: [], claimed: 0, claimedRows: [], map: [] }, repoWatches }, { settingsOpen: true }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
   assert.ok(text.includes('rwTitle') && text.includes('o/r') && text.includes('rwStateOn'), '守候卡片标题/仓库/状态')
@@ -1589,7 +1604,7 @@ test('设置页：仓库守候卡片显示状态、上次唤醒与过滤原因�
 
   // 判定子页签：过滤原因与最近记录（直接渲染区块，避免页面其它 state 占位）
   const ReactJ = fakeReact(['judge'])
-  const modJ = (await load('client.sidebar40.js', ReactJ)).mod
+  const modJ = (await loadSidebar(ReactJ)).mod
   const judge = textOf(ReactJ.createElement(modJ.RepoWatchSettings, {
     kit, act: async () => ({}), busy: false,
     board: { ...sampleBoard(), repoWatches }
@@ -1604,7 +1619,7 @@ test('地图页：没有拆分任务时给出创建入口，不再显示待接�
   const sync = { available: true, repo: 'o/r', paused: false, queue: 0, switches: {}, links: [] }
   const taskBoard = { open: [], claimed: 0, claimedRows: [], map: [] }
   const React = fakeReact(states({ ...sampleBoard(), github, repo, sync, taskBoard }, { tab: 'map' }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(text.includes('sideMapEmpty'), '空地图给出建任务提示')
   assert.ok(text.includes('sideTicketEmpty'), '没有投影票时票子区给说明')
@@ -1620,7 +1635,7 @@ test('地图页：拆分子任务表单以用户身份提交 task-split', async 
   const taskBoard = { open: [{ id: 'T10', title: '父任务' }], claimed: 0, claimedRows: [], map: [{ id: 'T10', title: '父任务', kind: 'open', childTotal: 0, children: [] }] }
   // MapTab 的 4 个 useState：表单开、父任务号、子任务正文、串行依赖
   const React = fakeReact(states({ ...sampleBoard(), github, repo, sync, taskBoard }, { tab: 'map', extra: [true, 'T10', '子一\n子二', true] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['sideMapSplitSubmit', 'sideMapSplitHint', 'sideMapSplitSerial']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1642,7 +1657,7 @@ test('交接页：快照按结构化行渲染（计数行 + 会话行 + 摘要�
   ].join('\n')
   const handoff = { coordinator: null, coordinatorFailure: null, draft: null, snapshot, history: [] }
   const React = fakeReact(states({ ...sampleBoard(), handoff }, { tab: 'handoff', extra: ['', false, 'new', '', false, false, true] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['可合并', 'ui/card-wave-c', 'f664ae5', 'T121 build343 Wave C', '归档 24 个']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1660,7 +1675,7 @@ test('交接页：草稿、接手方与二次确认；确认以用户身份发�
     history: [{ id: 'h1', from: 'session-old1234', to: 'session-main1234', fromLabel: '@old', toLabel: '@main', at: Date.now() - 1000, notes: '' }]
   }
   const React = fakeReact(states({ ...sampleBoard(), handoff }, { tab: 'handoff', extra: ['下一步：合并 #1', false, 'new', 'build281', false, true] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
   for (const part of ['hoTitle', 'hoByModel', 'hoSettings', 'hoTargetNew', 'hoQueue', 'hoConfirmAgain', 'hoSnapshotAttach', 'hoHideSnapshot', 'hoHistory', 'hoHint', 'chars', 'modelLabel', 'modelLoading']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1670,7 +1685,7 @@ test('交接页：草稿、接手方与二次确认；确认以用户身份发�
   assert.deepEqual(posted.at(-1), { action: 'handoff-confirm', to: 'new', alias: 'build281', mode: 'followup', fromSession: 'session-self' })
   // 有未保存改动时确认仍然可用：确认会先把说明存进草稿（与协作面板一致）
   const React2 = fakeReact(states({ ...sampleBoard(), handoff }, { tab: 'handoff', extra: ['改过的说明', true, 'new', '', false, true] }))
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const tree2 = React2.createElement(mod2.RelaySidebar, { kit, sessionId: 'session-self' })
   assert.ok(!textOf(tree2).includes('sideHandoffSaveFirst'), '不再要求先保存草稿')
   await findButton(tree2, (label) => label.includes('hoConfirmAgain')).props.onClick()
@@ -1678,7 +1693,7 @@ test('交接页：草稿、接手方与二次确认；确认以用户身份发�
   // 没有草稿、也没在写：编辑器收起，只给起草入口
   const noDraft = { ...handoff, draft: null }
   const React3 = fakeReact(states({ ...sampleBoard(), handoff: noDraft }, { tab: 'handoff' }))
-  const mod3 = (await load('client.sidebar40.js', React3)).mod
+  const mod3 = (await loadSidebar(React3)).mod
   const tree3 = React3.createElement(mod3.RelaySidebar, { kit, sessionId: 'session-self' })
   const text3 = textOf(tree3)
   assert.ok(!findNode(tree3, (node) => node.type === 'textarea'), '没有草稿时不铺空编辑器')
@@ -1687,7 +1702,7 @@ test('交接页：草稿、接手方与二次确认；确认以用户身份发�
   // 主会话上一轮失败（如上下文超限）：同一个按钮改成插件整理
   const failed = { ...handoff, draft: null, coordinatorFailure: { text: '上下文超限' } }
   const React4 = fakeReact(states({ ...sampleBoard(), handoff: failed }, { tab: 'handoff' }))
-  const mod4 = (await load('client.sidebar40.js', React4)).mod
+  const mod4 = (await loadSidebar(React4)).mod
   const tree4 = React4.createElement(mod4.RelaySidebar, { kit, sessionId: 'session-self' })
   const text4 = textOf(tree4)
   assert.ok(text4.includes('hoAuto') && text4.includes('hoFailed'), '失败时给插件整理入口和失败原因')
@@ -1700,7 +1715,7 @@ test('交接页：新主会话可指定模型；说明上限与面板一致为 2
   const handoff = { coordinator: 'session-main1234', coordinatorFailure: null, draft: { notes: '说明', by: 'model', updatedAt: Date.now() }, snapshot: 'S', history: [] }
   // 交接页 useState：notes、dirty、target、alias、queue、ask、snapOpen、histOpen、模型目录、模型
   const React = fakeReact(states({ ...sampleBoard(), handoff }, { tab: 'handoff', extra: ['说明', false, 'new', '', false, true, true, false, undefined, 'default'] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const box = findNode(tree, (node) => node.type === 'textarea')
   assert.equal(box.props.maxLength, 2000, '交接说明上限与后端 NOTES_LIMIT 一致')
@@ -1712,7 +1727,7 @@ test('设置页：版本线草稿保存带 workspaceId，字数上限 1500', asy
   const posted = []
   const act = async (body) => { posted.push(body); return {} }
   const React = fakeReact(['新版本线'])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const board = { ...sampleBoard(), workspace: { id: 'ws1', title: 'w', path: '/p' }, line: { text: '旧版本线', setAt: 1, setBy: 'user' } }
   const tree = React.createElement(mod.LineBox, { kit: kitFor(), board, act, busy: false })
   const text = textOf(tree)
@@ -1734,7 +1749,7 @@ test('设置页：模型角色保存为具体模型；常设授权、置顶、�
   }
   // RoleModelsBox：nonce、模型目录；两行各自的选择值
   const React = fakeReact([0, modelsData, { provider: 'g', model: 'm' }, 'default'])
-  const mod = (await load('client.sidebar40.js', React)).mod
+  const mod = (await loadSidebar(React)).mod
   const tree = React.createElement(mod.RoleModelsBox, { kit: kitFor(), board: sampleBoard(), act, busy: false, sessionId: 'session-self' })
   const text = textOf(tree)
   assert.ok(text.includes('modelRolesTitle') && text.includes('modelRoleMain') && text.includes('modelRoleWorker'), '两组角色模型都在')
@@ -1750,14 +1765,14 @@ test('设置页：模型角色保存为具体模型；常设授权、置顶、�
     restart: { phase: 'idle', text: '空闲后会重启' }
   }
   const React2 = fakeReact(states(settingsBoard, { settingsOpen: true }))
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const text2 = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   for (const part of ['delegTitle', 'pinTitle', 'devTitle', 'restartTitle', 'lineTitle', 'modelRolesTitle']) assert.ok(text2.includes(part), '设置页缺少 ' + part)
 })
 
 test('模型强度：具体模型出现分段按钮，改强度回传 reasoningEffort；未选模型提示先选', async () => {
   const React = fakeReact()
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const data = {
     catalog: {
       default: { provider: 'g', model: 'm' },
@@ -1793,7 +1808,7 @@ test('找会话：按关键词问服务端，结果可直接打开，未加入�
   }
   // SessionSearch useState：展开、关键词、结果、错误、搜索中
   const React = fakeReact([true, 'abc', found, undefined, false])
-  const mod = (await load('client.sidebar40.js', React)).mod
+  const mod = (await loadSidebar(React)).mod
   const opened = []
   const tree = React.createElement(mod.SessionSearch, { kit, board: { workspace: { id: 'ws1' } }, sessionId: 'session-self', openSession: (id) => opened.push(id) })
   const text = textOf(tree)
@@ -1819,7 +1834,7 @@ test('搜内容：切到全文模式后按 view=search 查询，结果按会话�
   }
   // SessionSearch useState：展开、关键词、找会话结果、错误、搜索中、模式、全文结果
   const React = fakeReact([true, '关键词', undefined, undefined, false, 'content', search])
-  const mod = (await load('client.sidebar40.js', React)).mod
+  const mod = (await loadSidebar(React)).mod
   const opened = []
   const tree = React.createElement(mod.SessionSearch, { kit, board: { workspace: { id: 'ws1' } }, sessionId: 'session-self', openSession: (id) => opened.push(id) })
   const text = textOf(tree)
@@ -1841,7 +1856,7 @@ test('模板：列表可删除（二次确认），新建可保存到同一存�
   const data = { templates: [{ name: 'claim', text: '认领任务…', updatedAt: 1 }], limits: { text: 16000 } }
   // TemplateBox useState：数据、错误、编辑中、删除确认
   let React = fakeReact([data, undefined, undefined, 'claim'])
-  let mod = (await load('client.sidebar40.js', React)).mod
+  let mod = (await loadSidebar(React)).mod
   let tree = React.createElement(mod.TemplateBox, { kit: kitFor(), act, busy: false })
   let text = textOf(tree)
   for (const part of ['tplTitle', 'tplHint', 'claim', 'copyUse', 'edit', 'confirmRemove']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -1849,7 +1864,7 @@ test('模板：列表可删除（二次确认），新建可保存到同一存�
   assert.deepEqual(posted.at(-1), { action: 'remove', name: 'claim' })
   // 新建：编辑器的名称/正文状态接在 TemplateBox 的 4 个状态之后
   React = fakeReact([data, undefined, 'new', undefined, 'newtpl', '正文'])
-  mod = (await load('client.sidebar40.js', React)).mod
+  mod = (await loadSidebar(React)).mod
   tree = React.createElement(mod.TemplateBox, { kit: kitFor(), act, busy: false })
   const area = findNode(tree, (node) => node.type === 'textarea')
   assert.equal(area.props.maxLength, 16000)
@@ -1863,7 +1878,7 @@ test('邮箱：显示未读与全文入口；标已读 / 归档以用户身份�
   const data = { mailbox: { unread: 1 }, items: [{ id: 'm1', subject: '发版公告', body: '正文', kind: 'notice', at: 1, readBy: {} }] }
   // MailBox useState：数据、错误、busy
   const React = fakeReact([data, undefined, false])
-  const mod = (await load('client.sidebar40.js', React)).mod
+  const mod = (await loadSidebar(React)).mod
   const tree = React.createElement(mod.MailBox, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
   assert.ok(text.includes('pageMail') && text.includes('发版公告') && text.includes('正文') && text.includes('mailUnread'), '邮件正文和未读状态')
@@ -1885,7 +1900,7 @@ test('任务看板：GitHub 同步一行状态，可展开链接票列表', asyn
   }
   const { kit } = taskKit()
   const collapsed = fakeReact([])
-  const mod = (await load('client.sidebar40.js', collapsed)).mod
+  const mod = (await loadSidebar(collapsed)).mod
   const collapsedTree = collapsed.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), sync, act: async () => ({}), busy: false })
   const collapsedText = textOf(collapsedTree)
   assert.match(collapsedText, /syncTitle/)
@@ -1900,13 +1915,13 @@ test('任务看板：GitHub 同步一行状态，可展开链接票列表', asyn
 
   const idleSync = { available: true, repo: 'o/r', paused: false, queue: 0, switches: { issues: true }, links: [] }
   const idle = fakeReact([])
-  const modIdle = (await load('client.sidebar40.js', idle)).mod
+  const modIdle = (await loadSidebar(idle)).mod
   const idleText = textOf(idle.createElement(modIdle.TaskBoard, { kit, tasks: tasksFixture(), sync: idleSync, act: async () => ({}), busy: false }))
   assert.match(idleText, /syncIdle/)
   assert.ok(!idleText.includes('syncQueue'), '队列为 0 时不显示队列数字')
 
   const expanded = fakeReact([undefined, {}, undefined, '', undefined, true])
-  const mod2 = (await load('client.sidebar40.js', expanded)).mod
+  const mod2 = (await loadSidebar(expanded)).mod
   const expandedText = textOf(expanded.createElement(mod2.TaskBoard, { kit, tasks: tasksFixture(), sync, act: async () => ({}), busy: false }))
   assert.match(expandedText, /syncStateSynced/)
   assert.match(expandedText, /T1/)
@@ -1928,7 +1943,7 @@ test('任务看板：同步队列动作按钮（刷新/回填/暂停/重试/解�
   const { kit } = taskKit()
   // TaskBoard 4 个 useState 之后：SyncStatus 的展开态、解除确认态
   const React = fakeReact([undefined, {}, undefined, '', undefined, true, 'T2'])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.TaskBoard, { kit, tasks: tasksFixture(), sync, act, busy: false })
   await findButton(tree, (label) => label === 'syncFlush').props.onClick()
   await findButton(tree, (label) => label === 'syncBackfill').props.onClick()
@@ -1966,7 +1981,7 @@ test('侧栏：先拉 light 首屏，再后台补完整快照；缺失的重字�
   const cleanups = []
   const boardUpdates = () => sets.map((value) => (typeof value === 'function' ? value({ board: undefined }) : value)).filter((value) => value && typeof value === 'object' && 'board' in value && value.board)
   try {
-    const { mod } = await load('client.sidebar40.js', React)
+    const { mod } = await loadSidebar(React)
     React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-lazy', useTabInfo: () => ({ tab: { visible: true } }) })
     cleanups.push(...effects.map((fn) => fn()))
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -1988,7 +2003,7 @@ const workItemKit = () => ({ ...kitFor(), t: (key) => key });
 
 test('工作项胶囊：kind / 状态 / owner / 分支 / 提交 / 链接统一展示，超过 6 个收成 +N', async () => {
   const React = fakeReact()
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const item = { kind: 'pr', id: '#7', title: '修 bug', status: { text: 'prReviewChanges', tone: 'error' }, owner: '@alice', branch: 'fix/x → main', commit: 'abcdef1234567', link: { text: '#7', url: 'https://github.com/o/r/pull/7' } }
   const tree = React.createElement(mod.WorkItemChips, { kit: workItemKit(), item })
   const text = textOf(tree)
@@ -2006,7 +2021,7 @@ test('工作项胶囊：kind / 状态 / owner / 分支 / 提交 / 链接统一�
 
 test('工作项详情外壳：字段 / 正文 / 动作槽、关闭按钮、ESC、遮罩关闭', async () => {
   const React = fakeReact()
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const closed = []
   const item = { kind: 'map-ticket', id: 'T1', title: '父票', status: { text: 'review', tone: 'warn' }, owner: '@a', branch: 'b', commit: 'abcdef1234', link: { text: '#7', url: 'https://github.com/o/r/issues/7' } }
   const tree = React.createElement(mod.WorkItemDetail, {
@@ -2043,7 +2058,7 @@ test('工作项懒加载：打开才拉、预取与缓存复用、invalidate 重
   let captured
   let second
   const React = fakeReact()
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   function Probe({ number, ttlMs }) { captured = mod.useLazyDetail({ kit, params: { view: 'pr-detail', session: 's', number }, ttlMs }); return null }
   React.createElement(Probe, { number: 7 })
   assert.equal(calls.length, 0, '渲染但没打开时不请求')
@@ -2104,7 +2119,7 @@ test('地图页：focus 打开共用详情，字段含依赖 / 子票 / 阶段�
   }
   const opened = []
   const React = fakeReact()
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.MapTab, {
     kit: workItemKit(), board, act: async () => ({}), busy: false,
     focus: { kind: 'map-ticket', id: 'T1', seq: 1 },
@@ -2125,7 +2140,7 @@ test('问题页：focus 打开共用详情，标签 / 指派 / 关联任务可�
   const board = { ...sampleBoard(), github: { login: 'carol', state: 'ready' }, sync: { links: [{ id: 'T3', issue: 9 }] } }
   const opened = []
   const React = fakeReact([issueData(), undefined, false, '', 'all', undefined])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.IssueTab, {
     kit: workItemKit(), board, sessionId: 's1',
     focus: { kind: 'issue', id: 9, seq: 1 },
@@ -2147,7 +2162,7 @@ test('PR 页：focus 打开共用外壳、正文走 PrDetail、审批动作保�
   const kit = { ...workItemKit(), request: async (method, body, query) => (query?.view === 'pr-detail' ? prDetail : {}) }
   // PrTab 前 9 个 useState：data / error / busy / filter / openNo / comment / pending / running / prState；detailNo 由 focus 懒初始化
   const React = fakeReact([prData(), undefined, false, 'all', undefined, '', undefined, undefined, 'open'])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   // 先用 hover 预取把详情放进缓存，正文挂载时直接命中（不发第二次请求）
   mod.prefetchWorkItemDetail(kit, { view: 'pr-detail', session: 'session-self', number: 7 })
   await new Promise((resolve) => setTimeout(resolve, 5))
@@ -2173,14 +2188,14 @@ test('跨页跳转：RelaySidebar 按 kind 强制目标页签并把 focus 交给
     sync: { links: [] }
   }
   const React = fakeReact(states(mapBoard, { workItem: { kind: 'map-ticket', id: 'T1', seq: 1 } }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: workItemKit(), sessionId: 'session-self' })
   const text = textOf(tree)
   assert.ok(text.includes('sideTabMap') && text.includes('workItemKindMap') && text.includes('父票'), '切到地图页并打开详情')
   assert.ok(findNode(tree, (node) => node.props?.role === 'dialog') !== undefined, '详情抽屉已开')
 
   const React2 = fakeReact(states(sampleBoard(), { workItem: { kind: 'issue', id: 9, seq: 1 }, extra: [issueData(), undefined, false] }))
-  const mod2 = (await load('client.sidebar40.js', React2)).mod
+  const mod2 = (await loadSidebar(React2)).mod
   const tree2 = React2.createElement(mod2.RelaySidebar, { kit: workItemKit(), sessionId: 'session-self' })
   const text2 = textOf(tree2)
   assert.ok(text2.includes('workItemKindIssue') && text2.includes('崩溃') && text2.includes('#9'), '问题页焦点打开详情')
@@ -2197,7 +2212,7 @@ test('PR 页：写动作成功后清工作项详情缓存，重新打开详情�
   const kit = { ...workItemKit(), request: async (method, body, query) => { posted.push([method, query, body]); return method === 'GET' && query?.view === 'pr-detail' ? prDetail : prData() } }
   // PrTab 11 个 useState：data / error / busy / filter / openNo / comment / pending / running / prState / detailNo / linkTask
   const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, 'LGTM', undefined, undefined, 'open', undefined, 'T12'] }))
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   // 动作前 hover 预取：把旧详情写进 workItemCache
   mod.prefetchWorkItemDetail(kit, { view: 'pr-detail', session: 'session-self', number: 7 })
   await new Promise((resolve) => setTimeout(resolve, 5))
@@ -2217,7 +2232,7 @@ test('PR 页：写动作成功后清工作项详情缓存，重新打开详情�
 
 test('问题页：点标题 / 摘要（非交互区）也能打开详情，链接与按钮不抢占', async () => {
   const React = fakeReact([issueData(), undefined, false, '', 'all', undefined])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   // 捕获 IssueTab 第 7 个 useState（detail）的 setter：useRemoteList 3 + query/filter/label 3
   const captured = []
   const baseUseState = React.useState
@@ -2248,7 +2263,7 @@ test('问题页：点标题 / 摘要（非交互区）也能打开详情，链�
 
 test('PR 页：行空白处点击打开详情，链接 / 按钮不抢占', async () => {
   const React = fakeReact([prData(), undefined, false, 'all', undefined, '', undefined, undefined, 'open'])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   // 捕获 PrTab 第 10 个 useState（detailNo）的 setter：useRemoteList 3 + filter/openNo/comment/pending/running/prState
   const captured = []
   const baseUseState = React.useState
@@ -2281,7 +2296,7 @@ test('PR 页：行空白处点击打开详情，链接 / 按钮不抢占', async
 test('侧栏：看板未到时先出页签框架与骨架，不整块空白', async () => {
   // useBoard 首个 state 还是 undefined；后面按父组件 useState 顺序补值（tab 设为 prs）
   const React = fakeReact([{ board: undefined, error: undefined, at: undefined, hydrating: false }, 0, 'all', undefined, false, undefined, false, false, false, undefined, false, 'prs', false, undefined, undefined, {}, false])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
   const text = textOf(tree)
   for (const part of ['sideTitle', 'sideTabSessions', 'sideTabPr', 'sideTabMore', 'loading']) assert.ok(text.includes(part), '缺少 ' + part)
@@ -2303,7 +2318,7 @@ test('入口：空闲时预取侧栏 chunk，首次打开不用再等下载', as
     assert.equal(pending.length, 1, '登记侧栏时挂一次空闲预取')
     pending[0]()
     await new Promise((resolve) => setTimeout(resolve, 0))
-    assert.deepEqual(asked, ['./client.sidebar40.js'], '空闲时拉一次 chunk')
+    assert.deepEqual(asked, ['./client.sidebar41.js'], '空闲时拉一次 chunk')
     const Tab = mod.makeSidebarTab({ t })
     assert.equal(textOf(React.createElement(Tab, { sessionId: 's' })), 'body', '预取完成后直接渲染正文，不再闪 Suspense')
   } finally {
@@ -2313,7 +2328,7 @@ test('入口：空闲时预取侧栏 chunk，首次打开不用再等下载', as
 
 test('PR 页：旧列表刷新时显示「正在重新加载」，不整块空白', async () => {
   const React = fakeReact([prData(), undefined, true, 'all', undefined, '', undefined, undefined, 'open', undefined, undefined])
-  const { mod } = await load('client.sidebar40.js', React)
+  const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.PrTab, { kit: workItemKit(), board: sampleBoard(), act: async () => ({}), busy: false, sessionId: 'session-self' })
   const text = textOf(tree)
   assert.ok(text.includes('reloading'), '刷新期间有文字状态')
@@ -2329,7 +2344,7 @@ test('侧栏：页面刷新后先用上次看板快照渲染，并标记后台�
       value: { board: sampleBoard(), at: Date.now() - 60_000, version: 3, fullAt: Date.now() - 60_000 }
     }))
     const React = fakeReact()
-    const { mod } = await load('client.sidebar40.js', React)
+    const { mod } = await loadSidebar(React)
     const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
     const text = textOf(tree)
     assert.ok(text.includes('mainIs') && text.includes('@main'), '看板内容直接可见')
@@ -2350,12 +2365,149 @@ test('PR 页：页面刷新后先用上次列表快照渲染，不等骨架', as
       value: { at: Date.now() - 60_000, data: prData() }
     }))
     const React = fakeReact()
-    const { mod } = await load('client.sidebar40.js', React)
+    const { mod } = await loadSidebar(React)
     const tree = React.createElement(mod.PrTab, { kit: workItemKit(), board: sampleBoard(), act: async () => ({}), busy: false, sessionId: 'session-self' })
     const text = textOf(tree)
     assert.ok(text.includes('修 bug'), '列表快照直接可见')
     assert.equal(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_skel')), undefined, '不先画骨架')
   } finally {
     delete globalThis.sessionStorage
+  }
+})
+
+// ---------------------------------------------------------------------------
+// T13：侧栏按页签拆 chunk（外壳 + shared + 每页一个 chunk）
+// ---------------------------------------------------------------------------
+
+const flush = async (times = 8) => { for (let index = 0; index < times; index += 1) await Promise.resolve() }
+const stubChunk = (overrides = {}) => ({ KIT_VERSION: KIT, make: () => ({ SessionsTab: () => null, SessionDetail: () => null, TaskBoard: () => null }), ...overrides })
+
+test('按需拆 chunk：只拉共享件 + 当前页签，未访问页签不拉；外壳不再内联页签正文', async () => {
+  const asked = []
+  const React = fakeReact()
+  React.useEffect = (fn) => { fn() }
+  const realTimeout = globalThis.setTimeout
+  const realInterval = globalThis.setInterval
+  globalThis.setTimeout = () => 0
+  globalThis.setInterval = () => 0
+  try {
+    const { mod } = await load('client.sidebar' + KIT + '.js', React, (file) => { asked.push(file); return Promise.resolve(stubChunk()) })
+    React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+    await flush()
+    assert.deepEqual(asked, ['./client.sidebar.shared' + KIT + '.js', './client.sidebar.sessions' + KIT + '.js'], '外壳 + 共享件 + 当前页签，按顺序')
+    assert.ok(!asked.some((file) => file.includes('.tasks') || file.includes('.prs') || file.includes('.settings')), '未访问页签不下载')
+  } finally {
+    globalThis.setTimeout = realTimeout
+    globalThis.setInterval = realInterval
+  }
+  const shell = await readFile(new URL('../lib/client.sidebar' + KIT + '.js', import.meta.url), 'utf8')
+  for (const name of ['TaskBoard', 'MapTab', 'PrTab', 'IssueTab', 'HandoffTab', 'BranchTab', 'MailTab', 'SettingsTab', 'WorkItemDetail']) {
+    assert.ok(!new RegExp('function ' + name + '\\b').test(shell), '外壳不内联 ' + name)
+  }
+})
+
+test('按需拆 chunk：每个 chunk 自带 KIT_VERSION 且文件名带 KIT', async () => {
+  for (const name of CHUNK_NAMES) {
+    const file = 'client.sidebar.' + name + KIT + '.js'
+    const { mod, chunk } = await load(file, fakeReact())
+    assert.equal(chunk, file, name + ' chunk 名')
+    assert.equal(mod.KIT_VERSION, KIT, name + ' KIT_VERSION')
+    assert.equal(typeof mod.make, 'function', name + ' 导出 make(deps)')
+    assert.ok(file.includes(String(KIT)), '文件名按 KIT 命名')
+  }
+})
+
+test('按需拆 chunk：右栏与嵌入面板共用同一加载器缓存（同 chunk 只下载一次）', async () => {
+  const asked = []
+  const React = fakeReact()
+  React.useEffect = (fn) => { fn() }
+  const realTimeout = globalThis.setTimeout
+  const realInterval = globalThis.setInterval
+  globalThis.setTimeout = () => 0
+  globalThis.setInterval = () => 0
+  try {
+    const { mod } = await load('client.sidebar' + KIT + '.js', React, (file) => { asked.push(file); return Promise.resolve(stubChunk()) })
+    React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+    React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', embedded: true, persistPrefix: 'embed:' })
+    await flush()
+    assert.deepEqual(asked, ['./client.sidebar.shared' + KIT + '.js', './client.sidebar.sessions' + KIT + '.js'], '两个入口共用同一份缓存 / in-flight')
+  } finally {
+    globalThis.setTimeout = realTimeout
+    globalThis.setInterval = realInterval
+  }
+})
+
+test('按需拆 chunk：hover 页签 200ms 后才预取，未到时不动', async () => {
+  const asked = []
+  const React = fakeReact()
+  const { mod } = await load('client.sidebar' + KIT + '.js', React, (file) => { asked.push(file); return Promise.resolve(stubChunk()) })
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const tasksTab = findNode(tree, (node) => node.type === 'button' && node.props?.role === 'tab' && textOf(node.children).includes('sideTabTasks'))
+  assert.ok(tasksTab !== undefined, '任务页签按钮在')
+  tasksTab.props.onPointerEnter()
+  assert.deepEqual(asked, [], '200ms 内不预取')
+  await new Promise((resolve) => setTimeout(resolve, 260))
+  assert.deepEqual(asked, ['./client.sidebar.shared' + KIT + '.js', './client.sidebar.tasks' + KIT + '.js'], '悬停后预取共享件 + 目标任务页')
+  // 移出会取消还没到时的预取
+  const asked2 = []
+  const React2 = fakeReact()
+  const mod2 = (await load('client.sidebar' + KIT + '.js', React2, (file) => { asked2.push(file); return Promise.resolve(stubChunk()) })).mod
+  const tree2 = React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const mapTab = findNode(tree2, (node) => node.type === 'button' && node.props?.role === 'tab' && textOf(node.children).includes('sideTabMap'))
+  mapTab.props.onPointerEnter()
+  mapTab.props.onPointerLeave()
+  await new Promise((resolve) => setTimeout(resolve, 260))
+  assert.deepEqual(asked2, [], '移出后取消预取')
+})
+
+test('按需拆 chunk：saveData 下不预取', async () => {
+  const asked = []
+  const React = fakeReact()
+  const { mod } = await load('client.sidebar' + KIT + '.js', React, (file) => { asked.push(file); return Promise.resolve(stubChunk()) })
+  const realNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', { value: { connection: { saveData: true } }, configurable: true })
+  try {
+    const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+    const tasksTab = findNode(tree, (node) => node.type === 'button' && node.props?.role === 'tab' && textOf(node.children).includes('sideTabTasks'))
+    tasksTab.props.onPointerEnter()
+    await new Promise((resolve) => setTimeout(resolve, 260))
+    assert.deepEqual(asked, [], '省流量模式抑制预取')
+  } finally {
+    if (realNavigator === undefined) delete globalThis.navigator
+    else Object.defineProperty(globalThis, 'navigator', realNavigator)
+  }
+})
+
+test('按需拆 chunk：旧版 / 加载失败回退成最小一行并给出刷新', async () => {
+  const realTimeout = globalThis.setTimeout
+  const realInterval = globalThis.setInterval
+  globalThis.setTimeout = () => 0
+  globalThis.setInterval = () => 0
+  try {
+    // 先让目标页 chunk 失败（渲染时直接命中失败缓存），再在同一个 React 实例上渲染一次
+    const staleReact = fakeReact(states(sampleBoard(), { tab: 'tasks' }))
+    const { mod: stale } = await load('client.sidebar' + KIT + '.js', staleReact, (file) => Promise.resolve(file.includes('.shared')
+      ? stubChunk()
+      : { KIT_VERSION: KIT - 1, make: () => ({}) }))
+    await stale.__ensureChunk('tasks')
+    await flush()
+    const staleTree = staleReact.createElement(stale.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+    const staleText = textOf(staleTree)
+    assert.ok(staleText.includes('sideStale') && staleText.includes('v' + (KIT - 1) + ' → v' + KIT), '不配套 chunk 显示实际 / 期望版本')
+    assert.ok(staleText.includes('tasksRefresh'), '给刷新入口')
+
+    const failedReact = fakeReact(states(sampleBoard(), { tab: 'tasks' }))
+    const { mod: failed } = await load('client.sidebar' + KIT + '.js', failedReact, (file) => Promise.resolve(file.includes('.shared')
+      ? stubChunk()
+      : Promise.reject(new Error('network down'))))
+    await failed.__ensureChunk('tasks')
+    await flush()
+    const failedTree = failedReact.createElement(failed.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+    const failedText = textOf(failedTree)
+    assert.ok(failedText.includes('sideLoadFailed'), '加载失败回退最小一行')
+    assert.ok(failed.__chunkFailures.get('tasks') !== undefined, '失败状态进缓存，可重试')
+  } finally {
+    globalThis.setTimeout = realTimeout
+    globalThis.setInterval = realInterval
   }
 })

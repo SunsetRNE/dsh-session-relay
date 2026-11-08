@@ -16,7 +16,7 @@
 - [ ] `engines.dsh` / `peerDependencies` 范围与 README「运行环境」一致（2.4.1：`>=0.2.2-rc.1` 起，未变）。
 - [ ] CHANGELOG 有对应版本段，且没有遗留「未发布」标题。
 - [ ] README 的功能、安装、发版段与代码一致（本次已按 2.4.1 更新）。
-- [ ] 本次改过 `lib/client.panel.js` / 侧栏正文时，`lib/client.js` 有对应的 touch 行；`PANEL_KIT` 与 `client.panel.js` 的 `KIT_VERSION` 相等；`SIDEBAR_KIT`、`SIDEBAR_CHUNK` 与 `lib/client.sidebar40.js` 的 `KIT_VERSION` 一致（2.4.1：侧栏 40 / 面板 8，`client.panel.js` 未改）。
+- [ ] 本次改过 `lib/client.panel.js` / 侧栏正文时，`lib/client.js` 有对应的 touch 行；`PANEL_KIT` 与 `client.panel.js` 的 `KIT_VERSION` 相等；`SIDEBAR_KIT`、`SIDEBAR_CHUNK` 与侧栏外壳的 `KIT_VERSION` 一致，且**全部页签 chunk 的 `KIT_VERSION` 也都等于 `SIDEBAR_KIT`**（2.4.1 时：侧栏 40 / 面板 8，单个文件；T13 起：侧栏 41，外壳 + shared + 10 个页签共 12 个文件）。
 - [ ] 若改过 `lib/client.js`，发版前整页刷新验过面板（本机宿主客户端热更新会直接生效）；改过 `lib/index.js` 则用「重启 DSH」验证。
 
 ## 1. 测试（必须串行）
@@ -27,7 +27,7 @@ node --test --test-concurrency=1 test/*.test.js
 
 - 结果必须是 440 pass / 0 fail 才继续（2.4.1 当前 440，约 33–62s）。
 - 偶发 `ENOTEMPTY` 等环境错误先重跑一次并记录；不重试到「抽到绿色」为止，要确认失败原因。
-- 真机确认项（用户）：右侧边栏仍 9 页签；页面刷新后先出页签框架 / 上次快照，再后台更新；`client.sidebar40.js` 的 `KIT_VERSION` 为 40，不再出现 `v39 → v40` 的 stale 提示；PR 刷新期间显示「正在重新加载…」且保留旧列表；`/relay drop` 快路径仍正常（需 reload）。
+- 真机确认项（用户）：右侧边栏仍 9 页签；页面刷新后先出页签框架 / 上次快照，再后台更新；侧栏外壳与各 chunk 的 `KIT_VERSION` 与入口 `SIDEBAR_KIT` 一致，不再出现 stale 提示；T13 起首次打开只拉外壳 + shared + 当前页签，hover 页签后再拉对应 chunk，11 页签首开耗时与拆分前对比；PR 刷新期间显示「正在重新加载…」且保留旧列表；`/relay drop` 快路径仍正常（需 reload）。
 - 真机步骤：插件管理器装本版本 → `/relay reload`（本次含服务端实现重载）→ 整页刷新 → 打开侧栏、PR 页各过一遍。
 
 ## 2. 版本号与 CHANGELOG
@@ -95,5 +95,6 @@ gh release create v2.4.1 dist/dsh-session-relay-2.4.1.tgz \
 - `origin/main`：`f895e59`（v2.4.0 tag）。
 - 本地领先：3 个检查点 + 本轮发版准备提交；发版准备提交推送后仍未打 tag、未发 Release。
 - 串行测试：440 pass / 0 fail（约 33–62s）。
-- 侧栏：`SIDEBAR_KIT 40` / chunk `lib/client.sidebar40.js` / `PANEL_KIT 8`；P1b 仍只在 `docs/workitem-ui-p1.md` 设计稿里。
+- 侧栏：`SIDEBAR_KIT 40` / chunk `lib/client.sidebar40.js` / `PANEL_KIT 8`（2.4.1 发布值）。
+- T13（未发布）：P1b 已落地，`SIDEBAR_KIT 41`，外壳 `lib/client.sidebar41.js` + `client.sidebar.shared41.js` + 10 个页签 chunk；串行测试 446 全过；真机首开耗时对比待把候选文件 stage 到运行中插件并整页刷新（需用户同意）。
 - 市场：条目钉在 v1.11.6；PR #13149 未合并，2.4.1 是否更新市场待用户决定。

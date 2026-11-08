@@ -1,5 +1,20 @@
 # Changelog
 
+## 未发布
+
+侧栏按页签拆 chunk（T13）：首次打开只拉「外壳 + 共享件 + 当前页签」，其余页签按需 `require.async`，悬停 200ms 预取；右栏与嵌入面板共用同一份加载器缓存；chunk 不配套 / 加载失败回退最小一行。串行测试 446 全过。
+
+### 侧栏按页签拆 chunk（T13）
+
+- 外壳 `lib/client.sidebar41.js` 只保留 TABS / TabBar / RelaySidebar / useBoard 与按需加载器；样式、图标、快照与分类工具留在外壳。
+- 共享件 `lib/client.sidebar.shared41.js`：Card / CopyId / 富文本 / BackMore / SyncStatus / WorkItemChips / WorkItemDetail / useLazyDetail / useRemoteList / 模型选择；会话 / 任务 / 交接 / 地图 / PR / 分支 / 问题 / 邮箱 / 更多 / 设置各一个 `lib/client.sidebar.<name>41.js`。
+- 首次打开只渲染外壳与当前页签骨架，共享件 + 当前页签按需加载；未访问页签不下载。每个 chunk 自带 `KIT_VERSION 41`，加载后校验；`SIDEBAR_KIT` 与全部 chunk 一起 bump，文件名带 KIT，换版本即换 URL。
+- 预取：hover / focus 页签 200ms 后预取；移出 / 点击取消；`navigator.connection.saveData === true` 时不预取。
+- 复用：右栏与嵌入面板共用模块级 `chunkModules` / `chunkPromises` / `chunkParts` 缓存，同一 chunk 只下载、执行、`make(deps)` 一次。
+- 回退：加载中给同高骨架；失败给最小一行 + 刷新按钮；KIT 不配套显示实际 / 期望版本。
+- `lib/client.js`：`SIDEBAR_CHUNK = 'client.sidebar41.js'`、`SIDEBAR_KIT 41`；`PANEL_KIT 8` / `client.panel.js` 未改。
+- 测试：`test/sidebar.test.js` 新增按需加载顺序、每个 chunk 带 KIT、右栏 / 嵌入同 chunk 复用、hover 预取与取消、saveData 抑制、旧版 / 加载失败回退 6 条；串行 446 全过（原 440 + 6）。
+
 ## 2.4.1 - 2026-11-09
 
 2.4.1 收口侧栏刷新体验：进入侧栏先出页签框架与骨架，chunk 空闲预取；页面刷新 / 重开时先用上次快照渲染，再后台刷新；侧栏 chunk 改为按 KIT 命名（`client.sidebar40.js`），彻底绕开 WebView 对固定 chunk 名的旧缓存（修复卡在 stale 屏、反复刷新 / 重启不生效的问题）。串行测试 440 全过。

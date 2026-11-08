@@ -17,7 +17,7 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - 协作邮箱（1.5.0）：核验成功这类公共通知只写进工作区邮箱（插件数据目录 `mailbox.json`），同一会话 5 分钟窗口内的多条通知合并成一条短通知（带最新 id）；需要细节时用 `peer_mail` read，主会话可用 `send`/`force` 推送。用户可用 `/relay mail` 看未读、读全文、归档和查看最近 7 天「短通知 / 全文」统计。失败/超时仍直接送达并响手机。
 - 协作面板（Web 客户端）：看板、交接预览、会话唤醒、等你决定的提问、自动置顶、开发者模式开关。
 - 右侧边栏「协作」标签（懒加载）：首屏先拉轻量快照，任务看板 / 声明 / 仓库 / 同步等重字段后台补水；之后轮询只拉轻量并合并保留重字段，完整快照在首次 / 5 分钟 / 手动刷新 / 写操作后补一次。正文是 9 个页签「会话 / 任务 / 交接 / 地图 / PR / 分支 / 问题 / 邮箱 / 更多」，窄栏把地图 / PR / 分支 / 问题折进「更多」（视觉参考 [Deck](https://github.com/FeatherHunter/dsh-mattpocock-skills-deck)（MIT）的 chip 页签、状态胶囊与列表行），只挂载看过的页签；会话页是本工作区的主会话、版本线、筛选与看板卡片，交接页是起草 / 二次确认 / 历史；地图页放地图票卡（顶层任务与子任务，带 #issue、OPEN/CLOSED、阶段与依赖；可直接拆分子任务）、票子列表、关联 PR、仓库状态与同步（同步在更多 / 设置，仓库开关仍只在设置页）；任务页切过去 / 打开详情只补轻量任务板，不触发远端校验。顶栏只留工作区、GitHub 胶囊、刷新与 ⚙ 设置；设置页集中版本线、新建会话模型、常设授权、自动置顶、开发者模式、空闲重启、指令模板、GitHub 账号、仓库开关、同步与核验。2.4.0 起左栏 / 对话「协作」嵌入面板扩到 11 页签（概览 / 全文搜索独立），嵌入 max-width 1080px 居中；地图 / 问题 / PR 共用详情抽屉与懒加载。2.4.1 起侧栏先出框架、chunk 空闲预取、上次快照先渲染后台刷新，chunk 文件名带 KIT 版本。
-- 侧栏加载体验（2.4.1）：chunk 空闲预取、看板未到先出页签与骨架、上次快照（`sessionStorage`，6h TTL）先渲染再后台刷新；侧栏正文改为按 KIT 命名的 `lib/client.sidebar40.js`，绕开 WebView 对固定 chunk 名的旧缓存。
+- 侧栏加载体验（2.4.1）：chunk 空闲预取、看板未到先出页签与骨架、上次快照（`sessionStorage`，6h TTL）先渲染再后台刷新；侧栏正文改为按 KIT 命名的 `lib/client.sidebar40.js`，绕开 WebView 对固定 chunk 名的旧缓存；未发布起再按页签拆成 12 个带 KIT 的 chunk（外壳 + 共享件 + 10 个页签）。
 - 工作项共用详情（2.4.0 P1a）：地图票 / 子票、问题、PR 共用同一套状态胶囊与底部详情抽屉；打开才拉、hover 预取、同 key 并发去重、60s 缓存，PR 审批 / 评论 / 关闭重开 / AI 审核后清缓存重拉；`openWorkItem({ kind, id })` 在同一边栏切页签并打开目标，问题 / PR 行点标题或空白即可开详情。
 - 指令模板与全文搜索（2.0 T3）：`/relay tpl save|list|show|rm`（设置页同一份存储，可编辑 / 重命名 / 删除、复制用法，模板名小写校验、正文带字数）；`/relay search [--in|--re|--case|--kind|--tool|--turn|--limit] <内容>` 搜本工作区最近 25 个会话的原始日志，按会话分组显示命中并可打开。都只由用户操作。
 - UI 基准线（`docs/ui-copy.md`）：全插件文案压缩、语义合并、边界提示独立；成功 / 进行中反馈用动画（脉冲 / 转圈 / ✓），错误仍用文字；数据变化只给变化的行 1.5s 高亮，`prefers-reduced-motion` 下关闭。
@@ -70,11 +70,12 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - 存量补报（2.2.0）：登记时可选 `backlogHours`（0–720，默认关），第一次成功轮询把最近 N 小时的存量报一次，之后只报新动态。
 - 2.1.0 起只支持 GitHub；Gitee、自动隔离 worktree 仍在 2.2.0 后续。
 
-## 右侧边栏（2.2.0 起，2.3.0 继续打磨，2.4.0 共用工作项详情，2.4.1 刷新体验）
+## 右侧边栏（2.2.0 起，2.3.0 继续打磨，2.4.0 共用工作项详情，2.4.1 刷新体验，未发布按页签拆 chunk）
 
 - 9 个页签：会话 / 任务 / 交接 / 地图 / PR / 分支 / 问题 / 邮箱 / 更多；侧栏压到 620px 以下时，地图 / PR / 分支 / 问题 折进「更多」，以列表入口打开，邮箱保持独立。
 - 2.3.0：页签与第一块内容连成一块（去掉分隔线与白缝），列表与卡片整体再压缩两档；折叠改用 `ResizeObserver` 宽度 class（`dshaSv_wide` / `dshaSv_narrow`），旋转后重算，修掉宽屏露快捷入口 / 窄屏露折叠页签的回归；stale 屏提示整页刷新并显示实际 / 期望 KIT。
 - 2.4.1：看板未到先出页签框架与骨架；chunk 空闲预取；上次快照先渲染后台刷新；侧栏 chunk 改为 `client.sidebar40.js`（按 KIT 命名），旧缓存不再命中。
+- 未发布（T13）：侧栏按页签拆 chunk——外壳 `client.sidebar41.js` 只保留 TABS / TabBar / RelaySidebar / useBoard 与加载器，共享件 `client.sidebar.shared41.js`，会话 / 任务 / 交接 / 地图 / PR / 分支 / 问题 / 邮箱 / 更多 / 设置各一个 `client.sidebar.<name>41.js`；首次打开只拉「外壳 + 共享件 + 当前页签」，未访问页签不下载；悬停页签 200ms 预取（`saveData` 抑制），右栏与嵌入面板共用同一加载器缓存；chunk 不配套 / 加载失败回退最小一行并给刷新；`SIDEBAR_KIT 41`。
 - 2.4.0：嵌入面板 11 页签（概览 / 全文搜索独立、滚动提示、概览 attention 计数、max-width 1080 居中）；地图票 / 问题 / PR 共用详情抽屉与懒加载；`/relay drop` 原始 id 快路径（需 `/relay reload`）；侧栏列表与看板加载提速（kit 引用稳定、只订阅主会话 id、挂载不重复拉取、并发去重）。
 - 地图：任务地图票子 + 本地票子，标题栏带计数、与其它页同一套间距；问题：远端 issue 列表（搜索 / 指派给我 / 标签筛选）；PR：远端 PR 列表（打开 / 已关闭、筛选与计数、行内看 `+A −D` 改动量，标题可开 GitHub），详情看文件改动、评审与评论（长文折叠、作者可点），审批 / 评论 / 关闭 / 重开只由用户点击，可把 PR 关联到本地任务、点「AI 审核」拉起只读审核会话审最新改动；分支：全部登记工作区的本地 / 远端分支，删除逐条确认（远端要输入分支名，默认分支和当前分支不可删）；「遗留分支清理」子页可多选后一次确认批量移除工作树分支（只清 .agents/worktrees 下、干净、无 .ACTIVE-SESSION；未合并要额外勾选）。
 - 邮箱：公共通知全文、标已读 / 归档；更多：窄屏快捷入口（地图 / PR / 分支 / 问题 / 设置，带计数）、同步队列、仓库探测；GitHub 账号与登录只在「设置」里。
@@ -92,7 +93,7 @@ npm test
 
 加载方式：`lib/index.js` 是外壳，逻辑在 `lib/impl.js` 及其依赖里。改实现文件后 `/relay reload` 即可生效；`lib/client.js`（面板）改动由宿主热更新，刷新即见；改 `lib/index.js`、`package.json` 的 `dsh` 字段或 `cordis.patch.yml` 需要重启 DSH。
 
-面板缓存注意：只改 `lib/client.panel.js` 必须同步改一行 `lib/client.js` 并把 `PANEL_KIT` / `KIT_VERSION` 一起 +1。改侧栏正文时，文件按当前 KIT 命名（如 `lib/client.sidebar40.js`），同步改 `lib/client.js` 的 `SIDEBAR_CHUNK` / `SIDEBAR_KIT` 与其 `KIT_VERSION`，并在 `client.js` touch 一行；KIT 一升就换文件名（`client.sidebar<新KIT>.js`），浏览器不会命中旧 chunk 的 immutable 缓存。改过 `client.js` 本身后本机实测宿主会热更新，等一两秒或刷新即见（2026-11-07 DSH 进程未重启也生效）；只有宿主没开客户端热更新且刷新无效时才重启 DSH。
+面板缓存注意：只改 `lib/client.panel.js` 必须同步改一行 `lib/client.js` 并把 `PANEL_KIT` / `KIT_VERSION` 一起 +1。改侧栏正文时，外壳与每个 chunk 都按当前 KIT 命名（如 `lib/client.sidebar41.js`、`lib/client.sidebar.tasks41.js`），同步改 `lib/client.js` 的 `SIDEBAR_CHUNK` / `SIDEBAR_KIT`、外壳与全部 chunk 的 `KIT_VERSION`，并在 `client.js` touch 一行；KIT 一升就换文件名（`client.sidebar<新KIT>.js` / `client.sidebar.<name><新KIT>.js`），浏览器不会命中旧 chunk 的 immutable 缓存。只改某一个 chunk 也要整体 bump（外壳会校验每个 chunk 的 KIT_VERSION）。改过 `client.js` 本身后本机实测宿主会热更新，等一两秒或刷新即见（2026-11-07 DSH 进程未重启也生效）；只有宿主没开客户端热更新且刷新无效时才重启 DSH。
 
 ## 打包
 
