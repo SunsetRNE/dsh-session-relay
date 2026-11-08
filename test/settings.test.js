@@ -418,6 +418,22 @@ test('Client：左侧 / 协作面板默认嵌入 9 页签；无主会话给说�
   assert.equal(typeof seen[0].onOpenUtility, 'function', 'utility 回调透传')
   assert.equal(typeof seen[0].t, 'function', '文案函数透传')
   assert.equal(typeof parts.LegacyBoardPage, 'function', '旧 BoardPage 仍导出给 utility 页')
+  // TDZ 回归：BoardPage 打开 utility（概览 / 搜索）时 mainId 必须已初始化，不能抛 ReferenceError
+  const originalUseState = React.useState
+  let boardCalls = 0
+  React.useState = (initial) => {
+    if (/at BoardPage/.test(String(new Error().stack))) {
+      boardCalls += 1
+      if (boardCalls === 1) return ['overview', () => {}]
+    }
+    return originalUseState(initial)
+  }
+  let utilText = ''
+  try {
+    utilText = textOf(React.createElement(parts.BoardPage, { t: (key) => key, openSession: () => {}, marksStore: storeOf({ coordinator: 'session-main' }) }))
+  } finally { React.useState = originalUseState }
+  assert.ok(boardCalls >= 1, 'utility state 已注入')
+  assert.match(utilText, /panelUtilityBack/, 'utility 打开不抛、返回栏渲染')
 })
 
 test('Client：面板、状态点、悬停卡片、页头 ID 在有数据时渲染不抛错', async () => {
