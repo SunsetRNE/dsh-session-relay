@@ -39,6 +39,18 @@ function textOf(node) {
   return textOf(node.children)
 }
 
+// 内存版 sessionStorage：只给「上次快照」用例模拟页面刷新前的缓存
+function fakeSessionStorage() {
+  const map = new Map()
+  return {
+    get length() { return map.size },
+    key: (index) => { const keys = [...map.keys()]; return index >= 0 && index < keys.length ? keys[index] : null },
+    getItem: (key) => (map.has(key) ? map.get(key) : null),
+    setItem: (key, value) => { map.set(String(key), String(value)) },
+    removeItem: (key) => { map.delete(key) }
+  }
+}
+
 const t = (key) => key
 
 test('入口：有 sidebarRightTabs 时登记标签类型与正文，旧的 7 个插槽不变', async () => {
@@ -115,7 +127,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 39 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 40 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -137,9 +149,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v39'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v40'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 39, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 40, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -2304,4 +2316,44 @@ test('PR 页：旧列表刷新时显示「正在重新加载」，不整块空�
   const text = textOf(tree)
   assert.ok(text.includes('reloading'), '刷新期间有文字状态')
   assert.ok(text.includes('修 bug'), '旧列表仍在，不闪空白')
+})
+
+test('侧栏：页面刷新后先用上次看板快照渲染，并标记后台刷新', async () => {
+  const store = fakeSessionStorage()
+  globalThis.sessionStorage = store
+  try {
+    store.setItem('dsh-session-relay:snapshot:v1:board:session-self', JSON.stringify({
+      savedAt: Date.now(),
+      value: { board: sampleBoard(), at: Date.now() - 60_000, version: 3, fullAt: Date.now() - 60_000 }
+    }))
+    const React = fakeReact()
+    const { mod } = await load('client.sidebar.js', React)
+    const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
+    const text = textOf(tree)
+    assert.ok(text.includes('mainIs') && text.includes('@main'), '看板内容直接可见')
+    assert.ok(text.includes('reloading'), '顶部标记后台刷新')
+    assert.equal(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_skel')), undefined, '不先画骨架')
+  } finally {
+    delete globalThis.sessionStorage
+  }
+})
+
+test('PR 页：页面刷新后先用上次列表快照渲染，不等骨架', async () => {
+  const store = fakeSessionStorage()
+  globalThis.sessionStorage = store
+  try {
+    const key = JSON.stringify({ view: 'pr-list', session: 'session-self' })
+    store.setItem('dsh-session-relay:snapshot:v1:remote:' + key, JSON.stringify({
+      savedAt: Date.now(),
+      value: { at: Date.now() - 60_000, data: prData() }
+    }))
+    const React = fakeReact()
+    const { mod } = await load('client.sidebar.js', React)
+    const tree = React.createElement(mod.PrTab, { kit: workItemKit(), board: sampleBoard(), act: async () => ({}), busy: false, sessionId: 'session-self' })
+    const text = textOf(tree)
+    assert.ok(text.includes('修 bug'), '列表快照直接可见')
+    assert.equal(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_skel')), undefined, '不先画骨架')
+  } finally {
+    delete globalThis.sessionStorage
+  }
 })
