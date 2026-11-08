@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 28 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 29 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -134,9 +134,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v28'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v29'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 28, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 29, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -194,6 +194,20 @@ test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar.js；会话�
   assert.ok(findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_metaChip')), '提交/分支用胶囊包裹')
   assert.ok(!text.includes('@w3'))
   assert.ok(!text.includes('sideFAll'), '没有单独的「全部」筛选')
+})
+
+test('会话卡片：汇报摘要按轻量富文本渲染（去 Markdown 记号，粗体/行内代码成标签）', async () => {
+  const board = sampleBoard()
+  board.entries[0].summary = '**1. 分支页**：`git worktree` 已处理\n- 安全条件不变'
+  const React = fakeReact(states(board, { tab: 'sessions' }))
+  const { mod } = await load('client.sidebar.js', React)
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const text = textOf(tree)
+  assert.ok(text.includes('1. 分支页'), '粗体文字保留')
+  assert.ok(!text.includes('**'), '不显示 Markdown 星号')
+  assert.ok(!text.includes('- 安全条件'), '列表记号被压成一行')
+  assert.ok(findNode(tree, (node) => node.type === 'strong'), '粗体转成 strong')
+  assert.ok(findNode(tree, (node) => node.type === 'code'), '行内代码转成 code')
 })
 
 test('正文 chunk：任务页签渲染任务看板（懒挂载）；交接 / 动态页签各自的正文', async () => {
