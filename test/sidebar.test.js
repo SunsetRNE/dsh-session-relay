@@ -2176,3 +2176,88 @@ test('跨页跳转：RelaySidebar 按 kind 强制目标页签并把 focus 交给
   assert.equal(mod2.workItemTabKey('task'), 'tasks')
   assert.equal(mod2.workItemTabKey('nope'), undefined)
 })
+
+test('PR 页：写动作成功后清工作项详情缓存，重新打开详情会再拉一次', async () => {
+  const posted = []
+  const prDetail = { prDetail: { detail: { number: 7, body: '旧正文', reviews: [], comments: [] } } }
+  const kit = { ...workItemKit(), request: async (method, body, query) => { posted.push([method, query, body]); return method === 'GET' && query?.view === 'pr-detail' ? prDetail : prData() } }
+  // PrTab 11 个 useState：data / error / busy / filter / openNo / comment / pending / running / prState / detailNo / linkTask
+  const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prData(), undefined, false, 'all', 7, 'LGTM', undefined, undefined, 'open', undefined, 'T12'] }))
+  const { mod } = await load('client.sidebar.js', React)
+  // 动作前 hover 预取：把旧详情写进 workItemCache
+  mod.prefetchWorkItemDetail(kit, { view: 'pr-detail', session: 'session-self', number: 7 })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  const detailGets = () => posted.filter(([, query]) => query?.view === 'pr-detail').length
+  assert.equal(detailGets(), 1, '预取先写入一次详情缓存')
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  await findButton(tree, (label) => label === 'prRequestChanges').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.ok(posted.some(([method]) => method === 'POST'), '写动作已发出')
+  // 动作后新开详情（组件重新挂载）必须重新 GET，不能命中动作前的旧缓存
+  let probe
+  function Probe() { probe = mod.useLazyDetail({ kit, params: { view: 'pr-detail', session: 'session-self', number: 7 } }); return null }
+  React.createElement(Probe)
+  await probe.open()
+  assert.equal(detailGets(), 2, '写动作后详情缓存已清，重新打开会再请求')
+})
+
+test('问题页：点标题 / 摘要（非交互区）也能打开详情，链接与按钮不抢占', async () => {
+  const React = fakeReact([issueData(), undefined, false, '', 'all', undefined])
+  const { mod } = await load('client.sidebar.js', React)
+  // 捕获 IssueTab 第 7 个 useState（detail）的 setter：useRemoteList 3 + query/filter/label 3
+  const captured = []
+  const baseUseState = React.useState
+  let index = 0
+  React.useState = (initial) => {
+    const pair = baseUseState(initial)
+    const current = index++
+    if (current === 6) return [pair[0], (value) => captured.push(value)]
+    return pair
+  }
+  const tree = React.createElement(mod.IssueTab, { kit: workItemKit(), board: sampleBoard(), sessionId: 's1', onOpenWorkItem: () => {} })
+  const row = findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_workRow'))
+  const title = findNode(row, (node) => node.props?.title === '崩溃')
+  assert.ok(title !== undefined, '标题在行内')
+  // 标题本身没有 onClick，真实 DOM 会冒泡到行；行不该因为 target 不是自身就拒绝
+  row.props.onClick({ target: title, currentTarget: row })
+  assert.equal(captured.length, 1, '点标题也能打开详情')
+  assert.equal(captured[0]?.kind, 'issue')
+  const link = findNode(row, (node) => node.type === 'a')
+  let stopped = 0
+  link.props.onClick({ stopPropagation: () => { stopped += 1 } })
+  assert.equal(stopped, 1, '行内链接自己 stopPropagation')
+  const label = findButton(row, (text) => text === 'bug')
+  stopped = 0
+  label.props.onClick({ stopPropagation: () => { stopped += 1 } })
+  assert.equal(stopped, 1, '标签按钮自己 stopPropagation')
+})
+
+test('PR 页：行空白处点击打开详情，链接 / 按钮不抢占', async () => {
+  const React = fakeReact([prData(), undefined, false, 'all', undefined, '', undefined, undefined, 'open'])
+  const { mod } = await load('client.sidebar.js', React)
+  // 捕获 PrTab 第 10 个 useState（detailNo）的 setter：useRemoteList 3 + filter/openNo/comment/pending/running/prState
+  const captured = []
+  const baseUseState = React.useState
+  let index = 0
+  React.useState = (initial) => {
+    const pair = baseUseState(initial)
+    const current = index++
+    if (current === 9) return [pair[0], (value) => captured.push(value)]
+    return pair
+  }
+  const tree = React.createElement(mod.PrTab, { kit: workItemKit(), board: sampleBoard(), act: async () => ({}), busy: false, sessionId: 'session-self' })
+  const row = findNode(tree, (node) => String(node.props?.className ?? '').includes('dshaSv_workRow'))
+  assert.ok(row !== undefined, 'PR 行挂在 workRow 上')
+  // 点行内非交互区：closest 找不到 a/button → 打开详情
+  row.props.onClick({ target: { closest: () => null }, currentTarget: row })
+  assert.deepEqual(captured, [7], '行空白点击打开详情')
+  // 点行内链接 / 按钮：closest 命中，行不抢
+  row.props.onClick({ target: { closest: () => 'a' }, currentTarget: row })
+  row.props.onClick({ target: { closest: () => 'button' }, currentTarget: row })
+  assert.deepEqual(captured, [7], '链接与按钮不触发行的详情')
+  // 标题链接自身 stopPropagation，点它只跳 GitHub
+  const title = findNode(row, (node) => node.type === 'a' && String(node.props?.className ?? '').includes('dshaSv_titleLink'))
+  let stopped = 0
+  title.props.onClick({ stopPropagation: () => { stopped += 1 } })
+  assert.equal(stopped, 1, '标题链接自己 stopPropagation')
+})

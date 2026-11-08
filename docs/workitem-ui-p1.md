@@ -103,4 +103,5 @@ client.sidebar.settings.js
 - 地图 / 问题详情直接用现有 `board.taskBoard.map` 与 `issue-list` 列表字段，不新增服务端视图；问题评论 `comments: null` 槽位留 P2。
 - PR 详情正文仍是 `PrDetail`（`view=pr-detail`），只是改成在共用外壳里挂载；列表 hover 预取改走同一个缓存，打开详情不再发第二次。
 - 跨页 `openWorkItem` 只接受 `task / map-ticket / issue / pr`，任务页 P1a 只切换页签；详情页打开后调用 `onFocusConsumed` 清空焦点，不留下“强制页签”状态。
-- 测试：`test/sidebar.test.js` 新增胶囊 / 外壳 / 懒加载 / 三页 focus / 跨页 7 条；全量 `node --test --test-concurrency=1 test/*.test.js` 432 全过（原 425 + 7）。
+- review 修复：PR 写动作成功处清整份工作项详情缓存（hover 预取可能早于动作写旧数据，不能只清当前 detailNo）；问题行去掉 target===currentTarget 判断，点标题 / 摘要也能打开（行内 a / button 各自 stopPropagation）；PR 行空白处也可点开详情，a / button / 表单控件按 closest 排除，键盘仍走「详情」按钮。
+- 测试：`test/sidebar.test.js` 新增胶囊 / 外壳 / 懒加载 / 三页 focus / 跨页 / 写后清缓存 / 行点击 10 条；全量 `node --test --test-concurrency=1 test/*.test.js` 435 全过（原 425 + 10）。
