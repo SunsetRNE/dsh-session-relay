@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   GitHubLists, LIST_TTL_MS, assertBranchDeletable, commandError, parseDefaultBranch, parseIssues,
-  parseLocalBranches, parsePullDetail, parsePullRequests, parseRemoteBranches, requireRepo, validateBranchName
+  parseLocalBranches, parsePullDetail, parsePullRequests, parseRemoteBranches, parseWorktrees, requireRepo, validateBranchName
 } from '../lib/githublists.js'
 
 test('PR / issue 列表解析：字段归一、排序不动、坏输出拒绝', () => {
@@ -180,6 +180,25 @@ test('PR 列表 / 详情请求带改动字段', async () => {
   assert.match(listArgs, /additions,deletions,changedFiles/, '列表带改动统计字段')
   const detailArgs = calls.gh.find((args) => args.join(' ').startsWith('pr view'))?.join(' ') ?? ''
   assert.match(detailArgs, /files,additions,deletions,changedFiles/, '详情带文件清单字段')
+})
+
+test('工作树：分支被 worktree 占用时标记并拒绝删除', async () => {
+  const git = async (args) => {
+    const joined = args.join(' ')
+    if (joined.includes('for-each-ref') && joined.includes('refs/heads')) return { stdout: ' \x00wt/branch\x00abc\x00\x00\x002026-11-07T00:00:00+08:00\x00x', stderr: '' }
+    if (joined.includes('for-each-ref') && joined.includes('refs/remotes/origin')) return { stdout: '', stderr: '' }
+    if (joined.includes('symbolic-ref')) return { stdout: '', stderr: '' }
+    if (joined.includes('worktree list --porcelain')) return { stdout: 'worktree /repo/wt\nHEAD abc\nbranch refs/heads/wt/branch\n\n', stderr: '' }
+    throw Object.assign(new Error('unknown git ' + joined), { stderr: 'unknown git' })
+  }
+  const lists = new GitHubLists({ gh: async () => ({ stdout: '' }), git, now: () => 1000 })
+  const snapshot = await lists.branches('/repo')
+  assert.equal(snapshot.local.find((item) => item.name === 'wt/branch').worktree, '/repo/wt')
+  await assert.rejects(() => lists.deleteBranch({ path: '/repo', name: 'wt/branch' }), /工作树占用/)
+  assert.deepEqual(parseWorktrees('worktree /a\nHEAD 1\nbranch refs/heads/x\n\nworktree /b\nHEAD 2\ndetached\n'), [
+    { path: '/a', branch: 'x', head: '1' },
+    { path: '/b', head: '2', detached: true }
+  ])
 })
 
 test('分支删除：当前 / 默认 / 未合并 / 远端确认名', async () => {

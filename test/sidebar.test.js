@@ -112,7 +112,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 21 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 22 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -134,9 +134,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v21'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v22'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 21, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 22, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -930,7 +930,8 @@ const branchData = () => ({
       workspace: { id: 'ws1', title: 'relay', path: '/repo' }, repo: 'o/r', current: 'main', defaultBranch: 'main', error: null,
       local: [
         { name: 'main', sha: 'a', current: true, upstream: 'origin/main', ahead: 0, behind: 0, at: '2026-11-07T00:00:00Z', subject: 'chore', merged: true },
-        { name: 'fix/y', sha: 'b', current: false, upstream: null, ahead: 2, behind: 1, at: '2026-11-06T00:00:00Z', subject: 'fix', merged: false }
+        { name: 'fix/y', sha: 'b', current: false, upstream: null, ahead: 2, behind: 1, at: '2026-11-06T00:00:00Z', subject: 'fix', merged: false },
+        { name: 'wt/branch', sha: 'c', current: false, upstream: null, ahead: 0, behind: 0, at: '2026-11-05T00:00:00Z', subject: 'wt', merged: false, worktree: '/repo/.agents/worktrees/wt/branch' }
       ],
       remote: [{ name: 'main', sha: 'a', at: '2026-11-07T00:00:00Z', subject: 'chore' }, { name: 'fix/y', sha: 'b', at: '2026-11-06T00:00:00Z', subject: 'fix' }]
     }]
@@ -1125,7 +1126,7 @@ test('分支页：全工作区列表、当前/默认/合并状态与拉取', asy
   const { mod } = await load('client.sidebar.js', React)
   const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
   const text = textOf(tree)
-  for (const part of ['sideTabBranches', 'relay', 'o/r', 'main', 'fix/y', 'brCurrent', 'brDefault', 'brUnmerged', 'brAhead', 'brBehind', 'brLocal', 'brRemote', 'brDelete', 'brDeleteRemote']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['sideTabBranches', 'relay', 'o/r', 'main', 'fix/y', 'brCurrent', 'brDefault', 'brUnmerged', 'brAhead', 'brBehind', 'brLocal', 'brRemote', 'brDelete', 'brDeleteRemote', 'brWorktree', 'brWorktreeHint']) assert.ok(text.includes(part), '缺少 ' + part)
   await findButton(tree, (label) => label === 'brFetch').props.onClick()
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(lastPost(posted), { action: 'branch-fetch', workspaceId: 'ws1', fromSession: 'session-self' })
