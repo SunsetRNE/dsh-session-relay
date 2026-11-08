@@ -115,7 +115,7 @@ test('入口：空壳不同步加载正文；用 require.async 拉 client.sideba
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 35 }) })
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 36 }) })
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
@@ -137,9 +137,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v35'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v36'), '显示实际 / 期望版本')
   const { mod: chunk } = await load('client.sidebar.js', fakeReact())
-  assert.equal(chunk.KIT_VERSION, 35, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 36, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -244,10 +244,12 @@ test('嵌入面板：SidebarEmbedded 懒加载同一份侧栏正文并透传 kit
   const h = React.createElement
   const StubSidebar = (props) => {
     calls.push(props)
-    return h('span', null, props.sessionId + '|' + props.persistPrefix + '|' + typeof props.onOpenUtility + '|' + typeof props.kit.request + '|' + typeof props.kit.openSession)
+    return h('span', null, props.sessionId + '|' + props.persistPrefix + '|' + typeof props.extraTabs + '|' + typeof props.kit.request + '|' + typeof props.kit.openSession)
   }
-  const text = textOf(React.createElement(mod.SidebarEmbedded, { t: (key) => key, sessionId: 'session-42', openSession: () => {}, persistPrefix: 'embed-x:', onOpenUtility: () => {}, mod: { RelaySidebar: StubSidebar, KIT_VERSION: mod.SIDEBAR_KIT } }))
-  assert.match(text, /session-42\|embed-x:\|function\|function\|function/, '透传会话 / 前缀 / utility 与 kit')
+  const extraTabs = [{ key: 'overview', render: () => null }]
+  const text = textOf(React.createElement(mod.SidebarEmbedded, { t: (key) => key, sessionId: 'session-42', openSession: () => {}, persistPrefix: 'embed-x:', extraTabs, mod: { RelaySidebar: StubSidebar, KIT_VERSION: mod.SIDEBAR_KIT } }))
+  assert.match(text, /session-42\|embed-x:\|object\|function\|function/, '透传会话 / 前缀 / 额外页签与 kit')
+  assert.equal(calls[0].extraTabs, extraTabs, '额外页签原样透传')
   assert.equal(calls.length, 1)
   assert.equal(calls[0].embedded, true, '嵌入实例标记')
   assert.equal(calls[0].pollMs, 60000, '嵌入侧轮询降频')
@@ -333,16 +335,30 @@ test('旧 BoardPage 邮箱：非主会话不显示归档按钮，标已读保留
   assert.ok(main.includes('mailArchive'), '主会话保留归档')
 })
 
-test('更多页：嵌入面板才显示概览 / 全文搜索入口', async () => {
+test('额外页签：嵌入面板在两端插入概览 / 全文搜索，右侧边栏保持 9 页签', async () => {
   const board = { github: null, repo: null, sync: null, coordinator: null }
-  const React = fakeReact()
+  const React = fakeReact(states(sampleBoard()))
   const { mod } = await load('client.sidebar.js', React)
-  const withUtility = textOf(React.createElement(mod.MoreTab, { kit: kitFor(), board, act: async () => ({}), busy: false, onOpen: () => {}, onSettings: () => {}, counts: {}, onOpenUtility: () => {} }))
-  for (const part of ['sideUtilityTitle', 'sideUtilityOverview', 'sideUtilitySearch']) assert.ok(withUtility.includes(part), '缺少 ' + part)
-  const React2 = fakeReact()
+  // 右侧边栏（不传 extraTabs）：不出现额外页签
+  const plain = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  assert.ok(!plain.includes('sideUtilityOverview') && !plain.includes('sideUtilitySearch'), '右栏不出现额外页签')
+  // 更多页也不再放面板工具
+  const more = textOf(React.createElement(mod.MoreTab, { kit: kitFor(), board, act: async () => ({}), busy: false, onOpen: () => {}, onSettings: () => {}, counts: {} }))
+  assert.ok(!more.includes('sideUtilityTitle') && !more.includes('sideUtilityOverview'), '更多页没有面板工具')
+  // 嵌入面板：概览 → 会话 … 邮箱 → 全文搜索 → 更多
+  const React2 = fakeReact(states(sampleBoard(), { tab: 'overview' }))
   const mod2 = (await load('client.sidebar.js', React2)).mod
-  const plain = textOf(React2.createElement(mod2.MoreTab, { kit: kitFor(), board, act: async () => ({}), busy: false, onOpen: () => {}, onSettings: () => {}, counts: {} }))
-  assert.ok(!plain.includes('sideUtilityOverview'), '独立右侧边栏不显示 utility 入口')
+  const h = React2.createElement
+  const tree = React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', persistPrefix: 'embed-x:', extraTabs: [
+    { key: 'overview', render: () => h('span', null, 'EXTRA_OVERVIEW') },
+    { key: 'search', render: () => h('span', null, 'EXTRA_SEARCH') }
+  ] })
+  const text = textOf(tree)
+  assert.ok(text.includes('sideUtilityOverview') && text.includes('sideUtilitySearch'), '两个额外页签都在')
+  assert.ok(text.includes('EXTRA_OVERVIEW'), '概览页签内容渲染')
+  assert.ok(!text.includes('EXTRA_SEARCH'), '未打开的全文搜索不挂载')
+  const order = ['sideUtilityOverview', 'sideTabSessions', 'sideTabMail', 'sideUtilitySearch', 'sideTabMore'].map((key) => text.indexOf(key))
+  assert.ok(order.every((value, index) => value >= 0 && (index === 0 || value > order[index - 1])), '页签顺序正确')
 })
 
 test('地图页：嵌入宽栏不传 onBack 时不渲染「返回更多」，窄栏传了仍保留', async () => {
@@ -476,7 +492,7 @@ test('入口：设置页 / 协作标签 / 监督面板的正文在 client.panel.
   React.lazy = (factory) => { lazies.push(factory); return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 6 }
+  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 7 }
   const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve(reply) })
   assert.equal(asked.length, 0, '载入入口时不下载正文')
   const tree = React.createElement(mod.BoardPage, { t })

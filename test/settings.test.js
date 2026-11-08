@@ -390,6 +390,25 @@ test('Client：注册 settings.section；有数据时渲染公告、模板、速
   } finally { await h.cleanup() }
 })
 
+test('Client：LegacyBoardPage 传 hideTabs 时不渲染自己的 5 个页签（给额外页签复用）', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => key
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const board = { scope: 'workspace', workspace: null, hiddenByScope: 0, coordinator: null, line: null, entries: [], others: [], othersTotal: 0, restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a' }
+  const render = (hideTabs) => {
+    const original = React.useState
+    let calls = 0
+    React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+    try { return textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'board', hideTabs })) } finally { React.useState = original }
+  }
+  const withTabs = render(false)
+  assert.match(withTabs, /pageOverview[\s\S]*pageBoard/, '默认渲染 5 个页签')
+  const hidden = render(true)
+  assert.ok(!hidden.includes('pageOverview') && !hidden.includes('pageBoard'), 'hideTabs 时不渲染页签')
+  assert.match(hidden, /sideTaskBoard|boardEmpty|cat/, '内容仍在')
+})
+
 test('Client：左侧 / 协作面板默认嵌入 9 页签；无主会话给说明；旧 BoardPage 保留为 utility', async () => {
   const { React } = fakeReact()
   const seen = []
@@ -412,28 +431,17 @@ test('Client：左侧 / 协作面板默认嵌入 9 页签；无主会话给说�
   assert.match(left, /EMBED:session-main:embed-panel:/, '左栏用主会话视角、独立页签前缀')
   const none = textOf(React.createElement(parts.BoardPage, { t: (key) => key, openSession: () => {}, marksStore: storeOf({}) }))
   assert.match(none, /panelNoMain/, '没有主会话给一行说明')
-  assert.match(none, /sideUtilityOverview[\s\S]*sideUtilitySearch/, '说明页仍可进概览 / 全文搜索')
   const tab = textOf(React.createElement(parts.ConversationRelayView, { t: (key) => key, openSession: () => {}, marksStore: storeOf({ coordinator: 'session-main' }), sessionId: 'session-cur' }))
   assert.match(tab, /EMBED:session-cur:embed-tab:/, '对话标签用当前会话、另一套页签前缀')
-  assert.equal(typeof seen[0].onOpenUtility, 'function', 'utility 回调透传')
   assert.equal(typeof seen[0].t, 'function', '文案函数透传')
-  assert.equal(typeof parts.LegacyBoardPage, 'function', '旧 BoardPage 仍导出给 utility 页')
-  // TDZ 回归：BoardPage 打开 utility（概览 / 搜索）时 mainId 必须已初始化，不能抛 ReferenceError
-  const originalUseState = React.useState
-  let boardCalls = 0
-  React.useState = (initial) => {
-    if (/at BoardPage/.test(String(new Error().stack))) {
-      boardCalls += 1
-      if (boardCalls === 1) return ['overview', () => {}]
-    }
-    return originalUseState(initial)
+  assert.equal(typeof parts.LegacyBoardPage, 'function', '旧 BoardPage 仍导出给额外页签')
+  // 额外页签：概览 / 全文搜索，render 调用不抛（旧 BoardPage 在没有看板时给读取中）
+  const extra = seen[0].extraTabs
+  assert.deepEqual(extra.map((item) => item.key), ['overview', 'search'], '两个额外页签按顺序传入')
+  for (const item of extra) {
+    assert.equal(typeof item.render, 'function')
+    assert.ok(textOf(item.render()) !== undefined, '额外页签 render 可执行')
   }
-  let utilText = ''
-  try {
-    utilText = textOf(React.createElement(parts.BoardPage, { t: (key) => key, openSession: () => {}, marksStore: storeOf({ coordinator: 'session-main' }) }))
-  } finally { React.useState = originalUseState }
-  assert.ok(boardCalls >= 1, 'utility state 已注入')
-  assert.match(utilText, /panelUtilityBack/, 'utility 打开不抛、返回栏渲染')
 })
 
 test('Client：面板、状态点、悬停卡片、页头 ID 在有数据时渲染不抛错', async () => {
