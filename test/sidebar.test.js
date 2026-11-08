@@ -256,6 +256,50 @@ test('嵌入面板：SidebarEmbedded 懒加载同一份侧栏正文并透传 kit
   assert.match(waiting, /sideLoading/)
 })
 
+test('嵌入面板：kit 用 useMemo 缓存，重复渲染引用不变', async () => {
+  const React = fakeReact()
+  const memo = { deps: undefined, value: undefined }
+  React.useMemo = (fn, deps) => {
+    const same = memo.deps !== undefined && Array.isArray(deps) && deps.every((dep, index) => dep === memo.deps[index])
+    if (!same) { memo.value = fn(); memo.deps = deps }
+    return memo.value
+  }
+  const { mod } = await load('client.js', React)
+  const kits = []
+  const Stub = (props) => { kits.push(props.kit); return null }
+  const t = (key) => key
+  const openSession = () => {}
+  const render = () => textOf(React.createElement(mod.SidebarEmbedded, { t, sessionId: 's', openSession, mod: { RelaySidebar: Stub, KIT_VERSION: mod.SIDEBAR_KIT } }))
+  render(); render()
+  assert.equal(kits.length, 2)
+  assert.equal(kits[0], kits[1], '同一组依赖下 kit 引用稳定，useBoard effect 不会每轮重跑')
+})
+
+test('嵌入面板：同一会话并发 light 请求共享一份（左右栏去重）', async () => {
+  const React = fakeReact()
+  const calls = []
+  const realEffect = React.useEffect
+  const realTimeout = globalThis.setTimeout
+  const realInterval = globalThis.setInterval
+  React.useEffect = (fn) => { fn() }
+  globalThis.setTimeout = () => 0
+  globalThis.setInterval = () => 0
+  const kit = { ...kitFor(), request: async (method, body, params) => { calls.push(params); return { entries: [], partial: true } } }
+  try {
+    const { mod } = await load('client.sidebar.js', React)
+    React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-same', persistPrefix: 'a:' })
+    React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-same', persistPrefix: 'b:' })
+    // 让 request 的 .finally 在 mock 定时器生效期内跑完，避免恢复后留下真实轮询
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+  } finally {
+    React.useEffect = realEffect
+    globalThis.setTimeout = realTimeout
+    globalThis.setInterval = realInterval
+  }
+  const light = calls.filter((params) => params?.view === 'board' && params?.session === 'session-same' && params?.light === 1 && !params?.tasks)
+  assert.equal(light.length, 1, '相同参数只发一份')
+})
+
 test('邮箱：非主会话隐藏归档按钮，主会话保留', async () => {
   const mail = { items: [{ id: 'm1', kind: 'notice', subject: '通知', body: '正文', at: 1, readBy: {} }], mailbox: { unread: 1 } }
   const kit = { ...kitFor(), request: async () => mail }
@@ -545,6 +589,9 @@ test('正文 chunk：轮询带上次的 since；notModified 时不换看板对�
   let reply = { ok: true, entries: sampleBoard().entries, version: 'v1' }
   const kit = { ...kitFor(), request: async (method, body, query) => { calls.push(query); return reply } }
   const saved = globalThis.document
+  const realTimeout = globalThis.setTimeout
+  const timers = []
+  globalThis.setTimeout = (fn) => { timers.push(fn); return timers.length }
   globalThis.document = { visibilityState: 'visible', addEventListener() {}, removeEventListener() {}, querySelector: () => null, createElement: () => ({ dataset: {}, remove() {} }), head: { appendChild() {} } }
   const cleanups = []
   // 找出更新看板的那次 setState（还有刷新提示等别的更新）
@@ -557,7 +604,7 @@ test('正文 chunk：轮询带上次的 since；notModified 时不换看板对�
     const { mod } = await load('client.sidebar.js', React)
     React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-poll', useTabInfo: () => ({ tab: { visible: true } }) })
     cleanups.push(...effects.map((fn) => fn()))
-    await new Promise((resolve) => setTimeout(resolve, 5))
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
     const boardCalls = () => calls.filter((query) => query?.view === 'board')
     assert.equal(boardCalls()[0].since, undefined)
     const first = boardUpdate()
@@ -567,13 +614,19 @@ test('正文 chunk：轮询带上次的 since；notModified 时不换看板对�
     effects.length = 0; sets.length = 0
     React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-poll', useTabInfo: () => ({ tab: { visible: true } }) })
     cleanups.push(...effects.map((fn) => fn()))
-    await new Promise((resolve) => setTimeout(resolve, 5))
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    // 缓存 <5s：第二次挂载只排轮询、不立即重复请求
+    assert.equal(boardCalls().length, 1, '挂载不重复拉取')
+    // 跑掉刚才排下的轮询：带上次 version；notModified 时沿用看板对象
+    timers.at(-1)()
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
     assert.equal(boardCalls().at(-1).since, 'v1')
     const updated = boardUpdate()
     assert.equal(updated.board, first.board, '看板对象沿用')
   } finally {
     for (const cleanup of cleanups) if (typeof cleanup === 'function') cleanup()
     globalThis.document = saved
+    globalThis.setTimeout = realTimeout
   }
 })
 
