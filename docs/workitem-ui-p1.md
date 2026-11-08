@@ -74,7 +74,7 @@ client.sidebar.settings.js
 - 热更新：DSH reload 后新 chunk 地址带 `?v=<KIT>`（或文件名 hash），避免浏览器缓存旧 chunk；整页刷新兜底提示沿用。本地开发时 `require.async` 失败回退外壳内联的最小加载失败行。
 - 预取策略：hover 页签按钮 200ms 后 prefetch 对应 chunk；受 `navigator.connection.saveData` 抑制；嵌入面板与右栏共用同一 chunk 缓存（同一模块加载器）。
 - 风险：`useBoard` 仍在外壳（所有页签共用）；`MailTab`/`MoreTab` 与设置页共用 `useRemoteList`，需要先抽 `client.sidebar.shared.js` 再拆页。
-- 验收：`node --test` 覆盖入口 stale、按需加载顺序、右栏/嵌入同 chunk 复用；真机点 11 页签首次打开耗时对比（需把候选文件 stage 到运行中的插件，待用户同意）。
+- 验收：`node --test` 覆盖入口 stale、按需加载顺序、右栏/嵌入同 chunk 复用；真机点 11 页签首次打开已由用户在 2026-11-09 预览确认可用（stage + 整页刷新），未做量化耗时对比。
 
 ## 5. 测试计划（P1a）
 
@@ -117,4 +117,4 @@ client.sidebar.settings.js
 - 失败回退：`require.async` 失败给最小一行 + 刷新按钮；chunk `KIT_VERSION` 不配套显示现有 stale 文案（实际 / 期望版本）+ 刷新；加载中给同高骨架。
 - 共享依赖经 `make(deps)` 传入（`React` / `h` / 图标 / 外壳工具 / 共享件）；DSH 模块协议不支持 chunk 之间同步 `require`，因此没有跨 chunk 同步引用。`client.js` 的 `SIDEBAR_CHUNK` 指向 `client.sidebar41.js`，`SIDEBAR_KIT 41`；`PANEL_KIT 8` 与 `client.panel.js` 未改。
 - 测试：`test/sidebar.test.js` 额外覆盖「只拉共享件 + 当前页签 / 每个 chunk 带 KIT / 右栏与嵌入复用同一缓存 / hover 200ms 预取与移出取消 / saveData 抑制 / 旧版与加载失败回退」；串行 446 全过（原 440 + 6）。
-- 真机 11 页签首次打开耗时对比尚未做：需要把候选文件 stage 到运行中的插件并整页刷新，按约定等用户同意。
+- 真机 11 页签首次打开：用户 2026-11-09 在 stage 预览（整页刷新）中确认可用；量化耗时对比未做。
