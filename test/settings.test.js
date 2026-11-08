@@ -1,7 +1,9 @@
 /** 设置页「会话协作」：Host 路由与 Client 组件冒烟测试（不启动浏览器）。 */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -1205,4 +1207,231 @@ test('协作面板 GitHub 仓库：同步队列只读展示', async () => {
   assert.match(text, /syncStateSynced/)
   assert.match(text, /T2/)
   assert.match(text, /syncStateUnknown/)
+})
+
+// ---------------------------------------------------------------- T14 合并批准 / 发布状态卡
+
+test('合并批准：绑定提交、幂等、sha 变化失效；打回要理由；只记录 + 通知，不跑 git', async () => {
+  const h = await makeRelay()
+  try {
+    await h.relay.coord.setCoordinator('session-main1', process.cwd(), '_')
+    await h.relay.coord.upsert('session-worker1', { status: 'ready', summary: 'done', branch: 't14-ui-flow', commit: 'abcdef1234' })
+    let board = await h.relay.board(undefined, { session: 'session-main1' })
+    let entry = board.entries.find((item) => item.sessionId === 'session-worker1')
+    assert.equal(entry.approval, undefined, '还没批准时没有流水线状态')
+    assert.match(board.release?.nextTag ?? '', /^v\d+\.\d+\.\d+$/, '看板带便宜的待发版本摘要')
+
+    const sent = []
+    h.relay.deliver = async (target, message, mode, options) => { sent.push({ target, mode, origin: options?.origin, text: message.content?.[0]?.text ?? '' }); return { wasRunning: false } }
+
+    let done = await perform(h.relay, { action: 'merge-approve', target: 'session-worker1', sha: 'abcdef1234', fromSession: 'session-main1' })
+    assert.equal(done.result.approval.status, 'approved')
+    assert.equal(done.result.duplicate, false)
+    assert.equal(done.result.notified, true)
+    assert.equal(sent.at(-1).target, 'session-main1', '批准唤醒主会话')
+    assert.equal(sent.at(-1).origin, 'user')
+    assert.match(sent.at(-1).text, /没有执行 git/)
+    board = await h.relay.board(undefined, { session: 'session-main1' })
+    entry = board.entries.find((item) => item.sessionId === 'session-worker1')
+    assert.equal(entry.approval.stage, 'approved')
+    assert.equal(entry.approval.sha, 'abcdef1234')
+
+    // 重复批准同一提交：幂等，不再通知
+    const before = sent.length
+    done = await perform(h.relay, { action: 'merge-approve', target: 'session-worker1', sha: 'abcdef1234', fromSession: 'session-main1' })
+    assert.equal(done.result.duplicate, true)
+    assert.equal(sent.length, before, '重复批准不重复唤醒')
+
+    // 用户看到的是旧 sha：拒绝写入，要求刷新
+    await assert.rejects(perform(h.relay, { action: 'merge-approve', target: 'session-worker1', sha: '9999999999', fromSession: 'session-main1' }), (error) => error.code === 'approval_stale')
+
+    // 会话汇报了新提交：旧批准失效，要重新批准
+    await h.relay.coord.upsert('session-worker1', { status: 'ready', commit: '9999999999' })
+    board = await h.relay.board(undefined, { session: 'session-main1' })
+    assert.equal(board.entries.find((item) => item.sessionId === 'session-worker1').approval.stage, 'stale')
+
+    // 稍后：只记录，不唤醒
+    const beforeLater = sent.length
+    done = await perform(h.relay, { action: 'merge-later', target: 'session-worker1', sha: '9999999999', fromSession: 'session-main1' })
+    assert.equal(done.result.approval.status, 'later')
+    assert.equal(sent.length, beforeLater, '稍后不打扰任何人')
+
+    // 打回：理由必填，唤醒工作会话
+    await assert.rejects(perform(h.relay, { action: 'merge-reject', target: 'session-worker1', sha: '9999999999', fromSession: 'session-main1' }), /要写理由/)
+    done = await perform(h.relay, { action: 'merge-reject', target: 'session-worker1', sha: '9999999999', reason: '测试没过，补一轮', fromSession: 'session-main1' })
+    assert.equal(done.result.approval.status, 'rejected')
+    assert.equal(done.result.approval.reason, '测试没过，补一轮')
+    assert.equal(sent.at(-1).target, 'session-worker1', '打回唤醒工作会话')
+    assert.match(sent.at(-1).text, /测试没过，补一轮/)
+    board = await h.relay.board(undefined, { session: 'session-main1' })
+    assert.equal(board.entries.find((item) => item.sessionId === 'session-worker1').approval.stage, 'rejected')
+
+    // 改完提交再汇报：旧打回自然让位，回到可合并
+    await h.relay.coord.upsert('session-worker1', { status: 'ready', commit: 'dddddddddd' })
+    board = await h.relay.board(undefined, { session: 'session-main1' })
+    assert.equal(board.entries.find((item) => item.sessionId === 'session-worker1').approval.stage, 'ready')
+
+    // 不是可合并状态 / 没有提交号：都不能批准
+    await h.relay.coord.upsert('session-worker2', { status: 'working', commit: 'eeeeeeeeee' })
+    await assert.rejects(perform(h.relay, { action: 'merge-approve', target: 'session-worker2', fromSession: 'session-main1' }), /不是「可合并」/)
+    await h.relay.coord.upsert('session-worker3', { status: 'ready' })
+    await assert.rejects(perform(h.relay, { action: 'merge-approve', target: 'session-worker3', fromSession: 'session-main1' }), /没有汇报提交号/)
+
+    // 记录落在协调状态里（插件存储），不是 git
+    const saved = JSON.parse(await readFile(join(h.dir, 'coordination.json'), 'utf8'))
+    assert.equal(saved.groups._.approvals['session-worker1'].status, 'rejected')
+  } finally { await h.cleanup() }
+})
+
+test('发布状态卡：只读版本 / HEAD / origin/main / tag / 本地 tgz；gh 读不到时写未知', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'relay-release-'))
+  const repo = join(dir, 'repo')
+  const origin = join(dir, 'origin.git')
+  const gitRun = promisify(execFile)
+  const run = (args, cwd = repo) => gitRun('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], { cwd })
+  try {
+    await mkdir(join(repo, 'docs'), { recursive: true })
+    await mkdir(join(repo, 'dist'), { recursive: true })
+    await run(['init', '--bare', origin], dir)
+    await run(['init', '-b', 'main', '.'])
+    await writeFile(join(repo, 'package.json'), JSON.stringify({ name: 'x', version: '2.4.2' }))
+    await writeFile(join(repo, 'CHANGELOG.md'), '# CHANGELOG\n\n## 2.4.2 - 2026-11-09\n\n- 测试\n')
+    await writeFile(join(repo, 'docs', 'release-notes-2.4.2.md'), '# v2.4.2\n')
+    await writeFile(join(repo, 'dist', 'dsh-session-relay-2.4.2.tgz'), 'fake-tarball')
+    await run(['add', '-A'])
+    await run(['commit', '-m', 'release 2.4.2'])
+    await run(['tag', 'v2.4.2'])
+    await run(['remote', 'add', 'origin', origin])
+    await run(['push', '-u', 'origin', 'main'])
+    await run(['push', 'origin', 'v2.4.2'])
+
+    const ctx = {
+      logger: { warn() {} }, get: () => undefined, sessions: { get: () => undefined },
+      workspaceRegistry: { list: () => [{ id: 'ws-a', title: 'repo', path: repo, sessionIds: ['session-main1'] }] }
+    }
+    const relay = new SessionRelay(ctx, {
+      aliasPath: join(dir, 'aliases.json'), statePath: join(dir, 'coordination.json'), templatePath: join(dir, 'templates.json'),
+      handoffPath: join(dir, 'handoffs.json'), watchPath: join(dir, 'watches.json'), deadlinePath: join(dir, 'deadlines.json'),
+      deadlineTickMs: 0, watch: false, githubAuto: false
+    })
+    await relay.ready()
+    await relay.coord.setCoordinator('session-main1', repo, 'ws-a')
+    // gh 只在测试里桩掉：真实读取失败也必须是「未知」，不能猜成完成
+    relay.ghReleaseView = async () => ({ state: 'unknown', reason: '测试环境没有 gh' })
+    const view = await relay.releaseView({ sessionId: 'session-main1' })
+    assert.equal(view.available, true)
+    assert.equal(view.version, '2.4.2')
+    assert.equal(view.tag, 'v2.4.2')
+    assert.equal(view.tagExists, true)
+    assert.equal(view.latestTag, 'v2.4.2')
+    assert.equal(view.nextVersion, '2.4.3')
+    assert.equal(view.nextTag, 'v2.4.3')
+    assert.equal(view.head.sha.slice(0, 7), (await run(['rev-parse', 'HEAD'])).stdout.trim().slice(0, 7))
+    assert.ok(view.main?.short)
+    assert.equal(view.pushed, true)
+    assert.equal(view.ahead, 0)
+    assert.equal(view.tagRemote, true, '远端 tag 已 push')
+    assert.deepEqual(view.prepared, { changelog: true, notes: true })
+    assert.ok(view.packed.size > 0)
+    assert.match(view.packed.sha256, /^[0-9a-f]{64}$/)
+    assert.equal(view.release.state, 'unknown', 'gh 读不到就写未知')
+    assert.deepEqual(view.stages.map((step) => step.key), ['prepare', 'test', 'pack', 'push', 'tag', 'release', 'market'])
+    const states = Object.fromEntries(view.stages.map((step) => [step.key, step.state]))
+    assert.equal(states.prepare, 'done')
+    assert.equal(states.test, 'unknown', '面板不记录测试，不假装完成')
+    assert.equal(states.pack, 'done')
+    assert.equal(states.push, 'done')
+    assert.equal(states.tag, 'done')
+    assert.equal(states.release, 'unknown')
+    assert.equal(states.market, 'unknown')
+    assert.match(view.command, /gh release create v2\.4\.2/)
+    assert.match(view.command, /docs\/release-notes-2\.4\.2\.md/)
+
+    // 路由 GET view=release
+    const handler = createHandler({ requestRejection: () => undefined }, relay)
+    const req = fakeReq('GET')
+    req.url = '/?view=release&session=session-main1'
+    const res = fakeRes()
+    await handler(req, res)
+    assert.equal(res.status, 200)
+    assert.equal(res.body.release.version, '2.4.2')
+    assert.equal(res.body.release.stages.length, 7)
+
+    // 不是仓库根：明确「无法读取」，不猜
+    const empty = await makeRelay()
+    try {
+      await empty.relay.coord.setCoordinator('session-main1', join(empty.dir, 'not-a-repo'), '_')
+      const missing = await empty.relay.releaseView({ sessionId: 'session-main1' })
+      assert.equal(missing.available, false)
+      assert.match(missing.reason, /读不到 package\.json|不是仓库根/)
+    } finally { await empty.cleanup() }
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('面板概览：下一步卡按 提问 > 已批准 > 可合并 > 发版待办 排序；空状态明确', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => key
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const base = {
+    scope: 'workspace', workspace: null, hiddenByScope: 0, coordinator: { sessionId: 'session-main1', label: '@main', exists: true, model: null },
+    self: null, line: null, others: [], othersTotal: 0, restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a',
+    asks: [{ id: 'ask1', question: '选哪个', options: ['A', 'B'], by: 'session-main1', byLabel: '@main', at: 1 }],
+    release: { version: '2.4.2', tag: 'v2.4.2', tagExists: true, nextVersion: '2.4.3', nextTag: 'v2.4.3' },
+    declarations: { main: { build: 'build3', released: { build: 'build1', tag: 'v2.4.1' } } },
+    entries: [
+      { sessionId: 'session-a1', label: '@a1', status: 'ready', category: 'ready', commit: 'aaaaaaa1', approval: { stage: 'approved', sha: 'aaaaaaa1', tag: null } },
+      { sessionId: 'session-a2', label: '@a2', status: 'ready', category: 'ready', commit: 'aaaaaaa2' }
+    ]
+  }
+  const render = (board) => {
+    const original = React.useState
+    let calls = 0
+    React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+    try { return textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: 'overview' })) } finally { React.useState = original }
+  }
+  const text = render(base)
+  for (const part of ['nextTitle', 'nextStageAsk', 'nextStageApproved', 'nextStageReady', 'nextStageRelease']) assert.ok(text.includes(part), '下一步缺少 ' + part)
+  assert.ok(text.indexOf('nextStageAsk') < text.indexOf('nextStageApproved'), '先回答提问')
+  assert.ok(text.indexOf('nextStageApproved') < text.indexOf('nextStageReady'), '再处理已批准合并')
+  assert.ok(text.indexOf('nextStageReady') < text.indexOf('nextStageRelease'), '最后准备发版')
+  assert.match(text, /nextWake/, '已批准项可以唤醒主会话')
+  // 空状态：没有提问 / 汇报 / 发版事实时明确写「暂无待办」
+  const empty = render({ ...base, asks: [], entries: [], declarations: null, release: null })
+  assert.match(empty, /nextEmpty/)
+})
+
+test('面板看板：可合并卡片给流水线与批准 / 稍后 / 打回；主会话卡给合并摘要', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => (key === 'mergeNext' ? 'mergeNext {tag}' : key)
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const board = {
+    scope: 'workspace', workspace: { id: 'w', title: 'W', path: '/w' }, hiddenByScope: 0,
+    coordinator: { sessionId: 'session-main1', label: '@main', exists: true, model: null },
+    self: { sessionId: 'session-self1', label: '@self', aliases: [], isMain: false, participant: true, seesLine: true, model: null },
+    line: { text: 'main=abc1234' }, asks: [], others: [], othersTotal: 0,
+    restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/w',
+    release: { version: '2.4.2', tag: 'v2.4.2', tagExists: true, nextVersion: '2.4.3', nextTag: 'v2.4.3' },
+    entries: [
+      { sessionId: 'session-r1', label: '@r1', status: 'ready', category: 'ready', commit: 'bbbbbbb1', state: 'idle', updatedAt: 1, approval: { stage: 'approved', sha: 'bbbbbbb1', tag: null, at: 2 } },
+      { sessionId: 'session-r2', label: '@r2', status: 'ready', category: 'ready', commit: 'bbbbbbb2', state: 'idle', updatedAt: 1 },
+      { sessionId: 'session-m1', label: '@m1', status: 'ready', category: 'ready', commit: 'bbbbbbb3', state: 'idle', updatedAt: 1, mainMerged: 'main' }
+    ]
+  }
+  const render = (page) => {
+    const original = React.useState
+    let calls = 0
+    React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+    try { return textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: page })) } finally { React.useState = original }
+  }
+  const page = render('board')
+  for (const part of ['mergeReady', 'mergeApproved', 'mergeMerged', 'mergeNext', 'mergeApprove', 'mergeLaterBtn', 'mergeRejectBtn', 'mergeApprovedHint']) {
+    assert.ok(page.includes(part), '可合并卡片缺少 ' + part)
+  }
+  assert.match(page, /v2\.4\.3/, '已合入项给出「随 v2.4.3 发布」')
+  const overview = render('overview')
+  assert.ok(overview.includes('mergeSummaryTitle'), '主会话卡有合并流水线摘要')
+  assert.ok(overview.includes('mergeSummary'))
+  assert.match(overview, /mergePending|mergeSummary/, '摘要里有可合并 / 已批准 / 已合入计数')
 })

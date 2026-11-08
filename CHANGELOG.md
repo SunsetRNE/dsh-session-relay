@@ -1,5 +1,35 @@
 # Changelog
 
+## 未发布
+
+协作流程 UI 补强（T14）：把「用户批准 → 主会话合并 → 发版」搬进面板，同时不放松授权边界——UI 只记录决定和发通知，推送 / 合并 / tag / Release 仍由用户在主会话明确同意后执行。串行测试 457 全过。
+
+### A. 合并批准流水线
+
+- 看板「可合并」卡片与主会话卡显示 `可合并 → 已批准 → 已合入 → 随 vX.Y.Z 发布`；已合入来自提交事实（mainMerged / 声明已合入），已发布只在 main 完全发布（main build == released build）时标记。
+- 用户动作「批准合并 / 稍后 / 打回（带理由）」走 `settings-route` 新增的 `merge-approve` / `merge-later` / `merge-reject`：只写协调状态 `groups.<工作区>.approvals` + 投递一条用户消息，**不跑 git、不改声明**。
+- 批准绑定汇报提交 sha：同一 sha 重复批准幂等（不重复唤醒）；提交变化后旧批准失效（`stale`），需重新批准；打回的新提交回到「可合并」。打回理由必填并唤醒工作会话。
+- 服务端：`CoordStore.approvalTtlMs`（默认 30 天过期清理，最多 200 条）；`relay.mergeDecision()`；看板条目新增 `approval` 视图；`impl.board()` 附带便宜的 `release` 摘要（版本 / tag / 待发版本）。
+
+### C. 主会话「下一步」卡
+
+- 协作面板概览首块：按 待回答提问 > 已批准合并 > 可合并 > 发版待办 > 发布后核对 排序；每项可「去看板」或「唤醒主会话」；空状态明确写「暂无待办」。
+- 发版待办 / 发布后核对只用只读事实（origin/main build 与已发布 build 的差），读不到不猜。
+
+### B. 发布状态卡
+
+- 设置页新增「发布」区：只读 `package.json` 版本、HEAD、origin/main、最新 tag、GitHub Release、tgz 附件 size/sha（本地 `dist/` 或 Release 资产）；gh 失败显示「未知」，404 显示「还没有」。
+- 阶段条：准备 → 测试 → 打包 → 已 push → tag → Release → 市场；测试没有落盘结果，明确写「面板不记录」。
+- 动作只有「复制发版清单命令 / 唤醒主会话 / 打开 Release」；**没有** push / tag / Release 按钮。
+- 服务端：`GET ?view=release`（60s 缓存，`force=1` 重读）；`lib/release.js` 纯函数（版本推进 / 阶段条 / 清单命令）；gh 只读，身份锁定时归入「无法读取」。
+
+### KIT / 文档 / 测试
+
+- 侧栏 `SIDEBAR_KIT 41 → 42`：外壳 + shared + 10 个页签 chunk 全部改名 `client.sidebar*42.js` 并同步 `KIT_VERSION`；面板 `PANEL_KIT 8 → 9`；`lib/client.js` touch。
+- 文案进 `docs/ui-copy.md` 第二十批；`docs/coordination-ui.md` 补实现状态；协作流程手册补面板批准说明；维护指南补 `lib/release.js` 与批准存储。
+- 测试新增 `test/release.test.js`（版本推进 / 阶段条 / 命令）与合并批准、发布视图、面板下一步 / 流水线、侧栏发布卡用例；串行 457 全过（原 446 + 11）。
+
+
 ## 2.4.2 - 2026-11-09
 
 侧栏按页签拆 chunk（T13）：首次打开只拉「外壳 + 共享件 + 当前页签」，其余页签按需 `require.async`，悬停 200ms 预取；右栏与嵌入面板共用同一份加载器缓存；chunk 不配套 / 加载失败回退最小一行。串行测试 446 全过。

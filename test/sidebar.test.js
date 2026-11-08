@@ -1,4 +1,4 @@
-// 右侧边栏「协作」标签：入口只登记类型与空壳，正文在 client.sidebar41.js 外壳 + 各页签 chunk 里按需加载
+// 右侧边栏「协作」标签：入口只登记类型与空壳，正文在 client.sidebar42.js 外壳 + 各页签 chunk 里按需加载
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -22,9 +22,9 @@ function fakeReact(states = []) {
   return React
 }
 
-// T13：侧栏按页签拆 chunk（KIT 41）。测试里把外壳 + 全部 chunk 一次性登记进同一加载器缓存，
+// T13：侧栏按页签拆 chunk（KIT 42）。测试里把外壳 + 全部 chunk 一次性登记进同一加载器缓存，
 // 这样 `mod.Xxx` 的原有断言不用改；按需 / 预取 / 失败回退另由「按需拆 chunk」用例直接测加载器。
-const KIT = 41
+const KIT = 42
 const CHUNK_NAMES = ['shared', 'sessions', 'tasks', 'handoff', 'map', 'prs', 'branches', 'issues', 'mail', 'more', 'settings']
 async function loadSidebar(React) {
   const { mod: shell, chunk } = await load('client.sidebar' + KIT + '.js', React)
@@ -137,21 +137,21 @@ test('入口：没有 ctx.inject（旧宿主）时不登记右侧边栏、不报
   assert.ok(!names.includes('sidebar.right.pane.tab'))
 })
 
-test('入口：空壳不同步加载正文；用 require.async 拉 client.sidebar41.js', async () => {
+test('入口：空壳不同步加载正文；用 require.async 拉 client.sidebar42.js', async () => {
   const React = fakeReact()
   let lazyFactory
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 41 }) })
-  assert.equal(mod.SIDEBAR_CHUNK, 'client.sidebar41.js', '入口指向按版本命名的 chunk')
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 42 }) })
+  assert.equal(mod.SIDEBAR_CHUNK, 'client.sidebar42.js', '入口指向按版本命名的 chunk')
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
   assert.equal(tree.type, 'suspense')
   assert.equal(textOf(tree.props.fallback), 'sideLoading')
   const loaded = await lazyFactory()
-  assert.deepEqual(asked, ['./client.sidebar41.js'])
+  assert.deepEqual(asked, ['./client.sidebar42.js'])
   assert.equal(loaded.default(), 'body')
 })
 
@@ -166,9 +166,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v41'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v42'), '显示实际 / 期望版本')
   const { mod: chunk } = await loadSidebar(fakeReact())
-  assert.equal(chunk.KIT_VERSION, 41, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 42, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -205,11 +205,11 @@ function kitFor(opened = []) {
 const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, workItem = undefined, extra = [] } = {}) =>
   [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, workItem, {}, false, 0, ...extra]
 
-test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar41.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
+test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar42.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
   const React = fakeReact(states(sampleBoard()))
   const { mod, chunk } = await loadSidebar(React)
-  assert.equal(chunk, 'client.sidebar41.js')
-  assert.equal(mod.KIT_VERSION, 41)
+  assert.equal(chunk, 'client.sidebar42.js')
+  assert.equal(mod.KIT_VERSION, 42)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
   const text = textOf(tree)
   for (const part of ['dsha-session-relay', 'sideTabSessions', 'sideTabTasks', 'sideTabHandoff', 'sideTabMap', 'sideTabPr', 'sideTabBranches', 'sideTabIssues', 'sideTabMail', 'sideTabMore', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
@@ -476,7 +476,7 @@ test('正文 chunk：还没数据时显示读取中；没有会话时不渲染',
 })
 
 test('正文 chunk：样式随标签注入，不在入口里；不用 backdrop-filter 和常驻动画', async () => {
-  const chunk = await readFile(new URL('../lib/client.sidebar41.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar42.js', import.meta.url), 'utf8')
   const entry = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   assert.ok(chunk.includes('.dshaSv_card'))
   assert.ok(!entry.includes('.dshaSv_'), '入口不带侧边栏样式')
@@ -508,7 +508,7 @@ test('正文 chunk：空白会话按服务端分类显示「空白」，不算�
   const open = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(open.includes('catBlank') && open.includes('f4ada307'))
   assert.ok(!open.includes('status_working'))
-  const chunk = await readFile(new URL('../lib/client.sidebar41.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar42.js', import.meta.url), 'utf8')
   assert.ok(!chunk.includes('brand-primary'), '强调色用链接蓝，不用主题里接近黑白的 brand-primary')
 })
 
@@ -535,7 +535,7 @@ test('入口：设置页 / 协作标签 / 监督面板的正文在 client.panel.
   React.lazy = (factory) => { lazies.push(factory); return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 8 }
+  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 9 }
   const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve(reply) })
   assert.equal(asked.length, 0, '载入入口时不下载正文')
   const tree = React.createElement(mod.BoardPage, { t })
@@ -746,7 +746,8 @@ test('正文 chunk：卡片主操作随状态——待答复回复、可合并�
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(posted.at(-1), { action: 'reply', target: q.sessionId, text: '先做 A', mode: 'followup', fromSession: 'session-self' })
   const r = sampleBoard().entries[1]
-  React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [r] }, ['assign', 'build281', false]))
+  // 可合并卡片多了两个合并动作的 useState（打回开关 / 理由），摆在 EntryCard 的 open 之后、CardAction 之前
+  React = fakeReact(sidebarStates({ ...sampleBoard(), entries: [r] }, ['assign', false, '', 'build281', false]))
   m = (await loadSidebar(React)).mod
   tree = React.createElement(m.RelaySidebar, { kit: { ...kit, request: async (method, body) => { posted.push(body); return {} } }, sessionId: 'session-self' })
   await find(tree, button('assignSend')).props.onClick({ stopPropagation() {} })
@@ -1560,7 +1561,7 @@ test('更多页：窄屏快捷入口，点条目切页 / 打开设置', async ()
 })
 
 test('侧栏折叠：更多页快捷入口只在窄屏显示，隐藏规则用双类名', async () => {
-  const source = await readFile(new URL('../lib/client.sidebar41.js', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../lib/client.sidebar42.js', import.meta.url), 'utf8')
   assert.ok(source.includes('.dshaSv_wide .dshaSv_foldOnly{display:none}'), '宽屏隐藏规则用宽度 class + 双类名')
   assert.ok(source.includes('ResizeObserver') && source.includes('dshaSv_wide'), '旋转后由 ResizeObserver 重新量宽度')
   const ReactR = fakeReact(states(sampleBoard()))
@@ -2318,7 +2319,7 @@ test('入口：空闲时预取侧栏 chunk，首次打开不用再等下载', as
     assert.equal(pending.length, 1, '登记侧栏时挂一次空闲预取')
     pending[0]()
     await new Promise((resolve) => setTimeout(resolve, 0))
-    assert.deepEqual(asked, ['./client.sidebar41.js'], '空闲时拉一次 chunk')
+    assert.deepEqual(asked, ['./client.sidebar42.js'], '空闲时拉一次 chunk')
     const Tab = mod.makeSidebarTab({ t })
     assert.equal(textOf(React.createElement(Tab, { sessionId: 's' })), 'body', '预取完成后直接渲染正文，不再闪 Suspense')
   } finally {
@@ -2510,4 +2511,69 @@ test('按需拆 chunk：旧版 / 加载失败回退成最小一行并给出刷�
     globalThis.setTimeout = realTimeout
     globalThis.setInterval = realInterval
   }
+})
+
+// ---------------------------------------------------------------- T14 合并流水线 / 发布卡
+
+test('T14：可合并卡片有流水线与批准 / 稍后 / 打回；主会话行给可合并 / 已批准计数', async () => {
+  const board = sampleBoard()
+  board.release = { version: '2.4.2', tag: 'v2.4.2', tagExists: true, nextVersion: '2.4.3', nextTag: 'v2.4.3', latestTag: 'v2.4.2' }
+  board.entries = [
+    { sessionId: 'session-r1aaaaaa', label: '@r1', status: 'ready', category: 'ready', state: 'idle', commit: 'aaaaaaa1', approval: { stage: 'approved', sha: 'aaaaaaa1', tag: null, at: 2 } },
+    { sessionId: 'session-r2bbbbbb', label: '@r2', status: 'ready', category: 'ready', state: 'idle', commit: 'bbbbbbb2' },
+    { sessionId: 'session-r3cccccc', label: '@r3', status: 'ready', category: 'ready', state: 'idle', commit: 'ccccccc3', mainMerged: 'main' }
+  ]
+  const React = fakeReact(states(board))
+  const { mod } = await loadSidebar(React)
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
+  const text = textOf(tree)
+  for (const part of ['mergeReady', 'mergeApproved', 'mergeMerged', 'mergeNext', 'mergeApprovedHint', 'mergeApprove', 'mergeLaterBtn', 'mergeRejectBtn']) {
+    assert.ok(text.includes(part), '可合并卡片缺少 ' + part)
+  }
+  assert.match(text, /mergeNext\{"tag":"v2\.4\.3"\}/, '已合入项显示随 v2.4.3 发布')
+  assert.match(text, /mergeApproved 1/, '主会话行给已批准计数')
+  assert.match(text, /mergeReady 2/, '主会话行给可合并计数（已批准 / 已合入不再算可合并）')
+})
+
+test('T14：设置页发布卡只读展示阶段条 / 事实 / 动作，复制的是命令、不触发写操作', async () => {
+  const copied = []
+  const data = {
+    available: true, version: '2.4.2', tag: 'v2.4.2', tagExists: true, tagRemote: true, latestTag: 'v2.4.2', nextTag: 'v2.4.3',
+    head: { sha: 'a'.repeat(40), short: 'aaaaaaaa', branch: 'main' },
+    main: { sha: 'b'.repeat(40), short: 'bbbbbbbb', build: 'build77' },
+    pushed: false, prepared: { changelog: true, notes: true },
+    packed: { file: 'dist/dsh-session-relay-2.4.2.tgz', size: 540732, sha256: 'c'.repeat(64) },
+    release: { state: 'missing' }, checkedAt: 1,
+    command: 'node --test --test-concurrency=1 test/*.test.js\nnpm pack --pack-destination dist',
+    stages: [
+      { key: 'prepare', state: 'done' }, { key: 'test', state: 'unknown' }, { key: 'pack', state: 'done' },
+      { key: 'push', state: 'pending' }, { key: 'tag', state: 'done' }, { key: 'release', state: 'pending' }, { key: 'market', state: 'unknown' }
+    ]
+  }
+  const React = fakeReact([data, undefined, false, false])
+  const { mod } = await loadSidebar(React)
+  assert.equal(typeof mod.ReleaseBox, 'function', '设置页导出发布卡')
+  const posted = []
+  const kit = {
+    ...kitFor(),
+    copyText: async (value) => { copied.push(value); return true },
+    request: async (method, body, params) => { posted.push({ method, params }); return { release: data } }
+  }
+  const tree = React.createElement(mod.ReleaseBox, { kit, board: { coordinator: { sessionId: 'session-main1' } }, sessionId: 'session-self', busy: false, act: () => {} })
+  const text = textOf(tree)
+  for (const part of ['releaseTitle', 'releaseHint', 'releaseStagePrepare', 'releaseStageTest', 'releaseStagePack', 'releaseStagePush', 'releaseStageTag', 'releaseStageRelease', 'releaseStageMarket', 'releaseStateDone', 'releaseStatePending', 'releaseStateUnknown', 'releaseVersion', 'v2.4.2', 'bbbbbbbb', 'releaseCommand', 'releaseWake']) {
+    assert.ok(text.includes(part), '发布卡缺少 ' + part)
+  }
+  assert.match(text, /528 KB/, '附件大小可读')
+  assert.match(text, /releaseMissing/, 'Release 缺失时写「还没有」而不是编造')
+  assert.equal(posted.length, 0, '渲染时只读 GET，不触发写操作')
+  // 复制按钮只把命令放进剪贴板
+  const copyButton = findButton(tree, (label) => label === 'releaseCommand')
+  assert.ok(copyButton, '有复制发版清单命令按钮')
+  await copyButton.props.onClick()
+  assert.deepEqual(copied, [data.command])
+  // 源码边界：发布卡没有 push / tag / release 写动作，只有唤醒（wake）与复制
+  const chunk = await readFile(new URL('../lib/client.sidebar.settings42.js', import.meta.url), 'utf8')
+  assert.match(chunk, /function ReleaseBox/)
+  assert.ok(!/git push|git tag|gh release create/.test(chunk.replace(/node --test[\s\S]*?release-notes[^\n]*/g, '')), '发布卡不跑 push / tag / Release 命令')
 })

@@ -215,6 +215,42 @@ test('协调状态：接管主会话、看板合并更新、裁剪与持久化',
   }
 })
 
+test('协调状态：合并批准按工作区存、重复批准幂等、sha 变化替换、30 天过期清理', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'coord-approval-'))
+  try {
+    let now = 1_000
+    const path = join(dir, 'coordination.json')
+    const store = new CoordStore(path, { now: () => now, approvalTtlMs: 10_000 })
+    const first = await store.setApproval('w1', { status: 'approved', sha: 'aaaaaaa1', at: now })
+    assert.equal(first.duplicate, false)
+    assert.deepEqual(store.group('_').approvals.w1, { status: 'approved', sha: 'aaaaaaa1', at: 1000, by: 'user' })
+    const same = await store.setApproval('w1', { status: 'approved', sha: 'aaaaaaa1', at: now })
+    assert.equal(same.duplicate, true, '同一 sha 重复批准幂等')
+    const changed = await store.setApproval('w1', { status: 'approved', sha: 'bbbbbbb2', at: now })
+    assert.equal(changed.duplicate, false)
+    assert.equal(changed.record.sha, 'bbbbbbb2', 'sha 变化时替换记录（旧批准自然失效）')
+    now = 5_000
+    await store.setApproval('w2', { status: 'rejected', sha: 'ccccccc3', reason: '补测试', at: now })
+    assert.equal(store.group('_').approvals.w2.reason, '补测试')
+    await store.setApproval('x1', { status: 'later', sha: 'ddddddd4', at: now }, 'ws-a')
+    assert.equal(store.group('ws-a').approvals.x1.status, 'later', '按工作区隔离')
+    assert.equal(store.group('_').approvals.x1, undefined)
+    // 30 天 / 自定义 TTL：读回时清过期，保留未过期的
+    now = 12_000
+    const reloaded = new CoordStore(path, { now: () => now, approvalTtlMs: 10_000 })
+    await reloaded.load()
+    assert.equal(reloaded.group('_').approvals.w1, undefined, '过期批准被清掉')
+    assert.equal(reloaded.group('_').approvals.w2.status, 'rejected', '没过期的保留')
+    assert.equal(reloaded.group('ws-a').approvals.x1.status, 'later')
+    // 清一条不影响其它
+    await reloaded.clearApproval('w2', '_')
+    assert.equal(reloaded.group('_').approvals?.w2, undefined)
+    assert.equal(reloaded.group('ws-a').approvals.x1.status, 'later')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('上下文文本：主会话看看板，工作会话看汇报方式；时间不用相对值', () => {
   const board = { w1: { status: 'question', summary: '要不要改版本号', question: 'build273 还是 274？', updatedAt: Date.UTC(2026, 10, 2, 17, 0) } }
   const main = coordinatorContext({ board, labelFor: (id) => '@' + id, selfId: 'm' })

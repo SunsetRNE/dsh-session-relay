@@ -93,7 +93,7 @@ npm test
 
 加载方式：`lib/index.js` 是外壳，逻辑在 `lib/impl.js` 及其依赖里。改实现文件后 `/relay reload` 即可生效；`lib/client.js`（面板）改动由宿主热更新，刷新即见；改 `lib/index.js`、`package.json` 的 `dsh` 字段或 `cordis.patch.yml` 需要重启 DSH。
 
-面板缓存注意：只改 `lib/client.panel.js` 必须同步改一行 `lib/client.js` 并把 `PANEL_KIT` / `KIT_VERSION` 一起 +1。改侧栏正文时，外壳与每个 chunk 都按当前 KIT 命名（如 `lib/client.sidebar41.js`、`lib/client.sidebar.tasks41.js`），同步改 `lib/client.js` 的 `SIDEBAR_CHUNK` / `SIDEBAR_KIT`、外壳与全部 chunk 的 `KIT_VERSION`，并在 `client.js` touch 一行；KIT 一升就换文件名（`client.sidebar<新KIT>.js` / `client.sidebar.<name><新KIT>.js`），浏览器不会命中旧 chunk 的 immutable 缓存。只改某一个 chunk 也要整体 bump（外壳会校验每个 chunk 的 KIT_VERSION）。改过 `client.js` 本身后本机实测宿主会热更新，等一两秒或刷新即见（2026-11-07 DSH 进程未重启也生效）；只有宿主没开客户端热更新且刷新无效时才重启 DSH。
+面板缓存注意：只改 `lib/client.panel.js` 必须同步改一行 `lib/client.js` 并把 `PANEL_KIT` / `KIT_VERSION` 一起 +1。改侧栏正文时，外壳与每个 chunk 都按当前 KIT 命名（如 `lib/client.sidebar42.js`、`lib/client.sidebar.tasks42.js`），同步改 `lib/client.js` 的 `SIDEBAR_CHUNK` / `SIDEBAR_KIT`、外壳与全部 chunk 的 `KIT_VERSION`，并在 `client.js` touch 一行；KIT 一升就换文件名（`client.sidebar<新KIT>.js` / `client.sidebar.<name><新KIT>.js`），浏览器不会命中旧 chunk 的 immutable 缓存。只改某一个 chunk 也要整体 bump（外壳会校验每个 chunk 的 KIT_VERSION）。改过 `client.js` 本身后本机实测宿主会热更新，等一两秒或刷新即见（2026-11-07 DSH 进程未重启也生效）；只有宿主没开客户端热更新且刷新无效时才重启 DSH。
 
 ## 协作流程
 

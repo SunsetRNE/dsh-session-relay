@@ -10,6 +10,8 @@
 - `lib/inspect.js`：会话日志分析层。把 `sessionQuery.readSession()` 的完整原始事件整理成轮次、工具调用、文件改动、输出和可搜索文档。它只读，不唤醒会话。
 - `lib/impl.js` / `lib/settings-route.js`：Host 适配层。`impl.js` 连接会话、工作区、看板和 `sessionQuery`；`settings-route.js` 给已登录的本机面板提供只读查询和用户动作。模型工具和用户面板必须在这一层区分权限范围。
 - `lib/client.js`：浏览器面板层。通过 `/api/dsha-session-relay` 取数据，不直接读文件或 Host 服务。面板逻辑改完通常刷新即可；外壳、注入字段和 bundle patch 改动需要重启 DSH。
+- `lib/release.js`：发布状态卡的纯函数（版本推进 / 阶段条 / 发版清单命令）。git / package.json / gh 的真读取在 `impl.js`，失败只写未知；UI 不执行 push / tag / Release。
+- 合并批准记录存在协调状态 `groups.<工作区>.approvals`（只由用户在面板点；sha 绑定、30 天过期）。它只是流水线记录，不是推送 / 合并授权；`impl.mergeDecision()` 不跑 git。
 
 `lib/index.js` 是尽量稳定的外壳：负责把实现复制到 `.gen/<代次>`、注册命令/工具/路由，并在 `/relay reload` 时热替换 `impl.js` 及依赖。不要把业务逻辑塞回外壳，否则热重载和状态接管会变复杂。
 
