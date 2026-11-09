@@ -1300,6 +1300,41 @@ test('合并批准：绑定提交、幂等、sha 变化失效；打回要理由�
   } finally { await h.cleanup() }
 })
 
+test('T18 面板：本地已合入 · 待推送走 5 段流水线并显示待推送原因，不给批准动作', async () => {
+  const { React } = fakeReact()
+  const mod = await loadClient(React)
+  const t = (key) => key === 'mergeLocalWhere' ? '已在 {v} · 待推送' : key
+  const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+  const entry = {
+    sessionId: 'session-loc1', label: '@loc', status: 'ready', category: 'ready', state: 'idle', commit: 'ddddddd4',
+    mainLocal: 'local main 43bb221', updatedAt: 1,
+    approval: { stage: 'local-merged', current: 'ddddddd4', localMerged: 'local main 43bb221', pendingPush: true, tag: null }
+  }
+  const board = {
+    scope: 'workspace', workspace: null, hiddenByScope: 0, coordinator: { sessionId: 'session-main1', label: '@main', exists: true },
+    line: null, others: [], othersTotal: 0, restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/a',
+    entries: [entry], asks: [], release: { nextTag: 'v2.4.4' }
+  }
+  const render = (page) => {
+    const original = React.useState
+    let calls = 0
+    React.useState = (initial) => (++calls === 2 ? [board, () => {}] : original(initial))
+    try {
+      return textOf(React.createElement(mod.LegacyBoardPage, { t, openSession: () => {}, marksStore: store, initialPage: page }))
+    } finally { React.useState = original }
+  }
+  const page = render('board')
+  for (const part of ['mergeReady', 'mergeApproved', 'mergeLocalMerged', 'mergeLocalPending', 'mergeMerged']) {
+    assert.ok(page.includes(part), '缺少 ' + part)
+  }
+  assert.match(page, /mergeLocalMerged · mergeLocalPending/, '中间节点写「本地已合入 · 待推送」')
+  assert.match(page, /已在 local main 43bb221 · 待推送/, '卡片说明待推送的本地 main')
+  assert.ok(!/mergeApprove(?![A-Za-z])/.test(page), '已合入本地 main 不再给批准动作')
+  const overview = render('overview')
+  assert.ok(overview.includes('nextStageLocal'), '下一步有「待推送」阶段')
+  assert.ok(overview.includes('nextLocal'), '下一步提示等 push')
+})
+
 test('发布状态卡：只读版本 / HEAD / origin/main / tag / 本地 tgz；gh 读不到时写未知', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'relay-release-'))
   const repo = join(dir, 'repo')

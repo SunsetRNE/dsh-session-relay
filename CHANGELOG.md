@@ -2,7 +2,26 @@
 
 ## 2.4.4 - 2026-11-09
 
-2.4.4 把协作流程继续做进面板：票子驾驶舱、PR 11 态审核、AI 审核自动回写；三个 relay 技能改为随包内置。串行测试 488 全过。
+2.4.4 把协作流程继续做进面板：票子驾驶舱、PR 11 态审核、AI 审核自动回写、合并流水线「本地已合入 · 待推送」中间态；三个 relay 技能改为随包内置。串行测试 492 全过。
+
+### T18：合并流水线中间态「本地已合入 · 待推送」
+
+用户反馈「批准 / 本地合入后看板仍显示没合并」：T15/T16/T17 已经 ff 合进本地 main、还没 push，合并流水线却停在「可合并 / 已批准」。本轮把 local main 纳入只读核对：提交在 `refs/heads/main` 但不在 `refs/remotes/origin/main` 时，看板条目带 `mainLocal`，流水线显示中间态「本地已合入 · 待推送」；push 后由 origin/main 事实接管，自动转「已合入 / 已发布」。只读 git，不 fetch、不 push，不改变 origin/main 口径；串行测试 492 全过。
+
+#### A. 服务端（只读 local main）
+
+- 新增 `loadLocalMain()`（`lib/tasks.js`）：`rev-parse refs/heads/main` + `rev-list` 一次取集合，不 fetch、不改 refs，也不看 origin/main；本地 main 不存在（detached / 别的分支名）返回 undefined，不猜。
+- `localMergedFor(key)`：对看板 ready 条目（有 commit、没有声明已合入）核对提交是否为 local main 祖先；只把「origin/main 没有、本地 main 有」的标成 `{ kind: 'local', where: 'local main <short>' }`。缓存按工作区，`config.localMainTtlMs` 可调，默认比 mainMerged TTL 短（≤ 2 分钟）。
+- `coordinatorBoard`：origin/main 事实先落 `mainMerged`（含已挑入 / 提交不存在），本地事实只补 `mainLocal`；origin 优先，`declMerged` / 非 ready 不覆盖；看板条目新增 `mainLocal` 字段。
+- `approvalView` 阶段优先级 **merged(origin) > local-merged > approved > ready**；local-merged 带 `pendingPush: true`、`localMerged`（本地 main 短 sha），不给 `tag`；`released` 仍只由 origin/main 已发布推出。
+- `staleReason` / `classifyEntry` / 归档：本地已合入按 `local-merged` 归档（主会话上下文不再排进合并队列，`staleLines` 单列「已合入本地 main、还没 push」），`/relay drop --archived --local-merged` 可用。
+
+#### B. UI（面板 + 右侧栏）
+
+- 合并流水线改成 5 段：可合并 → 已批准 → 本地已合入 · 待推送 → 已合入 → 随 vX.Y.Z 发布；中间态用 warn 色调，已 push / 已发布后该节点转 ok。
+- 本地已合入的卡片不再给「批准合并 / 稍后 / 打回」按钮，只显示「已在 {local main} · 待推送」+ 悬停「push / 发版后才会显示『已合入』」；主会话行加「待推送 N」warn 胶囊（不再算进可合并 / 已批准计数）；「下一步」卡加「N 个已合入本地 main，等 push」。
+- 文案 zh / en 成对（`mergeLocal*` / `nextStageLocal` / `nextLocal` / `why_local-merged`）；`SIDEBAR_KIT 45 → 46`（外壳 + shared + 10 页签 chunk 全部改名 `client.sidebar*46.js` 并同步 `KIT_VERSION`）、`PANEL_KIT 9 → 10`、`lib/client.js` touch（新增文案需重启 DSH）。
+- 文档 / 测试：`docs/coordination-playbook.md` 合并 / 发版段补中间态；`docs/ui-copy.md` 第二十四批；README 2.4.4；新增本地 main 判定（含 / 不含 / origin 优先 / 非 ready / 无 local main）、approvalView 优先级与面板 / 侧栏 5 段渲染测试。
 
 ### T17：AI 审核闭环（拉起即刷新 + 自动回写结论）
 
