@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { apply } from '../lib/index.js'
 import { parseRelayCommand } from '../lib/core.js'
 import { fileURLToPath } from 'node:url'
@@ -2290,6 +2290,127 @@ test('T19 票子驾驶舱：已写完成的票按 holder 合并事实显示本�
     assert.equal(row.gates.release.tag, null, '未发布不显示实际 tag')
     assert.equal(row.gates.release.released, false)
     assert.equal(row.gates.approval.value, 'pending', '任务审批单独标注')
+  } finally { await h.cleanup() }
+})
+
+test('T22 票子交接：活跃持有者 → 新会话接认领、launch 记接手自、原会话收停手通知，重复点击幂等', async () => {
+  const h = await setup()
+  try {
+    // 真实会话 id 带 session- 前缀；harness 的默认 peer 是裸 id，这里建一个带前缀的原持有者
+    const holder = h.makeAgent('session-bbbbbbbb-0000-0000-0000-000000000002', { cwd: h.dir, status: 'running' })
+    h.agents.set(holder.id, holder)
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, holder.id] })
+    await h.run('main here')
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |\n|---|---|---|---|---|---|\n| T1 | P1 | 交接票 | .agents/worktrees/t1 | 否 | 进行中（bbbbbbbb 认领） |\n\n### T1 交接票\n\n验收：交接后接着做。\n')
+    await mkdir(join(h.dir, '.agents/claims/T1'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/claims/T1/owner'), `${holder.id}\n`)
+    // 原持有者（live）的旧启动记录：分支 / 工作树要沿用到新会话，不再另开一条
+    const found = await h.relay.taskBoardFor({ sessionId: h.caller.id })
+    const state = await h.relay.ensureTaskState(found.board.storeRoot)
+    await state.set('T1', {
+      stage: 'doing', stageBy: h.peer.id, stageAt: Date.now(),
+      launch: { sessionId: holder.id, alias: 't1', branch: 't1', worktree: '.agents/worktrees/t1', skill: 'relay-worker', at: Date.now(), by: 'user' }
+    })
+    const before = new Set(h.agents.keys())
+    let board = await h.relay.board(undefined, { session: h.caller.id })
+    let row = [...board.taskBoard.claimedRows, ...board.taskBoard.open].find((item) => item.id === 'T1')
+    assert.equal(row.gates.holder.state, 'live')
+    assert.equal(row.gates.takeover.allowed, true, '活跃持有者可交接')
+    assert.equal(row.gates.launch.allowed, false, '拉起仍被活跃持有者挡住')
+
+    const { perform } = await import('../lib/settings-route.js')
+    const done = await perform(h.relay, { action: 'ticket-takeover', fromSession: h.caller.id, task: 'T1', skill: 'relay-worker', alias: 't1b' })
+    const created = done.result.sessionId
+    assert.ok(typeof created === 'string' && created !== '', '建了新会话')
+    assert.notEqual(created, holder.id)
+    assert.equal(done.result.from.sessionId, holder.id, '结果里记接手自')
+    assert.equal(done.result.branch, 't1', '沿用原持有者分支')
+    assert.equal(done.result.worktree, '.agents/worktrees/t1', '沿用原工作树')
+    assert.equal(done.result.notice, 'sent', '原持有者已通知')
+    // 认领转给新会话（走 board handoff，不手改 claims 目录）
+    const owner = await readFile(join(h.dir, '.agents/claims/T1/owner'), 'utf8')
+    assert.match(owner, new RegExp('接手 ' + created), '认领链尾部是新的持有者')
+    assert.match(owner, /由 aaaaaaaa 转交/)
+    // launch 记录：接手自 + stage=doing
+    assert.equal(state.get('T1').stage, 'doing')
+    assert.equal(state.get('T1').launch.takeover, true)
+    assert.equal(state.get('T1').launch.takeoverFrom, holder.id)
+    assert.equal(state.get('T1').launch.sessionId, created)
+    // 首条消息：票子完整字段 + 接手自 / 先读原会话 / 别推别的分支
+    const inbox = h.agents.get(created).inbox
+    assert.equal(inbox.length, 1, '新会话只有票子首条消息（没有重复的转交通知）')
+    const text = inbox[0][1].content[0].text
+    for (const part of ['T1', '交接票', '接手自：', holder.id, '先读原会话的 .SESSION-DONE', '别推别的分支', '分支 t1', '先加载技能']) {
+      assert.ok(text.includes(part), '首条消息缺少 ' + part)
+    }
+    // 原持有者收到停手通知
+    const oldText = h.agents.get(holder.id).inbox.at(-1)[1].content[0].text
+    assert.match(oldText, /T1 已交接给 @t1b/)
+    assert.match(oldText, /停止改文件/)
+    // 审计：task-events.jsonl 记 ticket-takeover（含原 / 新持有者）
+    const audit = await readFile(join(dirname(found.board.file), 'task-events.jsonl'), 'utf8')
+    assert.match(audit, /"action":"handoff"/)
+    assert.match(audit, /"action":"ticket-takeover"/)
+    assert.match(audit, /"notice":"sent"/)
+
+    // 重复点击：幂等，不建第二个会话、不再转认领
+    const mid = new Set(h.agents.keys())
+    const again = await perform(h.relay, { action: 'ticket-takeover', fromSession: h.caller.id, task: 'T1', skill: 'relay-worker', alias: 't1c' })
+    assert.equal(again.result.already, true)
+    assert.equal(again.result.sessionId, created)
+    assert.deepEqual([...new Set(h.agents.keys())].filter((id) => !mid.has(id) && !before.has(id)), [], '没有新会话')
+    const ownerAgain = await readFile(join(h.dir, '.agents/claims/T1/owner'), 'utf8')
+    assert.match(ownerAgain, new RegExp('接手 ' + created), '幂等没有追加第二条接手')
+    assert.equal((ownerAgain.match(/^接手/gm) ?? []).length, 1, '认领链只追加了一次接手')
+    assert.equal(state.get('T1').launch.sessionId, created)
+    assert.equal(state.get('T1').stage, 'doing')
+  } finally { await h.cleanup() }
+})
+
+test('T22 票子交接：门禁挡住时不建会话不改认领；通知失败不回滚交接但结果 / 审计记录', async () => {
+  const h = await setup()
+  try {
+    const holder = h.makeAgent('session-bbbbbbbb-0000-0000-0000-000000000002', { cwd: h.dir, status: 'running' })
+    h.agents.set(holder.id, holder)
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, holder.id] })
+    await h.run('main here')
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |\n|---|---|---|---|---|---|\n| T1 | P1 | 有依赖 | .agents/worktrees/t1 | 否 | 进行中（bbbbbbbb 认领） |\n| T2 | P1 | 通知失败 | .agents/worktrees/t2 | 否 | 进行中（bbbbbbbb 认领） |\n| T0 | P1 | 前置 |  | 否 | 待认领 |\n')
+    await mkdir(join(h.dir, '.agents/claims/T1'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/claims/T1/owner'), `${holder.id}\n`)
+    await mkdir(join(h.dir, '.agents/claims/T2'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/claims/T2/owner'), `${holder.id}\n`)
+    // T1 依赖未结束的 T0（任务树依赖存图里，不由表格文本推）
+    const found2 = await h.relay.taskBoardFor({ sessionId: h.caller.id })
+    const { TaskGraph } = await import('../lib/taskgraph.js')
+    const graph = new TaskGraph(found2.board.storeRoot)
+    await graph.load()
+    await graph.set('T1', { parentId: null, dependsOn: ['T0'] })
+    // T1 依赖未结束 → 交接门禁拒绝
+    const before = new Set(h.agents.keys())
+    const { perform } = await import('../lib/settings-route.js')
+    await assert.rejects(perform(h.relay, { action: 'ticket-takeover', fromSession: h.caller.id, task: 'T1' }), (error) => error.code === 'ticket_gate')
+    assert.deepEqual([...new Set(h.agents.keys())].filter((id) => !before.has(id)), [], '门禁挡住不建会话')
+    assert.equal((await readFile(join(h.dir, '.agents/claims/T1/owner'), 'utf8')).split('\n')[0], holder.id, '认领不动')
+
+    // T2：通知原持有者失败，交接保留并在结果 / 审计标记失败
+    const realDeliver = h.relay.deliver.bind(h.relay)
+    h.relay.deliver = async (target, message, mode, options) => {
+      if (target === holder.id) throw new Error('模拟：原持有者不可达')
+      return realDeliver(target, message, mode, options)
+    }
+    try {
+      const sent = await perform(h.relay, { action: 'ticket-takeover', fromSession: h.caller.id, task: 'T2', skill: 'relay-worker' })
+      assert.equal(sent.result.notice, 'failed')
+      assert.match(sent.result.noticeError, /不可达/)
+      const owner = await readFile(join(h.dir, '.agents/claims/T2/owner'), 'utf8')
+      assert.match(owner, new RegExp('接手 ' + sent.result.sessionId), '交接没有被回滚')
+      const audit = await readFile(join(dirname(found2.board.file), 'task-events.jsonl'), 'utf8')
+      assert.match(audit, /"action":"ticket-takeover"/)
+      assert.match(audit, /"notice":"failed"/)
+      assert.match(audit, /不可达/)
+    } finally { h.relay.deliver = realDeliver }
   } finally { await h.cleanup() }
 })
 

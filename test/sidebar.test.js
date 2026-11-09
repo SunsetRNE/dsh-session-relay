@@ -2831,6 +2831,76 @@ test('票子驾驶舱：holder / 分支 / 工作树 / 最近汇报 + 一行判�
   assert.deepEqual(opened, ['session-new'], '拉起成功后打开新会话')
 })
 
+test('T22 票子驾驶舱：活跃 / 久未活动持有者可「交接给新会话」，提交 ticket-takeover 并打开新会话；门禁挡住时禁用给原因', async () => {
+  const posted = []
+  const opened = []
+  const kit = { ...kitFor(opened), request: async () => ({}) }
+  const act = async (body) => { posted.push(['POST', body]); return { result: { sessionId: 'session-new2' } } }
+  const task = {
+    id: 'T22', title: '交接票', owner: 'session-w1aaaaaa', worktree: '.agents/worktrees/t22',
+    gates: cockpitGates(),
+    launch: { branch: 't22', worktree: '.agents/worktrees/t22', skill: 'relay-worker' }
+  }
+  const React = fakeReact()
+  const { mod } = await loadSidebar(React)
+  const tree = React.createElement(mod.TicketCockpit, { kit, task, skills: cockpitSkills, entries: [], act, busy: false, sessionId: 'session-self' })
+  const text = textOf(tree)
+  assert.ok(text.includes('ticketTakeover') && text.includes('ticketTakeoverHint'), '有交接按钮与说明')
+  const button = findButton(tree, (label) => label === 'ticketTakeover')
+  assert.ok(button !== undefined)
+  assert.equal(button.props.disabled, false, '活跃持有者可交接')
+  await button.props.onClick({ stopPropagation() {} })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const sent = posted.at(-1)[1]
+  assert.equal(sent.action, 'ticket-takeover')
+  assert.equal(sent.task, 'T22')
+  assert.equal(sent.alias, 't22')
+  assert.equal(sent.skill, 'relay-worker')
+  assert.deepEqual(opened, ['session-new2'], '交接成功后打开新会话')
+
+  // stale 持有者也可交接（同一按钮）
+  const ReactStale = fakeReact()
+  const modStale = (await loadSidebar(ReactStale)).mod
+  const staleTask = { ...task, gates: cockpitGates({ holder: { sessionId: 'session-w1aaaaaa', label: '@w1', state: 'stale' } }) }
+  const staleTree = ReactStale.createElement(modStale.TicketCockpit, { kit, task: staleTask, skills: cockpitSkills, entries: [], act, busy: false, sessionId: 'session-self' })
+  assert.equal(findButton(staleTree, (label) => label === 'ticketTakeover').props.disabled, false, '久未活动持有者可交接')
+
+  // 持有者状态不明：禁用并显示原因，不默认抢
+  const ReactBlocked = fakeReact()
+  const modBlocked = (await loadSidebar(ReactBlocked)).mod
+  const blockedTask = { ...task, gates: cockpitGates({ holder: { sessionId: 'session-w1aaaaaa', label: '@w1', state: 'unknown' } }) }
+  const blockedTree = ReactBlocked.createElement(modBlocked.TicketCockpit, { kit, task: blockedTask, skills: cockpitSkills, entries: [], act, busy: false, sessionId: 'session-self' })
+  const blockedButton = findButton(blockedTree, (label) => label === 'ticketTakeover')
+  assert.equal(blockedButton.props.disabled, true, 'unknown 持有者不能直接接手')
+  assert.match(blockedButton.props.title, /状态不明/)
+  const blockedText = textOf(blockedTree)
+  assert.ok(blockedText.includes('ticketTakeoverBlocked') && blockedText.includes('状态不明'), '禁用原因可见')
+
+  // 依赖未结束：仍挡
+  const ReactDeps = fakeReact()
+  const modDeps = (await loadSidebar(ReactDeps)).mod
+  const depsTask = { ...task, gates: cockpitGates({ deps: [{ id: 'T14', title: '前置', ended: false }] }) }
+  const depsTree = ReactDeps.createElement(modDeps.TicketCockpit, { kit, task: depsTask, skills: cockpitSkills, entries: [], act, busy: false, sessionId: 'session-self' })
+  const depsButton = findButton(depsTree, (label) => label === 'ticketTakeover')
+  assert.equal(depsButton.props.disabled, true)
+  assert.match(depsButton.props.title, /依赖未结束：T14/)
+
+  // 已结束：连按钮都不渲染（只读）
+  const ReactEnded = fakeReact()
+  const modEnded = (await loadSidebar(ReactEnded)).mod
+  const endedTask = { ...task, gates: cockpitGates({ claim: { state: 'done' }, holder: undefined, terminal: 'merged' }) }
+  const endedTree = ReactEnded.createElement(modEnded.TicketCockpit, { kit, task: endedTask, skills: cockpitSkills, act, busy: false, sessionId: 'session-self' })
+  assert.equal(findButton(endedTree, (label) => label === 'ticketTakeover'), undefined, '已结束不给交接')
+  // 缺 takeover gate 的旧快照不渲染按钮
+  const oldGates = cockpitGates()
+  delete oldGates.takeover
+  const ReactOld = fakeReact()
+  const modOld = (await loadSidebar(ReactOld)).mod
+  const oldTree = ReactOld.createElement(modOld.TicketCockpit, { kit, task: { ...task, gates: oldGates }, skills: cockpitSkills, act, busy: false, sessionId: 'session-self' })
+  assert.equal(findButton(oldTree, (label) => label === 'ticketTakeover'), undefined, '旧 gates 安静跳过')
+})
+
 test('票子驾驶舱：旧快照没有 gates 时不渲染；已结束票只读、不给拉起', async () => {
   const React = fakeReact()
   const { mod } = await loadSidebar(React)

@@ -2,7 +2,7 @@
 
 ## 2.4.5 - 未发布
 
-2.4.5 先补协作面板的工作区切换：对话里的「协作」标签与左侧「会话监督」面板不再只能看当前会话所属工作区，可以切到任一侧栏已登记的工作区看只读监督数据；右侧边栏「无会话视角」与设置页行为不变。串行测试 503 全过。
+2.4.5 补两处协作体验：对话里的「协作」标签与左侧「会话监督」面板可以切到任一侧栏已登记的工作区看只读监督数据；票子驾驶舱可以把活跃 / 久未活动持有者直接交接给新会话。串行测试 508 全过。
 
 ### T20：协作面板工作区切换（有会话上下文时也能切）
 
@@ -24,7 +24,7 @@
 #### C. KIT / 测试 / 文档
 
 - `SIDEBAR_KIT 47 → 48`（外壳 + shared + 10 页签全部改名 `client.sidebar*48.js` 并同步 `KIT_VERSION`）、`PANEL_KIT 10 → 11`、`lib/client.js` touch（新增文案需重启 DSH）。
-- 测试：切工作区后 board 请求带 workspace 且不带 session、跟随模式参数不变、选择按嵌入 / 会话隔离记本机、跨工作区写动作不发 POST、旧服务端无 workspaces 不报错、受控面板按 workspace 取数与只读拦截、服务端只读视图 workspace 透传；串行 **503 全过**（基线 495 → +8）。
+- 测试：切工作区后 board 请求带 workspace 且不带 session、跟随模式参数不变、选择按嵌入 / 会话隔离记本机、跨工作区写动作不发 POST、旧服务端无 workspaces 不报错、受控面板按 workspace 取数与只读拦截、服务端只读视图 workspace 透传；串行 **503 全过**（基线 495 → +8；含后续 T22 共 508 全过）。
 - 文档：`docs/coordination-ui.md` §11、`docs/ui-copy.md` 第二十六批（新文案 zh / en 成对）。
 
 ## 2.4.4 - 2026-11-09
@@ -50,6 +50,31 @@
 
 - `SIDEBAR_KIT 46 → 47`（外壳 + shared + 10 页签全部改名 `client.sidebar*47.js` 并同步 `KIT_VERSION`）、`lib/client.js` touch；面板未改，`PANEL_KIT 10` 不变。
 - 测试：gates 的 approved / local-merged / released / nextTag 与「任务审批 ≠ 合并」、已结束票的 board 接线、任务页展开 / 收起 / 截断按钮；串行 495 全过。
+
+### T22：票子驾驶舱「活跃 / 久未活动持有者交接给新会话」
+
+用户要求：票子驾驶舱里持有者 live / stale 时也能把票交接给新会话，不用先手动 handoff 再拉起两步。原实现只在 holder dead 时提示「可拉起新会话接手」，活跃 / 久未活动只给「打开 / 唤醒」。本轮新增用户动作 `ticket-takeover`：建会话 → 看板 handoff 转移认领 → 写 launch（接手自 @old）+ stage=doing → 首条消息带接手说明 → 通知原持有者停手 → 审计。串行测试 508 全过。
+
+#### A. 门禁（gates）
+
+- 新增 `gates.takeover`：只对「未结束 + 有持有者（live / stale）」开放；dead 保持既有「拉起会话」接手语义，不重复入口；holderUnknown 先打开 / 唤醒核对，不默认抢。
+- 依赖未结束、审批打回、技能不存在仍挡；`stage=doing / review` 等非 ready 阶段**不挡**——交接本来就是为了接手中途的票。
+- 首条消息（`ticketLaunchText`）在交接时多一行「接手自：@old（session-…）；先读原会话的 .SESSION-DONE / 汇报和看板再继续，别推别的分支」。
+
+#### B. 执行顺序与幂等
+
+- `impl.takeoverTicket()`：复用 `ticketGateView()`（T15 同一套看板 / gates 事实）与新会话创建；在首条消息发出前用 `launchClaimer` 的 `beforeDeliver` 钩子执行：复核认领仍属原持有者 → `taskOp({action:'handoff'})` 转认领（不手改 claims 目录）→ 写 `state.launch`（`takeover: true`、`takeoverFrom` / `takeoverFromLabel`）与 `stage=doing`。
+- 新会话沿用原持有者的分支 / 工作树（有声明 / 上次 launch 记录时），没有才用新别称；`taskOp` 转交对新会话的通知被抑制，避免和票子首条消息重复。
+- 原持有者收到「Txx 已交接给 @new：停止改文件、等唤醒」（`deliver` followup，送达预算不足时排队）。通知失败不回滚交接，结果带 `notice: failed` + `noticeError`，审计记失败。
+- 幂等 / 竞态：同一票并发点击用进程内集合挡住（`takeover_busy`）；刚由本动作交接给同一持有者的重复点击（2 分钟内）直接返回 `already: true`，不建第二个会话、不重复转认领；转认领前在锁内复核认领未被别的会话改动，否则取消转交（不产生两个所有者）。
+- 审计写任务事件（`task-events.jsonl`）：`handoff` + `ticket-takeover`（from / to / branch / worktree / skill / notice 结果）。
+
+#### C. UI / 路由 / 测试 / 文档
+
+- `client.sidebar.shared48.js` `TicketCockpit`：新增「交接给新会话」按钮（仅在服务端给 `gates.takeover` 时出现），沿用别称 / 技能 / 模型控件；禁用时 `title` 与可见提示写原因（`暂不能交接：{reason}`）；说明「会转认领并通知原会话停手；不跑 git、不 push、不合并」。拉起 / 打开 / 唤醒现有语义与文案不变。
+- `lib/settings-route.js` 新增用户动作 `ticket-takeover`（`BOARD_ACTIONS`）；`lib/client.js` 新增 ticketTakeover / ticketTakingOver / ticketTakeoverBlocked / ticketTakeoverHint 中英文案。KIT 保持 `SIDEBAR_KIT 48` / `PANEL_KIT 11` 不改名加号。
+- 测试：gates 各持有者状态 / 阶段不挡 / 依赖审批技能仍挡；首条消息接手说明；完整交接（认领 owner、launch 记录、沿用分支、原会话通知、新会话无重复通知、审计、重复点击幂等、并发忙）；门禁挡住不建会话不改认领；通知失败不回滚；驾驶舱按钮渲染 / 禁用 / 提交；串行 **508 全过**。
+- 文档：`docs/coordination-ui.md` §9 补交接行，`docs/ui-copy.md` 第二十七批。
 
 ### T18：合并流水线中间态「本地已合入 · 待推送」
 

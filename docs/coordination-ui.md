@@ -119,6 +119,7 @@
 | 阶段动作 | `impl.setTicketStage()` + `settings-route` `ticket-stage` | 只写本地 stage（review 自动 pending 审批）；不跑 git、不写 GitHub。 |
 | 合并 / 版本事实（T19） | `impl.ticketCommitLocations()` + `ticketGates` | 合并按 holder 会话的合并流水线事实（origin 已合入 / 本地已合入 · 待推送 / 已批准 / 可合并 / 已发布）；版本用 `releaseSummary.nextTag`，只有已发布才显示实际 tag；任务审批与合并分两行。 |
 | 任务页展开（T19） | `client.sidebar.tasks47.js` | 已结束默认露 8 条，尾部「还有 N 条，点开展开」是可点按钮；可接 / 进行中与服务端截断同样可点。 |
+| 交接给新会话（T22） | `impl.takeoverTicket()` + `ticketGates().takeover` + `TicketCockpit` | 活跃 / 久未活动持有者可一键交接：建会话 → 看板 handoff 转认领 → 写 launch（接手自 @old）+ stage=doing → 首条消息带「先读原会话 .SESSION-DONE / 别推别的分支」→ 通知原持有者停手 → 审计。dead 仍走「拉起会话」，unknown 先打开 / 唤醒核对；依赖 / 审批 / 技能挡，阶段不挡；重复点击幂等、并发生成不了两个所有者。 |
 
 **边界**：拉起只创建会话并回填认领；不 push、不合并、不打 tag、不发 Release、不安装。UI 的「批准」动作仍只记录并通知主会话。旧快照没有 `gates` 时客户端安静跳过驾驶舱，不崩。
 
@@ -152,3 +153,10 @@
 | 只读视图数据 | `impl.viewWorkspace()` + `prListView` / `prDetailView` / `issueListView` / `railCounts` | 显式 `workspaceId` 优先，未登记报 `no_workspace`；不传时仍按 `fromSession` 解析。路由 `GET ?view=…&workspace=<id>` 透传；不带该参数的老调用不变。 |
 
 **边界**：跨工作区是只读监督视角，不提供任何会改动会话或工作区的入口；切回「跟随当前会话」才恢复写动作。不 push、不合并、不 tag、不 Release、不安装。
+
+### 9.1 交接给新会话的边界（T22，2.4.5 未发布）
+
+- 入口只有驾驶舱的「交接给新会话」按钮（用户点）；模型没有工具入口。
+- 只改本地认领链（追加「接手」行）、`state.launch` / `stage` 与收件箱消息；不跑 git、不写 GitHub、不 push / 合并 / tag / Release。
+- 首条消息与普通拉起同一套票子字段，额外写明接手自谁、先读原会话 `.SESSION-DONE` 与看板、别推别的分支；新会话沿用原持有者分支 / 工作树。
+- 原持有者通知失败不回滚交接，但结果与任务事件审计会记失败；重复点击 / 并发竞态下不会出现两个所有者。

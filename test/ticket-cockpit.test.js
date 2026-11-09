@@ -183,6 +183,50 @@ test('gates：无持有者 + 可认领 + 依赖结束 → 可拉起；各道门�
   assert.equal(gates.release.tag, 'v2.4.3', '已发布才显示实际 tag')
 })
 
+test('T22 交接 gates：live / stale 可交接；dead 走拉起、unknown 先核对；依赖 / 审批 / 技能仍挡，阶段不挡', () => {
+  const base = { deps: [], stage: 'doing', approval: null, skill: 'relay-worker', skills: ['relay-worker'] }
+  const holderOf = (state) => ({ sessionId: 'session-a', label: '@a', state })
+  const claimed = { state: 'claimed', holder: 'session-a' }
+
+  // 活跃 / 久未活动：可交接（阶段是 doing 也不挡——交接本来就是接手中途的票）
+  let gates = ticketGates({ ...base, claim: claimed, holder: holderOf('live') })
+  assert.equal(gates.takeover.allowed, true, 'live 持有者可交接')
+  assert.equal(gates.takeover.reason, null)
+  assert.equal(gates.launch.allowed, false, '拉起仍因活跃持有者被挡')
+  gates = ticketGates({ ...base, claim: claimed, holder: holderOf('stale') })
+  assert.equal(gates.takeover.allowed, true, 'stale 持有者可交接')
+  gates = ticketGates({ ...base, stage: 'review', claim: claimed, holder: holderOf('live') })
+  assert.equal(gates.takeover.allowed, true, 'review 阶段不挡交接')
+
+  // 无人持有 / 失效持有者：不重复入口，沿用「拉起会话」
+  gates = ticketGates({ ...base, stage: 'ready', claim: null })
+  assert.equal(gates.takeover.allowed, false)
+  assert.match(gates.takeover.reason, /直接「拉起会话」/)
+  gates = ticketGates({ ...base, stage: 'ready', claim: claimed, holder: holderOf('dead') })
+  assert.equal(gates.takeover.allowed, false)
+  assert.match(gates.takeover.reason, /用「拉起会话」接手/)
+  assert.equal(gates.launch.allowed, true, 'dead 仍走拉起')
+
+  // 状态不明：先打开 / 唤醒核对，不默认抢
+  gates = ticketGates({ ...base, claim: claimed, holder: holderOf('unknown') })
+  assert.equal(gates.takeover.allowed, false)
+  assert.match(gates.takeover.reason, /状态不明/)
+  assert.equal(gates.wake.allowed, true)
+
+  // 事实门禁仍挡：依赖 / 审批打回 / 技能不存在
+  gates = ticketGates({ ...base, claim: claimed, holder: holderOf('live'), deps: [{ id: 'T1', ended: false }] })
+  assert.equal(gates.takeover.allowed, false)
+  assert.match(gates.takeover.reason, /依赖未结束：T1/)
+  gates = ticketGates({ ...base, claim: claimed, holder: holderOf('live'), approval: 'rejected' })
+  assert.match(gates.takeover.reason, /审批已打回/)
+  gates = ticketGates({ ...base, claim: claimed, holder: holderOf('live'), skill: 'missing-skill' })
+  assert.match(gates.takeover.reason, /missing-skill 不存在/)
+  // 已结束：只读
+  gates = ticketGates({ ...base, claim: { state: 'done' }, terminal: 'merged', holder: holderOf('live') })
+  assert.equal(gates.takeover.allowed, false)
+  assert.match(gates.takeover.reason, /只读/)
+})
+
 test('依赖明细：认领状态与看板文字都能判断结束，未结束的保留给 UI', () => {
   const rowOf = new Map([
     ['T1', { id: 'T1', title: '一', status: '已合入（main）' }],
@@ -215,4 +259,19 @@ test('拉起首条消息：票子完整字段 + 先加载技能 + 边界；长�
     assert.ok(text.includes(part), '缺少 ' + part)
   }
   assert.ok(text.length < 8000, '正文有上限')
+})
+
+test('T22 交接首条消息：写清接手自 @old、先读原会话 .SESSION-DONE/看板、别推别的分支', () => {
+  const text = ticketLaunchText({
+    task: 'T22', title: '交接', body: '正文', sessionId: 'session-new', alias: 't22b',
+    skill: 'relay-worker', branch: 't22', worktree: '.agents/worktrees/t22',
+    takeoverFrom: { sessionId: 'session-old', label: '@old' }
+  })
+  assert.match(text, /接手自：@old（session-old）/, '接手自 @old')
+  assert.match(text, /先读原会话的 .SESSION-DONE \/ 汇报和看板再继续/, '先读原会话声明 / 看板')
+  assert.match(text, /别推别的分支/)
+  assert.match(text, /工作树 \.agents\/worktrees\/t22，分支 t22/, '沿用原分支 / 工作树')
+  // 普通拉起不带「接手自」
+  const plain = ticketLaunchText({ task: 'T1', title: 'x', body: 'b', sessionId: 'session-new', alias: 't1', skill: 'relay-worker' })
+  assert.ok(!plain.includes('接手自'))
 })
