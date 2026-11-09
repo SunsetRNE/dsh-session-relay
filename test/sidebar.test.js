@@ -1,4 +1,4 @@
-// 右侧边栏「协作」标签：入口只登记类型与空壳，正文在 client.sidebar46.js 外壳 + 各页签 chunk 里按需加载
+// 右侧边栏「协作」标签：入口只登记类型与空壳，正文在 client.sidebar47.js 外壳 + 各页签 chunk 里按需加载
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -25,7 +25,7 @@ function fakeReact(states = []) {
 
 // T13：侧栏按页签拆 chunk（KIT 46）。测试里把外壳 + 全部 chunk 一次性登记进同一加载器缓存，
 // 这样 `mod.Xxx` 的原有断言不用改；按需 / 预取 / 失败回退另由「按需拆 chunk」用例直接测加载器。
-const KIT = 46
+const KIT = 47
 const CHUNK_NAMES = ['shared', 'sessions', 'tasks', 'handoff', 'map', 'prs', 'branches', 'issues', 'mail', 'more', 'settings']
 async function loadSidebar(React) {
   const { mod: shell, chunk } = await load('client.sidebar' + KIT + '.js', React)
@@ -138,21 +138,21 @@ test('入口：没有 ctx.inject（旧宿主）时不登记右侧边栏、不报
   assert.ok(!names.includes('sidebar.right.pane.tab'))
 })
 
-test('入口：空壳不同步加载正文；用 require.async 拉 client.sidebar46.js', async () => {
+test('入口：空壳不同步加载正文；用 require.async 拉 client.sidebar47.js', async () => {
   const React = fakeReact()
   let lazyFactory
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 46 }) })
-  assert.equal(mod.SIDEBAR_CHUNK, 'client.sidebar46.js', '入口指向按版本命名的 chunk')
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 47 }) })
+  assert.equal(mod.SIDEBAR_CHUNK, 'client.sidebar47.js', '入口指向按版本命名的 chunk')
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
   assert.equal(tree.type, 'suspense')
   assert.equal(textOf(tree.props.fallback), 'sideLoading')
   const loaded = await lazyFactory()
-  assert.deepEqual(asked, ['./client.sidebar46.js'])
+  assert.deepEqual(asked, ['./client.sidebar47.js'])
   assert.equal(loaded.default(), 'body')
 })
 
@@ -167,9 +167,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v46'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v47'), '显示实际 / 期望版本')
   const { mod: chunk } = await loadSidebar(fakeReact())
-  assert.equal(chunk.KIT_VERSION, 46, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 47, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -206,11 +206,11 @@ function kitFor(opened = []) {
 const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, workItem = undefined, extra = [] } = {}) =>
   [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, workItem, {}, false, 0, ...extra]
 
-test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar46.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
+test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar47.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
   const React = fakeReact(states(sampleBoard()))
   const { mod, chunk } = await loadSidebar(React)
-  assert.equal(chunk, 'client.sidebar46.js')
-  assert.equal(mod.KIT_VERSION, 46)
+  assert.equal(chunk, 'client.sidebar47.js')
+  assert.equal(mod.KIT_VERSION, 47)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
   const text = textOf(tree)
   for (const part of ['dsha-session-relay', 'sideTabSessions', 'sideTabTasks', 'sideTabHandoff', 'sideTabMap', 'sideTabPr', 'sideTabBranches', 'sideTabIssues', 'sideTabMail', 'sideTabMore', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
@@ -477,7 +477,7 @@ test('正文 chunk：还没数据时显示读取中；没有会话时不渲染',
 })
 
 test('正文 chunk：样式随标签注入，不在入口里；不用 backdrop-filter 和常驻动画', async () => {
-  const chunk = await readFile(new URL('../lib/client.sidebar46.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar47.js', import.meta.url), 'utf8')
   const entry = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   assert.ok(chunk.includes('.dshaSv_card'))
   assert.ok(!entry.includes('.dshaSv_'), '入口不带侧边栏样式')
@@ -509,7 +509,7 @@ test('正文 chunk：空白会话按服务端分类显示「空白」，不算�
   const open = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(open.includes('catBlank') && open.includes('f4ada307'))
   assert.ok(!open.includes('status_working'))
-  const chunk = await readFile(new URL('../lib/client.sidebar46.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar47.js', import.meta.url), 'utf8')
   assert.ok(!chunk.includes('brand-primary'), '强调色用链接蓝，不用主题里接近黑白的 brand-primary')
 })
 
@@ -1728,7 +1728,7 @@ test('更多页：窄屏快捷入口，点条目切页 / 打开设置', async ()
 })
 
 test('侧栏折叠：更多页快捷入口只在窄屏显示，隐藏规则用双类名', async () => {
-  const source = await readFile(new URL('../lib/client.sidebar46.js', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../lib/client.sidebar47.js', import.meta.url), 'utf8')
   assert.ok(source.includes('.dshaSv_wide .dshaSv_foldOnly{display:none}'), '宽屏隐藏规则用宽度 class + 双类名')
   assert.ok(source.includes('ResizeObserver') && source.includes('dshaSv_wide'), '旋转后由 ResizeObserver 重新量宽度')
   const ReactR = fakeReact(states(sampleBoard()))
@@ -2486,7 +2486,7 @@ test('入口：空闲时预取侧栏 chunk，首次打开不用再等下载', as
     assert.equal(pending.length, 1, '登记侧栏时挂一次空闲预取')
     pending[0]()
     await new Promise((resolve) => setTimeout(resolve, 0))
-    assert.deepEqual(asked, ['./client.sidebar46.js'], '空闲时拉一次 chunk')
+    assert.deepEqual(asked, ['./client.sidebar47.js'], '空闲时拉一次 chunk')
     const Tab = mod.makeSidebarTab({ t })
     assert.equal(textOf(React.createElement(Tab, { sessionId: 's' })), 'body', '预取完成后直接渲染正文，不再闪 Suspense')
   } finally {
@@ -2760,7 +2760,7 @@ test('T14：设置页发布卡只读展示阶段条 / 事实 / 动作，复制�
   await copyButton.props.onClick()
   assert.deepEqual(copied, [data.command])
   // 源码边界：发布卡没有 push / tag / release 写动作，只有唤醒（wake）与复制
-  const chunk = await readFile(new URL('../lib/client.sidebar.settings46.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar.settings47.js', import.meta.url), 'utf8')
   assert.match(chunk, /function ReleaseBox/)
   assert.ok(!/git push|git tag|gh release create/.test(chunk.replace(/node --test[\s\S]*?release-notes[^\n]*/g, '')), '发布卡不跑 push / tag / Release 命令')
 })
@@ -2838,11 +2838,11 @@ test('票子驾驶舱：旧快照没有 gates 时不渲染；已结束票只读�
   assert.equal(plain, null, '缺 gates 的旧数据安静跳过')
   const ended = {
     id: 'T14', title: '已合入', owner: 'session-w1aaaaaa',
-    gates: cockpitGates({ claim: { state: 'done' }, holder: undefined, terminal: 'merged', release: { tag: 'v2.4.3', released: true }, merge: { approved: true, sha: 'abcdef1234' } })
+    gates: cockpitGates({ claim: { state: 'done' }, holder: undefined, terminal: 'merged', release: { tag: 'v2.4.3', released: true, nextTag: 'v2.4.4' }, merge: { stage: 'released', approved: true, sha: 'abcdef1234' } })
   }
   const tree = React.createElement(mod.TicketCockpit, { kit: kitFor(), task: ended, skills: cockpitSkills, act: async () => ({}) })
   const text = textOf(tree)
-  assert.ok(text.includes('ticketReadOnly') && text.includes('ticketReleaseTag'))
+  assert.ok(text.includes('ticketReadOnly') && text.includes('ticketReleasedTag') && text.includes('v2.4.3'))
   assert.equal(findButton(tree, (label) => label === 'ticketLaunch'), undefined, '已结束不给拉起')
 })
 
@@ -2875,4 +2875,64 @@ test('任务 / 地图票详情接入驾驶舱：阶段、判定与拉起都在�
   })
   const mapText = textOf(tree)
   for (const part of ['ticketTitle', 'ticketHolder', '@w1', 'ticketBranch', 'ticketStageDoing', 'ticketLaunchBlocked']) assert.ok(mapText.includes(part), '地图详情缺少 ' + part)
+})
+
+
+// ---------------------------------------------------------------- T19 合并/版本显示 + 任务页展开
+
+test('T19 驾驶舱：合并流水线与任务审批分开，版本用 nextTag、已发布才显示实际 tag', async () => {
+  const React = fakeReact()
+  const { mod } = await loadSidebar(React)
+  const task = {
+    id: 'T15', title: '票子驾驶舱', owner: 'session-w1aaaaaa',
+    gates: ticketGates({
+      claim: { state: 'done' }, terminal: 'merged', approval: 'pending',
+      merge: { stage: 'local-merged', pendingPush: true, sha: '73001c2' },
+      release: { nextTag: 'v2.4.4' }
+    })
+  }
+  const tree = React.createElement(mod.TicketCockpit, { kit: kitFor(), task, skills: cockpitSkills, entries: [], act: async () => ({}) })
+  const text = textOf(tree)
+  assert.ok(text.includes('ticketTaskApproval'), '任务审批单独标注')
+  assert.ok(text.includes('ticketApprovalPending'), '任务审批是待审批')
+  assert.ok(text.includes('ticketMergeLocal'), '合并显示本地已合入·待推送')
+  assert.ok(text.includes('73001c2'), '合并显示审批 sha')
+  assert.ok(text.includes('ticketReleaseNext') && text.includes('v2.4.4'), '版本用 nextTag')
+  assert.ok(!text.includes('ticketReleasedTag'), '未发布不显示已发布 tag')
+  assert.ok(!text.includes('v2.4.3'), '不把旧 latestTag 当成本次发布版本')
+  // 合并批准：写「合并已批准」，不写进任务审批
+  const approved = fakeReact()
+  const modApproved = (await loadSidebar(approved)).mod
+  const approvedTask = { id: 'T20', title: '已批准', owner: 'session-w1aaaaaa', gates: ticketGates({ claim: { state: 'claimed', holder: 'session-w1aaaaaa' }, holder: { sessionId: 'session-w1aaaaaa', label: '@w1', state: 'live' }, approval: null, merge: { stage: 'approved', approved: true, sha: 'abcdef1234' }, release: { nextTag: 'v2.4.4' } }) }
+  const approvedText = textOf(approved.createElement(modApproved.TicketCockpit, { kit: kitFor(), task: approvedTask, skills: cockpitSkills, act: async () => ({}) }))
+  assert.ok(approvedText.includes('ticketMergeApproved') && !approvedText.includes('ticketApprovalApproved'), '合并批准 ≠ 任务审批')
+  assert.ok(approvedText.includes('ticketReleaseNext'))
+})
+
+test('T19 任务页：已结束列表本地展开/收起，「还有 N 条」是可点按钮并带点开展开文案', async () => {
+  const endedRows = Array.from({ length: 12 }, (_, index) => ({ id: 'T' + (index + 1), title: '旧任务 ' + (index + 1), claim: 'done' }))
+  const tasks = { open: [], claimed: 0, claimedRows: [], ended: 12, endedRows }
+  // TaskBoard 的 fold 状态：已结束组展开
+  const React = fakeReact([undefined, { 'g:ended': true }])
+  const { mod } = await loadSidebar(React)
+  const tree = React.createElement(mod.TaskBoard, { kit: kitFor(), tasks, act: async () => ({}), busy: false })
+  const text = textOf(tree)
+  assert.ok(text.includes('旧任务 8') && !text.includes('旧任务 9'), '默认只露 8 条')
+  const more = findButton(tree, (label) => label.includes('sideMoreTasks'))
+  assert.ok(more !== undefined, '「还有 N 条」是按钮')
+  assert.ok(more.props['aria-expanded'] === false || more.props['aria-expanded'] === 'false')
+  assert.ok(text.includes('sideMoreTasks'), '文案改用点开展开')
+  // 展开态：全部 12 条
+  const expanded = fakeReact([undefined, { 'g:ended': true, ended: true }])
+  const modExpanded = (await loadSidebar(expanded)).mod
+  const expandedText = textOf(expanded.createElement(modExpanded.TaskBoard, { kit: kitFor(), tasks, act: async () => ({}), busy: false }))
+  assert.ok(expandedText.includes('旧任务 12'), '展开后显示全部已加载行')
+  // 服务端截断（已结束总数 > 已加载行数）：仍给可点按钮，不再是纯文本
+  const truncated = { open: [], claimed: 0, claimedRows: [], ended: 30, endedRows }
+  const React2 = fakeReact([undefined, { 'g:ended': true, ended: true }])
+  const mod2 = (await loadSidebar(React2)).mod
+  const truncatedTree = React2.createElement(mod2.TaskBoard, { kit: kitFor(), tasks: truncated, act: async () => ({}), busy: false })
+  const overflow = findButton(truncatedTree, (label) => label.includes('sideDoneMore'))
+  assert.ok(overflow !== undefined, '超出已加载的「还有 N 条」也是按钮')
+  assert.ok(textOf(truncatedTree).includes('sideDoneMore'))
 })

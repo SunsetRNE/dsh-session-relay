@@ -2,7 +2,27 @@
 
 ## 2.4.4 - 2026-11-09
 
-2.4.4 把协作流程继续做进面板：票子驾驶舱、PR 11 态审核、AI 审核自动回写、合并流水线「本地已合入 · 待推送」中间态；三个 relay 技能改为随包内置。串行测试 492 全过。
+2.4.4 把协作流程继续做进面板：票子驾驶舱、PR 11 态审核、AI 审核自动回写、合并流水线「本地已合入 · 待推送」中间态；三个 relay 技能改为随包内置。串行测试 495 全过。
+
+### T19：票子驾驶舱合并 / 版本显示纠正 + 任务页「还有 N 条」可展开
+
+用户实测反馈两处：票子详情把任务审批、合并批准和 `latestTag` 混在一起（T15 已本地 main 合入却显示「合并已批准 / 随 v2.4.3 发布」）；任务页「还有 N 条，去协作页看板查看」是纯文本不可点。本轮把合并状态改为按该票 holder 会话的合并流水线事实（origin 已合入 / 本地已合入 · 待推送 / 已批准 / 可合并 / 已发布），版本改用 `releaseSummary.nextTag`（当前 v2.4.4），只有已发布才显示实际 tag；任务审批单独标注。任务页尾部改成可点按钮（已结束默认露 8 条、可展开；进行中 / 服务端截断同样可点），文案「还有 N 条，点开展开」。串行测试 495 全过。
+
+#### A. 合并 / 版本显示
+
+- `impl.board()` 的 `gatesOf` 按 holder 会话（进行中认领 → 已结束认领 owner → launch 记录）取 T14/T18 `approvalView`；已写完成但不在看板 ready 列表的票，用 `ticketCommitLocations()` 只读核对 origin/main / 本地 main，补 `mainMerged` / `mainLocal`。
+- `ticketGates` 的 `merge` 带 `stage`（ready / approved / rejected / stale / later / local-merged / merged / released）、`pendingPush`、`localMerged` / `merged`、`sha`；`release` 带 `nextTag`，实际 `tag` 只在已发布时给。
+- UI 判定胶囊：任务审批写「任务审批：…」，合并单独写「可合并 / 合并已批准 / 本地已合入 · 待推送 / 已合入 origin/main / 已随版本发布」；未发布版本写「随 v2.4.4 发布」，已发布才写「已发布 v2.4.3」。
+
+#### B. 任务页可展开
+
+- 已结束组默认露 8 条，点「还有 N 条，点开展开」展开 / 收起；可接、进行中沿用本地展开，「已结束」和服务端截断的剩余条数都改成按钮（点一下展开并刷新），不再是不可点的纯文本。
+- `board.taskBoard.claimedRows` / `endedRows` 上限 20 / 10 → 40 / 40，减少「已加载之外」的分页提示。
+
+#### C. KIT / 测试 / 文档
+
+- `SIDEBAR_KIT 46 → 47`（外壳 + shared + 10 页签全部改名 `client.sidebar*47.js` 并同步 `KIT_VERSION`）、`lib/client.js` touch；面板未改，`PANEL_KIT 10` 不变。
+- 测试：gates 的 approved / local-merged / released / nextTag 与「任务审批 ≠ 合并」、已结束票的 board 接线、任务页展开 / 收起 / 截断按钮；串行 495 全过。
 
 ### T18：合并流水线中间态「本地已合入 · 待推送」
 

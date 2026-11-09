@@ -2264,6 +2264,35 @@ test('票子驾驶舱：拉起新会话带票子字段与技能，回填认领 /
   } finally { await h.cleanup() }
 })
 
+test('T19 票子驾驶舱：已写完成的票按 holder 合并事实显示本地已合入·待推送，版本用 nextTag；任务审批分开', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await mkdir(join(h.dir, '.agents/claims/T1'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/claims/T1/owner'), `${h.peer.id}\n`)
+    await writeFile(join(h.dir, '.agents/claims/T1/done'), '73001c2 可合并\n')
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |\n|---|---|---|---|---|---|\n| T1 | P1 | 票子驾驶舱 |  | 否 | 已合入（main） |\n')
+    await h.relay.coord.upsert(h.peer.id, { status: 'done', commit: '73001c2', summary: 'T1 完成' })
+    // 不建真 git 仓库：合并事实按 T14/T18 的 approvalView 走，这里只替换 git 读取。
+    h.relay.ticketCommitLocations = async () => ({ localMerged: 'local main e071cf10' })
+    h.relay.releaseSummary = async () => ({ nextTag: 'v2.4.4', latestTag: 'v2.4.3', nextVersion: '2.4.4' })
+    // 任务审批（review 会自动 pending）与合并状态是两件事
+    await h.call('peer_task', { action: 'update', id: 'T1', stage: 'review' })
+    const board = await h.relay.board(undefined, { session: h.caller.id })
+    const row = board.taskBoard.endedRows.find((item) => item.id === 'T1')
+    assert.ok(row !== undefined, '已结束列表带 T1')
+    assert.equal(row.owner, h.peer.id, '已结束认领也带回 owner（供合并事实用）')
+    assert.equal(row.gates.merge.stage, 'local-merged')
+    assert.equal(row.gates.merge.pendingPush, true)
+    assert.equal(row.gates.merge.sha, '73001c2')
+    assert.equal(row.gates.release.nextTag, 'v2.4.4', '版本用 nextTag')
+    assert.equal(row.gates.release.tag, null, '未发布不显示实际 tag')
+    assert.equal(row.gates.release.released, false)
+    assert.equal(row.gates.approval.value, 'pending', '任务审批单独标注')
+  } finally { await h.cleanup() }
+})
+
 test('子代理通讯：树内经根会话转交；对外署名根会话、回复落根；别人的子代理经其根转交；特权不继承、认领记在根会话；树内限流', async () => {
   const h = await setup()
   try {

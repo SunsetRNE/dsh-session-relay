@@ -105,7 +105,7 @@
 
 **边界**：面板没有 push / merge / tag / Release / install 入口；「已合入 / 已发布」只从提交事实和只读 tag / Release 事实推，读不到就写未知。批准记录不等于用户对推送 / 发布的授权；主会话仍需用户在当前会话明确同意后才执行。
 
-## 9. 票子驾驶舱与内置技能（T15，2.4.4 未发布）
+## 9. 票子驾驶舱与内置技能（T15，2.4.4）
 
 目标：把「票子 → 拉起会话 → 回填持有者 / 分支 / 工作树 → 阶段与判定」搬进任务 / 地图票详情，技能随插件包提供，不要求用户手装或仓库里放副本。
 
@@ -117,6 +117,8 @@
 | 详情动作区 | `client.sidebar.shared44.js` `TicketCockpit` | 任务页与地图票详情共用：holder / 分支 / 工作树 / 最近汇报、判定胶囊、阶段按钮（待分诊 / 可认领 / 进行中 / 待审查）、审批、拉起表单（别称 / 技能 / 模型）。禁用按钮显示原因。 |
 | 拉起即填充 | `impl.launchTicket()` + `launchClaimer()` + `claimTicketAtLaunch()` | 用户动作 `ticket-launch`：按 gates 复核后建会话，首条消息带票子完整字段 + 「先加载 <skill> 技能」；锁内登记认领（owner=新会话）、写分支 / 工作树 / stage=doing / launch 记录。 |
 | 阶段动作 | `impl.setTicketStage()` + `settings-route` `ticket-stage` | 只写本地 stage（review 自动 pending 审批）；不跑 git、不写 GitHub。 |
+| 合并 / 版本事实（T19） | `impl.ticketCommitLocations()` + `ticketGates` | 合并按 holder 会话的合并流水线事实（origin 已合入 / 本地已合入 · 待推送 / 已批准 / 可合并 / 已发布）；版本用 `releaseSummary.nextTag`，只有已发布才显示实际 tag；任务审批与合并分两行。 |
+| 任务页展开（T19） | `client.sidebar.tasks47.js` | 已结束默认露 8 条，尾部「还有 N 条，点开展开」是可点按钮；可接 / 进行中与服务端截断同样可点。 |
 
 **边界**：拉起只创建会话并回填认领；不 push、不合并、不打 tag、不发 Release、不安装。UI 的「批准」动作仍只记录并通知主会话。旧快照没有 `gates` 时客户端安静跳过驾驶舱，不崩。
 

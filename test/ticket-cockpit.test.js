@@ -152,12 +152,35 @@ test('gates：无持有者 + 可认领 + 依赖结束 → 可拉起；各道门�
   assert.match(gates.launch.reason, /审批已打回/)
   gates = ticketGates({ ...base, claim: null, skill: 'missing-skill', skills: ['relay-worker'] })
   assert.match(gates.launch.reason, /missing-skill 不存在/)
-  gates = ticketGates({ ...base, claim: { state: 'done' }, terminal: 'merged', merge: { approved: true, sha: 'abcdef1234' }, release: { tag: 'v2.4.3', released: true } })
+
+  // T19：任务审批与合并流水线分开；版本未发布只给 nextTag，已发布才给实际 tag。
+  gates = ticketGates({ ...base, claim: null, approval: 'approved', merge: { stage: 'ready', sha: 'abc' }, release: { nextTag: 'v2.4.4' } })
+  assert.equal(gates.approval.value, 'approved', '任务审批是 approved')
+  assert.equal(gates.merge.stage, 'ready', '合并仍是可合并（审批 ≠ 合并）')
+  assert.equal(gates.release.nextTag, 'v2.4.4')
+  assert.equal(gates.release.tag, null, '未发布不给实际 tag')
+  assert.equal(gates.release.released, false)
+
+  gates = ticketGates({ ...base, claim: null, merge: { stage: 'approved', approved: true, sha: 'abcdef1234' }, release: { nextTag: 'v2.4.4' } })
+  assert.equal(gates.merge.stage, 'approved')
+  assert.equal(gates.merge.approved, true)
+  assert.equal(gates.merge.sha, 'abcdef1234')
+  assert.equal(gates.release.tag, null)
+
+  gates = ticketGates({ ...base, claim: { state: 'done' }, terminal: 'merged', merge: { stage: 'local-merged', pendingPush: true, sha: '73001c2', approved: true }, release: { nextTag: 'v2.4.4' } })
   assert.equal(gates.ended, true)
   assert.equal(gates.launch.allowed, false)
   assert.match(gates.launch.reason, /只读/)
-  assert.equal(gates.merge.approved, true)
+  assert.equal(gates.merge.stage, 'local-merged')
+  assert.equal(gates.merge.pendingPush, true, '本地已合入 · 待推送')
+  assert.equal(gates.merge.sha, '73001c2')
+  assert.equal(gates.release.nextTag, 'v2.4.4')
+  assert.equal(gates.release.released, false)
+
+  gates = ticketGates({ ...base, claim: { state: 'done' }, terminal: 'merged', merge: { stage: 'released', sha: 'abcdef1234', merged: 'main e071cf10' }, release: { nextTag: 'v2.4.4', tag: 'v2.4.3', released: true } })
+  assert.equal(gates.merge.stage, 'released')
   assert.equal(gates.release.released, true)
+  assert.equal(gates.release.tag, 'v2.4.3', '已发布才显示实际 tag')
 })
 
 test('依赖明细：认领状态与看板文字都能判断结束，未结束的保留给 UI', () => {

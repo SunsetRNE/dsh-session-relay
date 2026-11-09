@@ -177,3 +177,10 @@
 - 主会话行加「待推送 N」warn 胶囊；「下一步」卡加「N 个已合入本地 main，等 push」。可合并 / 已批准计数不再包含待推送项。
 - 归档分区把该态记为「本地已合入 · 待推送」，与「已合入 main」分开；`/relay drop --archived --local-merged` 单独清理。
 - 双语同步：新增 mergeLocal* / nextStageLocal / nextLocal / why_local-merged 键 zh / en 成对；服务端只给 stage / localMerged / pendingPush 事实，展示文案由客户端 i18n 渲染。
+
+## 第二十五批（2026-11-09）：票子合并 / 版本事实修正 + 任务页展开
+
+- 票子驾驶舱把「任务审批」与「合并」分成两颗胶囊：任务审批写「任务审批：待审批 / 已审批 / 已打回」；合并写「可合并（待批准）/ 合并已批准 / 本地已合入 · 待推送 / 已合入 origin/main / 已随版本发布」。
+- 版本胶囊只在有合并事实时出现：未发布写「随 v2.4.4 发布」，已发布才写「已发布 <实际 tag>」；不再把 latestTag 当成本次发布版本。
+- 任务页尾部「还有 N 条，点开展开」是可点按钮（已结束默认露 8 条）；展开 / 收起状态记在本机，服务端截断时点一下刷新。
+- 双语同步：ticketMerge* / ticketReleaseNext / ticketReleasedTag / ticketTaskApproval 与 sideMoreTasks / sideDoneMore 成对更新。
