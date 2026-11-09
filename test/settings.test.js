@@ -102,7 +102,7 @@ test('路由：鉴权失败、跨源、坏请求体、正常读写', async () =>
 
 test('PR「AI 审核」提示词：带仓库 / PR 号 / 只读边界', () => {
   const text = prReviewLaunchText({ repo: 'o/r', number: 7, title: '修 bug', url: 'https://github.com/o/r/pull/7', workspaceTitle: 'w', sessionId: 'session-ai' })
-  for (const part of ['o/r#7', 'gh pr diff 7 --repo o/r', '只读', '不要改任何文件', 'peer_report']) assert.ok(text.includes(part), '缺少 ' + part)
+  for (const part of ['o/r#7', 'gh pr diff 7 --repo o/r', '只读', '不要改任何文件', 'peer_report', '【审核结论】pass', '【结论原因】']) assert.ok(text.includes(part), '缺少 ' + part)
 })
 
 test('PR「AI 审核」路由：用户动作把 PR 号交给 launchPrReview', async () => {

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   MAX_REVIEW_ROUNDS, PR_REVIEW_ORDER, PR_REVIEW_STATE, PrReviewStore,
-  appendReviewRecord, normalizeReviewRecords, prReviewKey, prReviewState
+  appendReviewRecord, normalizeReviewRecords, parseReviewConclusion, prReviewKey, prReviewState
 } from '../lib/prreview.js'
 
 const checksPass = { total: 2, passing: 2, pending: 0, failing: 0, state: 'pass' }
@@ -138,6 +138,11 @@ test('存储：多轮记录 / 忽略拒绝开关 / AI 会话标记 / 重新加�
     const store = new PrReviewStore(path, { now: () => 5000 })
     await store.setAiReview('o/r', 7, { sessionId: 'session-ai', headSha: 'aaaa', at: 4000 })
     assert.equal(store.get('o/r', 7).aiReview.sessionId, 'session-ai')
+    await store.setAiReview('o/r', 7, { sessionId: 'session-ai', headSha: 'aaaa', at: 4000, checkedAt: 4500, noVerdict: true })
+    assert.equal(store.get('o/r', 7).aiReview.checkedAt, 4500)
+    assert.equal(store.get('o/r', 7).aiReview.noVerdict, true)
+    await store.setAiReview('o/r', 7, { sessionId: 'session-ai', headSha: 'aaaa', at: 4000 })
+    assert.equal(store.get('o/r', 7).aiReview.noVerdict, undefined, '重挂同一会话可清掉 noVerdict')
     const first = await store.record('o/r', 7, { headSha: 'aaaa', verdict: 'must-fix', note: '先修', source: 'ai', sessionId: 'session-ai', at: 5000 })
     assert.equal(first.round, 1)
     await store.clearAiReview('o/r', 7, 'session-other')
@@ -181,5 +186,41 @@ test('状态机用存储里的记录：head 变化自动需再审，记录结论
     assert.equal(prReviewState(pr, entry.records, { ignored: entry.flags.ignored, rejected: entry.flags.rejected }).state, 'reviewed')
     const changed = { ...pr, headSha: 'cccccccc3333' }
     assert.equal(prReviewState(changed, entry.records, {}).state, 'needs-rereview')
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('解析 AI 审核会话的机器可读结论：只认标记、最后一条优先、原因截断；解析不到返回 undefined', () => {
+  assert.deepEqual(parseReviewConclusion('说明\n【审核结论】pass\n【结论原因】没有必须修项'), { verdict: 'pass', reason: '没有必须修项' })
+  assert.deepEqual(parseReviewConclusion('【审核结论】must-fix\n【结论原因】边界没测'), { verdict: 'must-fix', reason: '边界没测' })
+  assert.deepEqual(parseReviewConclusion('【审核结论】：PASS\n【结论原因】：可以合'), { verdict: 'pass', reason: '可以合' })
+  // 最后一条优先（多轮 / 重试输出）
+  assert.deepEqual(parseReviewConclusion('【审核结论】must-fix\n【结论原因】先修\n【审核结论】pass\n【结论原因】已修好'), { verdict: 'pass', reason: '已修好' })
+  // 原因标记在结论之前不算
+  assert.deepEqual(parseReviewConclusion('【结论原因】旧原因\n【审核结论】pass'), { verdict: 'pass', reason: '' })
+  // 不认识的结论不猜
+  for (const text of ['', '没有标记', '【审核结论】maybe', '【审核结论】passed', '结论：pass']) {
+    assert.equal(parseReviewConclusion(text), undefined, '不应解析：' + text)
+  }
+  const long = parseReviewConclusion('【审核结论】pass\n【结论原因】' + '长'.repeat(300))
+  assert.equal(long.reason.length, 200, '原因截断到 200 字')
+  // 真实场景：assistant 正文里标记出现在中间，后面还有其他文字也能解析
+  assert.deepEqual(parseReviewConclusion('审完了。\n【审核结论】pass\n【结论原因】OK\n以上。'), { verdict: 'pass', reason: 'OK' })
+})
+
+test('存储：oncePerSession 保证同一 AI 会话只回写一次（并发也安全）', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'relay-prreview-once-'))
+  try {
+    const store = new PrReviewStore(join(dir, 'pr-reviews.json'))
+    const first = await store.record('o/r', 7, { headSha: 'aaaa', verdict: 'pass', source: 'ai', sessionId: 'session-dup', at: 1000, oncePerSession: true })
+    assert.equal(first.skipped, false)
+    const again = await store.record('o/r', 7, { headSha: 'aaaa', verdict: 'must-fix', source: 'ai', sessionId: 'session-dup', at: 2000, oncePerSession: true })
+    assert.equal(again.skipped, true)
+    assert.equal(again.round, 1)
+    assert.equal(store.get('o/r', 7).records.length, 1, '同一会话不追加第二轮')
+    assert.equal(store.get('o/r', 7).records[0].verdict, 'pass')
+    // 手动记录（默认 oncePerSession=false）仍可覆盖，用于补录 / 改判
+    const manual = await store.record('o/r', 7, { headSha: 'aaaa', verdict: 'must-fix', note: '补录', source: 'user', sessionId: 'session-dup', at: 3000 })
+    assert.equal(manual.round, 2)
+    assert.equal(store.get('o/r', 7).records.length, 2)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

@@ -287,3 +287,90 @@ test('PR 审核 11 态：列表 / 详情接入本地记录、忽略拒绝与 AI 
     for (const event of ['pr-review-record', 'pr-ignored', 'pr-unignored', 'pr-rejected']) assert.ok(audit.includes(event), '缺少审计 ' + event)
   } finally { await h.cleanup(); await rm(base, { recursive: true, force: true }) }
 })
+
+test('T17 AI 审核自动回写：运行中审批中；结束 pass / must-fix 写本地记录；无结论提示；幂等', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'relay-ws-ai-loop-'))
+  const repo = await makeRepo(base, 'ai-loop')
+  const head = 'aaaaaaaa1111bbbbbbbb2222cccccccc3333dddddddd'
+  const baseItem = {
+    number: 7, title: 'x', author: 'alice', url: 'https://github.com/o/ai-loop/pull/7', state: 'OPEN', draft: false,
+    merged: false, mergeStateStatus: 'BLOCKED', mergeable: 'UNKNOWN', reviewDecision: 'REVIEW_REQUIRED',
+    reviewRequests: [], latestReviews: [], checks: { total: 0, passing: 0, pending: 0, failing: 0, state: 'none' },
+    headSha: head, head: 'fix/x', base: 'main', updatedAt: '2026-11-09T00:00:00Z', comments: 0, additions: 1, deletions: 1, changedFiles: 1
+  }
+  let item = baseItem
+  const lists = {
+    pullRequests: async () => ({ repo: 'o/ai-loop', state: 'open', items: [item], fetchedAt: 1 }),
+    pullRequestDetail: async () => ({ repo: 'o/ai-loop', detail: { ...item, reviews: [], comments: [], files: [] }, fetchedAt: 1 }),
+    issues: async () => ({ items: [] }),
+    branches: async () => ({ local: [], remote: [] })
+  }
+  const h = await makeRelay({ lists, workspaces: [{ id: 'ws1', title: '项目', path: repo, sessionIds: ['s1'] }] })
+  const old = Date.now() - 120_000
+  const assistant = (text) => ({ events: [{ seq: 1, type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } }] })
+  try {
+    h.relay.sessionRunning = async () => undefined
+    // 1) 运行中（刚拉起 60 秒内按运行中算）→ 审批中
+    await h.relay.prReviews.setAiReview('o/ai-loop', 7, { sessionId: 'session-ai-running', headSha: head, at: Date.now() })
+    let view = await h.relay.prListView({ fromSession: 's1' })
+    assert.equal(view.items[0].review.state, 'reviewing')
+    assert.equal(view.items[0].local.aiReviewNoVerdict, false)
+
+    // 2) 已结束 + pass 结论 → 自动写 source:ai 记录，状态已审核，标记清掉
+    await h.relay.prReviews.setAiReview('o/ai-loop', 7, { sessionId: 'session-ai-pass', headSha: head, at: old })
+    h.relay.loadSessionEvents = async () => assistant('审完了\n【审核结论】pass\n【结论原因】没有必须修项')
+    view = await h.relay.prListView({ fromSession: 's1' })
+    assert.equal(view.items[0].review.state, 'reviewed', 'AI pass + 缺批准 / 不可合并 → 已审核')
+    assert.equal(view.items[0].review.round, 1)
+    assert.equal(view.items[0].local.aiReview, null, '回写后清掉 aiReview 标记')
+    let detail = await h.relay.prDetailView({ fromSession: 's1', number: 7 })
+    assert.equal(detail.records.length, 1)
+    assert.equal(detail.records[0].verdict, 'pass')
+    assert.equal(detail.records[0].source, 'ai')
+    assert.equal(detail.records[0].sessionId, 'session-ai-pass')
+    // 幂等：同一 sessionId 的记录已存在，再挂一次 aiReview 也只清标记、不追加记录
+    await h.relay.prReviews.setAiReview('o/ai-loop', 7, { sessionId: 'session-ai-pass', headSha: head, at: old })
+    view = await h.relay.prListView({ fromSession: 's1' })
+    detail = await h.relay.prDetailView({ fromSession: 's1', number: 7 })
+    assert.equal(detail.records.length, 1, '同一会话只回写一次')
+    assert.equal(view.items[0].local.aiReview, null)
+
+    // 3) 已结束 + must-fix 结论（peer_report 参数里的标记也认）→ 已驳回 + 原因
+    await h.relay.prReviews.setAiReview('o/ai-loop', 7, { sessionId: 'session-ai-must', headSha: head, at: old })
+    h.relay.loadSessionEvents = async () => ({
+      events: [{
+        seq: 2, type: 'tool/call',
+        data: { name: 'peer_report', arguments: { status: 'done', summary: '有必须修', text: '结论\n【审核结论】must-fix\n【结论原因】边界没测' } }
+      }]
+    })
+    view = await h.relay.prListView({ fromSession: 's1' })
+    assert.equal(view.items[0].review.state, 'changes-requested')
+    detail = await h.relay.prDetailView({ fromSession: 's1', number: 7 })
+    assert.equal(detail.records.length, 2)
+    assert.equal(detail.records[1].verdict, 'must-fix')
+    assert.equal(detail.records[1].note, '边界没测')
+
+    // 4) 已结束但没有结论 → 不伪造记录，标 noVerdict 并给提示；只解析一次
+    await h.relay.prReviews.setAiReview('o/ai-loop', 7, { sessionId: 'session-ai-none', headSha: head, at: old })
+    let reads = 0
+    h.relay.loadSessionEvents = async () => { reads += 1; return assistant('审完了，结论见上（没有标记）') }
+    view = await h.relay.prListView({ fromSession: 's1' })
+    assert.equal(view.items[0].local.aiReviewNoVerdict, true)
+    assert.equal(view.items[0].local.aiReview.sessionId, 'session-ai-none')
+    detail = await h.relay.prDetailView({ fromSession: 's1', number: 7 })
+    assert.equal(detail.aiReviewNoVerdict, true)
+    assert.equal(detail.records.length, 2, '无结论时不追加记录')
+    assert.ok(detail.records.every((row) => row.sessionId !== 'session-ai-none'))
+    const before = reads
+    await h.relay.prListView({ fromSession: 's1' })
+    assert.equal(reads, before, '标 noVerdict 后不再反复读日志')
+    // 手动记录仍可用（补录后状态变）
+    const manual = await h.relay.prReviewRecord({ fromSession: 's1', number: 7, verdict: 'pass', source: 'user', user: true })
+    assert.equal(manual.round, 3)
+    view = await h.relay.prListView({ fromSession: 's1' })
+    assert.equal(view.items[0].review.state, 'reviewed')
+    // 5) 审计里有自动回写事件
+    const audit = await readFile(join(h.dir, 'pr-review-audit.jsonl'), 'utf8')
+    assert.ok(audit.includes('pr-review-auto-record'), '自动回写写审计')
+  } finally { await h.cleanup(); await rm(base, { recursive: true, force: true }) }
+})

@@ -1,5 +1,27 @@
 # Changelog
 
+## 未发布（T17 AI 审核闭环：拉起即刷新 + 自动回写结论）
+
+用户实测：点「AI 审核」后审核会话已运行 / 完成，PR 状态仍停在「未审核」——因为拉起时还没写本地标记（旧实现 reload 前拉起），且结论原本只能手动记录。本轮把闭环补成自动：拉起后立刻强刷列表并先给乐观「审批中」；AI 会话结束后服务端只读会话日志，解析最后两行的机器可读结论并自动写本地审核记录；解析不到不伪造，给「请记录结论」提示。边界不变：只读会话日志 + 写本地记录，不写 GitHub、不合并、不推送。串行测试 488 全过。
+
+### A. 拉起即刷新 + 乐观态
+
+- `PrTab.launchAi` 成功后（失败也）立即 `reload(true, baseQuery)` 强刷 PR 列表，让服务端刚写入的「审批中」马上替换本地乐观态；仍自动打开新审核会话。
+- `aiRunning === 该 PR` 时行内状态先显示「审批中」pill（本地乐观态），不再停在「未审核」；详情顶部状态同样显示审批中。
+- `SIDEBAR_KIT 44 → 45`：外壳 + shared + 10 个页签 chunk 全部改名 `client.sidebar*45.js` 并同步 `KIT_VERSION`；`lib/client.js` touch。面板未改，`PANEL_KIT` 仍 9。
+
+### B. AI 结论自动回写
+
+- `prReviewLaunchText` 要求审核会话在最后一条回复用两行结尾：`【审核结论】pass` / `【审核结论】must-fix` + `【结论原因】<=80 字`（保留原有「必须修 / 建议修 / 可忽略」结构）；插件只读会话日志自动回写，不写 GitHub。
+- `prReviewLocal`：存在 `aiReview`（sessionId / headSha）且没有该 sessionId 的记录时——会话运行中 → 「审批中」；已结束 → 读会话最后一轮输出（助手正文 + `peer_report` / `peer_send` 参数均认）解析结论，pass / must-fix 写 `source:'ai'` 多轮记录（同一 session 只回写一次，幂等），随后清掉 `aiReview`；head 变化仍走 stale → 需再审。
+- 解析不到 → 不伪造记录，`aiReview.noVerdict=true`（只解析一次，面板轮询不反复读日志），面板行内「请记录结论」+ 详情说明；用户手动「记录结论」保留，可用于补录 / 覆盖。
+- 自动回写写 `pr-review-audit.jsonl`（`pr-review-auto-record`）。
+
+### 文档 / 测试
+
+- `docs/coordination-playbook.md` §11 补「AI 结论自动回写」与机器可读格式；`docs/coordination-ui.md` §10 更新数据 / 闭环行；`docs/ui-copy.md` 第二十三批；README / CHANGELOG。
+- 新增解析单测（标记 / 最后一条优先 / 原因截断 / 不猜）、自动回写端到端（运行中 / pass / must-fix / 无结论 / 幂等 / 审计）、面板拉起后强刷与乐观态、无结论提示；串行 488 全过。
+
 ## 未发布（T16 PR 多状态审核）
 
 PR 页从「OPEN / CLOSED + 审批胶囊」升级成 11 态审核视图：服务端只用 GitHub 只读字段 + 本地多轮审核记录 / 忽略拒绝标记算状态，面板按固定优先级链展示 chip、筛选、计数、图例与一句话原因；PR 详情可以记录「通过 / 必须修」结论（多轮，head 变化自动需再审）、本地忽略 / 拒绝（可取消），并链接本次 AI 审核会话。边界不变：只写本地存储与审计，不写 GitHub、不合并、不推送。串行测试 484 全过。

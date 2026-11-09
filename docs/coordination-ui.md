@@ -126,9 +126,10 @@
 | 项 | 位置 | 说明 |
 | --- | --- | --- |
 | 状态机 | `lib/prreview.js` | `PR_REVIEW_ORDER` / `PR_REVIEW_STATE` + `prReviewState()`；11 态、优先级链、未知 / stale / 草稿边界，不猜。 |
-| 本地记录 | `lib/prreview.js` `PrReviewStore` | `pr-reviews.json` 按 repo#PR 存多轮记录（最近 10 轮）、忽略 / 拒绝标记、AI 审核会话；head 变化即 stale。 |
+| 本地记录 | `lib/prreview.js` `PrReviewStore` | `pr-reviews.json` 按 repo#PR 存多轮记录（最近 10 轮）、忽略 / 拒绝标记、AI 审核会话（含 checkedAt / noVerdict）；head 变化即 stale。 |
 | 数据 | `lib/githublists.js` + `lib/taskpr.js` | PR 列表 / 详情补 state / mergeStateStatus / reviewRequests / latestReviews / statusCheckRollup / headRefOid；任务 PR 补 commits 最新提交时间。 |
 | 用户动作 | `impl.prReviewRecord()` / `impl.prFlag()` + `settings-route` | `pr-review-record` / `pr-flag` 只由用户点：记录结论（绑定当前 head）、忽略 / 拒绝（可取消），写本地 + `pr-review-audit.jsonl`。 |
+| AI 自动闭环 | `impl.prReviewLocal()` / `readAiConclusion()` + `lib/prreview.js` `parseReviewConclusion()` | 拉起后强刷 + 乐观「审批中」；会话结束只读日志解析 `【审核结论】` / `【结论原因】`，自动写 `source:'ai'` 记录（幂等，清 aiReview）；解析不到标 noVerdict 并提示手动记录。 |
 | 列表 / 图例 | `client.sidebar.prs44.js` | 11 态 chip + 筛选计数（优先级链）+ 状态图例 + 行内原因 / 轮次 / head。 |
 | 详情 | `client.sidebar.prs44.js` `PrDetail` | 状态 / 原因 / 轮次 / head / 本地多轮记录 / AI 会话链接；动作区记录结论、忽略 / 拒绝。 |
 
