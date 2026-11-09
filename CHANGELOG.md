@@ -1,88 +1,92 @@
 # Changelog
 
-## 未发布（T17 AI 审核闭环：拉起即刷新 + 自动回写结论）
+## 2.4.4 - 2026-11-09
+
+2.4.4 把协作流程继续做进面板：票子驾驶舱、PR 11 态审核、AI 审核自动回写；三个 relay 技能改为随包内置。串行测试 488 全过。
+
+### T17：AI 审核闭环（拉起即刷新 + 自动回写结论）
 
 用户实测：点「AI 审核」后审核会话已运行 / 完成，PR 状态仍停在「未审核」——因为拉起时还没写本地标记（旧实现 reload 前拉起），且结论原本只能手动记录。本轮把闭环补成自动：拉起后立刻强刷列表并先给乐观「审批中」；AI 会话结束后服务端只读会话日志，解析最后两行的机器可读结论并自动写本地审核记录；解析不到不伪造，给「请记录结论」提示。边界不变：只读会话日志 + 写本地记录，不写 GitHub、不合并、不推送。串行测试 488 全过。
 
-### A. 拉起即刷新 + 乐观态
+#### A. 拉起即刷新 + 乐观态
 
 - `PrTab.launchAi` 成功后（失败也）立即 `reload(true, baseQuery)` 强刷 PR 列表，让服务端刚写入的「审批中」马上替换本地乐观态；仍自动打开新审核会话。
 - `aiRunning === 该 PR` 时行内状态先显示「审批中」pill（本地乐观态），不再停在「未审核」；详情顶部状态同样显示审批中。
 - `SIDEBAR_KIT 44 → 45`：外壳 + shared + 10 个页签 chunk 全部改名 `client.sidebar*45.js` 并同步 `KIT_VERSION`；`lib/client.js` touch。面板未改，`PANEL_KIT` 仍 9。
 
-### B. AI 结论自动回写
+#### B. AI 结论自动回写
 
 - `prReviewLaunchText` 要求审核会话在最后一条回复用两行结尾：`【审核结论】pass` / `【审核结论】must-fix` + `【结论原因】<=80 字`（保留原有「必须修 / 建议修 / 可忽略」结构）；插件只读会话日志自动回写，不写 GitHub。
 - `prReviewLocal`：存在 `aiReview`（sessionId / headSha）且没有该 sessionId 的记录时——会话运行中 → 「审批中」；已结束 → 读会话最后一轮输出（助手正文 + `peer_report` / `peer_send` 参数均认）解析结论，pass / must-fix 写 `source:'ai'` 多轮记录（同一 session 只回写一次，幂等），随后清掉 `aiReview`；head 变化仍走 stale → 需再审。
 - 解析不到 → 不伪造记录，`aiReview.noVerdict=true`（只解析一次，面板轮询不反复读日志），面板行内「请记录结论」+ 详情说明；用户手动「记录结论」保留，可用于补录 / 覆盖。
 - 自动回写写 `pr-review-audit.jsonl`（`pr-review-auto-record`）。
 
-### 文档 / 测试
+#### 文档 / 测试
 
 - `docs/coordination-playbook.md` §11 补「AI 结论自动回写」与机器可读格式；`docs/coordination-ui.md` §10 更新数据 / 闭环行；`docs/ui-copy.md` 第二十三批；README / CHANGELOG。
 - 新增解析单测（标记 / 最后一条优先 / 原因截断 / 不猜）、自动回写端到端（运行中 / pass / must-fix / 无结论 / 幂等 / 审计）、面板拉起后强刷与乐观态、无结论提示；串行 488 全过。
 
-## 未发布（T16 PR 多状态审核）
+### T16：PR 多状态审核
 
 PR 页从「OPEN / CLOSED + 审批胶囊」升级成 11 态审核视图：服务端只用 GitHub 只读字段 + 本地多轮审核记录 / 忽略拒绝标记算状态，面板按固定优先级链展示 chip、筛选、计数、图例与一句话原因；PR 详情可以记录「通过 / 必须修」结论（多轮，head 变化自动需再审）、本地忽略 / 拒绝（可取消），并链接本次 AI 审核会话。边界不变：只写本地存储与审计，不写 GitHub、不合并、不推送。串行测试 484 全过。
 
-### A. 11 态状态机
+#### A. 11 态状态机
 
 - 新增 `lib/prreview.js`：`PR_REVIEW_ORDER` / `PR_REVIEW_STATE`（显示名 / 色调 / 一句话含义）+ 纯函数 `prReviewState(pr, records, flags)`。
 - 状态：未审核 / 审批中 / 已审核 / 需再审 / 已驳回 / 已拒绝 / 已关闭 / 已忽略 / 已落后 / 待合并 / 已合并；优先级链 **已合并 > 已拒绝 > 已关闭 > 已忽略 > 已落后 > 已驳回 > 需再审 > 审批中 > 待合并 > 已审核 > 未审核**（列表 / 筛选 / 计数 / 图例同序）。
 - 判定输入：`state` / `merged` / `draft` / `mergeStateStatus` / `mergeable` / `reviewDecision` / `reviewRequests` / `latestReviews` / `checks` / `headSha`；不认识的结论记 unknown，不猜。草稿、无 checks、未知、stale、「AI 通过但未批准」「pending review request」都有边界处理。
 
-### B. 本地审核记录与标记
+#### B. 本地审核记录与标记
 
 - 按 repo + PR 存多轮记录 `{ headSha, verdict: pass|must-fix, note, source: ai|user, at, round, sessionId? }`（最近 10 轮）；head sha 一变旧记录即 stale（需再审）。
 - 忽略 / 拒绝只写插件存储（`pr-reviews.json`）+ `pr-review-audit.jsonl` 审计，可取消；不写 GitHub、不改任务阶段 / 审批。
 - AI 审核闭环：拉起只读审核会话时记下 sessionId / head（「审批中」+ 会话链接）；审核结束后由用户在 PR 详情「记录结论：通过 / 必须修（带 note）」写本地记录并清审批中标记；新提交后自动变需再审。
 - 用户动作走 `settings-route`：`pr-review-record`、`pr-flag`；模型工具没有写入口。
 
-### C. gh 字段
+#### C. gh 字段
 
 - 侧栏 PR 列表 / 详情补 `state,headRefOid,mergeStateStatus,mergeable,reviewRequests,latestReviews,statusCheckRollup`；`lib/taskpr.js` 的 `gh pr view` 补 `mergeStateStatus,reviewRequests,latestReviews,commits`，汇总成 `reviewRequests / latestReviews / headCommittedAt`。
 - 任务关联 PR 的一行状态补「已落后」（BEHIND）；探测失败仍记 unknown，不丢上次缓存。
 
-### D. 面板
+#### D. 面板
 
 - PR 列表：11 态 chip（颜色 + 原因 tooltip + 行内原因）、筛选与计数按优先级链（保留打开 / 已关闭 / 全部）、状态图例（固定顺序 + 每个状态一句话含义）、行内显示审核轮次与 head 短 sha。
 - PR 详情：状态、原因、审核轮次、head sha、本地多轮记录（结论 / 来源 / 轮次 / 会话）、AI 审核会话链接；动作区新增「记录结论（通过 / 必须修 + 说明 + AI / 人工）」与「忽略 / 拒绝（可取消）」。
 - 文案 zh / en 成对；旧服务端 / 旧快照没有 `review` 字段时保留原胶囊与筛选，不崩。
 
-### KIT / 文档 / 测试
+#### KIT / 文档 / 测试
 
 - `SIDEBAR_KIT 43 → 44`：外壳 + shared + 10 个页签 chunk 全部改名 `client.sidebar*44.js` 并同步 `KIT_VERSION`；`lib/client.js` touch（新增文案需重启 DSH）。面板未改，`PANEL_KIT` 仍 9。
 - `docs/coordination-playbook.md` 新增 PR 审核状态与门；`docs/coordination-ui.md` 新增 §10；`docs/ui-copy.md` 第二十二批；README 更新。
 - 新增 `test/prreview.test.js`（11 态 / 优先级 / 边界 / 存储），并补 gh 字段映射、列表 / 详情接入、用户路由与面板渲染 / 筛选 / 记录结论用例；串行 484 全过。
 
-## 未发布（T15 票子流程驾驶舱）
+### T15：票子流程驾驶舱
 
 票子从「看板上一行」变成可操作的驾驶舱：任务 / 地图票详情直接显示持有者、分支、工作树、最近汇报，服务端为每票给出依赖 / 持有者 / 阶段 / 审批 / 技能 / 合并 / 发布判定；用户可以在详情里拉起会话（首条消息注入票子完整字段并指定技能），拉起后自动回填认领、分支、工作树与 `stage=doing`。同时把 relay 三个技能改成随插件包提供（Deck 式内置技能），不再要求仓库里放 `.dsh/skills` 副本。串行测试 470 全过。
 
-### A. 内置技能（Deck 式）
+#### A. 内置技能（Deck 式）
 
 - 新增随包 `bundled-skills/relay-main|relay-worker|relay-release/SKILL.md`（kebab-case frontmatter：name / description / whenToUse）；`package.json` 的 `files` 加入 `bundled-skills/*/SKILL.md`。
 - `lib/index.js` 在 `ctx.inject(['skills'])` 里注册 bundled provider（`lib/bundled-skills.js` 实现）：候选带 source / provider / rank 600 / resourceBase，`get()` 按需读正文；宿主没有 skills 服务时安静降级，不影响插件其它功能。
 - 删除仓库内 `.dsh/skills/relay-*` 副本（避免与 bundled 同名冲突），文档改为「技能随插件提供」。
 
-### B. 票子详情动作区（任务 / 地图票）
+#### B. 票子详情动作区（任务 / 地图票）
 
 - 详情新增「票子驾驶舱」：持有者（可开会话）、分支、工作树、最近汇报；一行判定胶囊（依赖 / 持有者 / 阶段 / 审批 / 技能 / 合并批准 / 随版本发布）。
 - 动作：「拉起会话」（阶段允许、无活跃持有者、依赖全结束、技能存在时可用，否则禁用并显示原因）、「打开会话 / 唤醒」（已有持有者）、技能选择（内置 + 项目 `.dsh/skills`，默认 worker→`relay-worker`）、别称与模型可选。
 - 阶段按钮覆盖 待分诊 → 可认领 → 进行中 → 待审查；审批按钮在待审查 / 待审批时出现；已合入 / 已发布只显示只读事实。
 
-### C. 拉起即填充
+#### C. 拉起即填充
 
 - 新增用户动作 `ticket-launch`：复用 `launchClaimer`，复核 gates 后建会话，首条消息注入标题 / 正文（含验收）/ 依赖 / 子票 / 父任务 / issue / PR / 版本线，并写明「先加载 <skill> 技能」。
 - 创建后在锁内代用户登记认领（`claims/<号>/owner` = 新会话），写 owner 备注（分支 / 工作树 / 技能）、看板工作树列、`stage=doing` 与 `launch` 记录；旧失效 / 已结束的认领先移到 `claims/.released` 留档。
 
-### D. 判定（gates）
+#### D. 判定（gates）
 
 - 服务端为每票返回 `gates`：依赖是否全部结束（列出未结束项）/ 无活跃持有者或已失效 / stage 是否允许 / approval 与审批结果 / 技能是否存在 / 合并批准 sha / Release tag 状态。
 - 纯函数在 `lib/ticket-cockpit.js`（`ticketGates` / `ticketDependencyViews` / `ticketLaunchText`），测试覆盖各道门禁与首条消息字段。
 
-### KIT / 文档 / 测试
+#### KIT / 文档 / 测试
 
 - `SIDEBAR_KIT 42 → 43`：外壳 + shared + 10 个页签 chunk 全部改名 `client.sidebar*43.js` 并同步 `KIT_VERSION`；`lib/client.js` touch。面板未改，`PANEL_KIT` 仍 9。
 - `docs/coordination-ui.md` 新增 §9；`docs/ui-copy.md` 第二十一批；README / 协作手册 / 维护指南更新技能与驾驶舱说明。
@@ -111,7 +115,7 @@ PR 页从「OPEN / CLOSED + 审批胶囊」升级成 11 态审核视图：服务
 - 动作只有「复制发版清单命令 / 唤醒主会话 / 打开 Release」；**没有** push / tag / Release 按钮。
 - 服务端：`GET ?view=release`（60s 缓存，`force=1` 重读）；`lib/release.js` 纯函数（版本推进 / 阶段条 / 清单命令）；gh 只读，身份锁定时归入「无法读取」。
 
-### KIT / 文档 / 测试
+#### KIT / 文档 / 测试
 
 - 侧栏 `SIDEBAR_KIT 41 → 42`：外壳 + shared + 10 个页签 chunk 全部改名 `client.sidebar*42.js` 并同步 `KIT_VERSION`；面板 `PANEL_KIT 8 → 9`；`lib/client.js` touch。
 - 文案进 `docs/ui-copy.md` 第二十批；`docs/coordination-ui.md` 补实现状态；协作流程手册补面板批准说明；维护指南补 `lib/release.js` 与批准存储。
