@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.4.5 - 未发布
+## 2.4.5 - 2026-11-09
 
 2.4.5 补两处协作体验：对话里的「协作」标签与左侧「会话监督」面板可以切到任一侧栏已登记的工作区看只读监督数据；票子驾驶舱可以把活跃 / 久未活动持有者直接交接给新会话。串行测试 508 全过。
 
@@ -27,30 +27,6 @@
 - 测试：切工作区后 board 请求带 workspace 且不带 session、跟随模式参数不变、选择按嵌入 / 会话隔离记本机、跨工作区写动作不发 POST、旧服务端无 workspaces 不报错、受控面板按 workspace 取数与只读拦截、服务端只读视图 workspace 透传；串行 **503 全过**（基线 495 → +8；含后续 T22 共 508 全过）。
 - 文档：`docs/coordination-ui.md` §11、`docs/ui-copy.md` 第二十六批（新文案 zh / en 成对）。
 
-## 2.4.4 - 2026-11-09
-
-2.4.4 把协作流程继续做进面板：票子驾驶舱、PR 11 态审核、AI 审核自动回写、合并流水线「本地已合入 · 待推送」中间态；三个 relay 技能改为随包内置。串行测试 495 全过。
-
-### T19：票子驾驶舱合并 / 版本显示纠正 + 任务页「还有 N 条」可展开
-
-用户实测反馈两处：票子详情把任务审批、合并批准和 `latestTag` 混在一起（T15 已本地 main 合入却显示「合并已批准 / 随 v2.4.3 发布」）；任务页「还有 N 条，去协作页看板查看」是纯文本不可点。本轮把合并状态改为按该票 holder 会话的合并流水线事实（origin 已合入 / 本地已合入 · 待推送 / 已批准 / 可合并 / 已发布），版本改用 `releaseSummary.nextTag`（当前 v2.4.4），只有已发布才显示实际 tag；任务审批单独标注。任务页尾部改成可点按钮（已结束默认露 8 条、可展开；进行中 / 服务端截断同样可点），文案「还有 N 条，点开展开」。串行测试 495 全过。
-
-#### A. 合并 / 版本显示
-
-- `impl.board()` 的 `gatesOf` 按 holder 会话（进行中认领 → 已结束认领 owner → launch 记录）取 T14/T18 `approvalView`；已写完成但不在看板 ready 列表的票，用 `ticketCommitLocations()` 只读核对 origin/main / 本地 main，补 `mainMerged` / `mainLocal`。
-- `ticketGates` 的 `merge` 带 `stage`（ready / approved / rejected / stale / later / local-merged / merged / released）、`pendingPush`、`localMerged` / `merged`、`sha`；`release` 带 `nextTag`，实际 `tag` 只在已发布时给。
-- UI 判定胶囊：任务审批写「任务审批：…」，合并单独写「可合并 / 合并已批准 / 本地已合入 · 待推送 / 已合入 origin/main / 已随版本发布」；未发布版本写「随 v2.4.4 发布」，已发布才写「已发布 v2.4.3」。
-
-#### B. 任务页可展开
-
-- 已结束组默认露 8 条，点「还有 N 条，点开展开」展开 / 收起；可接、进行中沿用本地展开，「已结束」和服务端截断的剩余条数都改成按钮（点一下展开并刷新），不再是不可点的纯文本。
-- `board.taskBoard.claimedRows` / `endedRows` 上限 20 / 10 → 40 / 40，减少「已加载之外」的分页提示。
-
-#### C. KIT / 测试 / 文档
-
-- `SIDEBAR_KIT 46 → 47`（外壳 + shared + 10 页签全部改名 `client.sidebar*47.js` 并同步 `KIT_VERSION`）、`lib/client.js` touch；面板未改，`PANEL_KIT 10` 不变。
-- 测试：gates 的 approved / local-merged / released / nextTag 与「任务审批 ≠ 合并」、已结束票的 board 接线、任务页展开 / 收起 / 截断按钮；串行 495 全过。
-
 ### T22：票子驾驶舱「活跃 / 久未活动持有者交接给新会话」
 
 用户要求：票子驾驶舱里持有者 live / stale 时也能把票交接给新会话，不用先手动 handoff 再拉起两步。原实现只在 holder dead 时提示「可拉起新会话接手」，活跃 / 久未活动只给「打开 / 唤醒」。本轮新增用户动作 `ticket-takeover`：建会话 → 看板 handoff 转移认领 → 写 launch（接手自 @old）+ stage=doing → 首条消息带接手说明 → 通知原持有者停手 → 审计。串行测试 508 全过。
@@ -75,6 +51,30 @@
 - `lib/settings-route.js` 新增用户动作 `ticket-takeover`（`BOARD_ACTIONS`）；`lib/client.js` 新增 ticketTakeover / ticketTakingOver / ticketTakeoverBlocked / ticketTakeoverHint 中英文案。KIT 保持 `SIDEBAR_KIT 48` / `PANEL_KIT 11` 不改名加号。
 - 测试：gates 各持有者状态 / 阶段不挡 / 依赖审批技能仍挡；首条消息接手说明；完整交接（认领 owner、launch 记录、沿用分支、原会话通知、新会话无重复通知、审计、重复点击幂等、并发忙）；门禁挡住不建会话不改认领；通知失败不回滚；驾驶舱按钮渲染 / 禁用 / 提交；串行 **508 全过**。
 - 文档：`docs/coordination-ui.md` §9 补交接行，`docs/ui-copy.md` 第二十七批。
+
+## 2.4.4 - 2026-11-09
+
+2.4.4 把协作流程继续做进面板：票子驾驶舱、PR 11 态审核、AI 审核自动回写、合并流水线「本地已合入 · 待推送」中间态；三个 relay 技能改为随包内置。串行测试 495 全过。
+
+### T19：票子驾驶舱合并 / 版本显示纠正 + 任务页「还有 N 条」可展开
+
+用户实测反馈两处：票子详情把任务审批、合并批准和 `latestTag` 混在一起（T15 已本地 main 合入却显示「合并已批准 / 随 v2.4.3 发布」）；任务页「还有 N 条，去协作页看板查看」是纯文本不可点。本轮把合并状态改为按该票 holder 会话的合并流水线事实（origin 已合入 / 本地已合入 · 待推送 / 已批准 / 可合并 / 已发布），版本改用 `releaseSummary.nextTag`（当前 v2.4.4），只有已发布才显示实际 tag；任务审批单独标注。任务页尾部改成可点按钮（已结束默认露 8 条、可展开；进行中 / 服务端截断同样可点），文案「还有 N 条，点开展开」。串行测试 495 全过。
+
+#### A. 合并 / 版本显示
+
+- `impl.board()` 的 `gatesOf` 按 holder 会话（进行中认领 → 已结束认领 owner → launch 记录）取 T14/T18 `approvalView`；已写完成但不在看板 ready 列表的票，用 `ticketCommitLocations()` 只读核对 origin/main / 本地 main，补 `mainMerged` / `mainLocal`。
+- `ticketGates` 的 `merge` 带 `stage`（ready / approved / rejected / stale / later / local-merged / merged / released）、`pendingPush`、`localMerged` / `merged`、`sha`；`release` 带 `nextTag`，实际 `tag` 只在已发布时给。
+- UI 判定胶囊：任务审批写「任务审批：…」，合并单独写「可合并 / 合并已批准 / 本地已合入 · 待推送 / 已合入 origin/main / 已随版本发布」；未发布版本写「随 v2.4.4 发布」，已发布才写「已发布 v2.4.3」。
+
+#### B. 任务页可展开
+
+- 已结束组默认露 8 条，点「还有 N 条，点开展开」展开 / 收起；可接、进行中沿用本地展开，「已结束」和服务端截断的剩余条数都改成按钮（点一下展开并刷新），不再是不可点的纯文本。
+- `board.taskBoard.claimedRows` / `endedRows` 上限 20 / 10 → 40 / 40，减少「已加载之外」的分页提示。
+
+#### C. KIT / 测试 / 文档
+
+- `SIDEBAR_KIT 46 → 47`（外壳 + shared + 10 页签全部改名 `client.sidebar*47.js` 并同步 `KIT_VERSION`）、`lib/client.js` touch；面板未改，`PANEL_KIT 10` 不变。
+- 测试：gates 的 approved / local-merged / released / nextTag 与「任务审批 ≠ 合并」、已结束票的 board 接线、任务页展开 / 收起 / 截断按钮；串行 495 全过。
 
 ### T18：合并流水线中间态「本地已合入 · 待推送」
 
