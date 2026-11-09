@@ -54,6 +54,7 @@
   },
   "files": [
     "lib/*.js",
+    "bundled-skills/*/SKILL.md",
     "CHANGELOG.md",
     "cordis.patch.yml",
     "locale/*.json",

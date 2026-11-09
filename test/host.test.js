@@ -2216,6 +2216,54 @@ test('任务派发：dispatch spawn 拉起新会话并带任务指令', async ()
   } finally { await h.cleanup() }
 })
 
+test('票子驾驶舱：拉起新会话带票子字段与技能，回填认领 / 分支 / 工作树 / stage；gates 与阶段动作', async () => {
+  const h = await setup()
+  try {
+    h.workspaces.push({ id: 'ws-1', title: 'A', path: h.dir, sessionIds: [h.caller.id, h.peer.id] })
+    await h.run('main here')
+    await mkdir(join(h.dir, '.agents'), { recursive: true })
+    await writeFile(join(h.dir, '.agents/TASKS.md'), '| 号 | 优先 | 任务 | 工作树 | 需要构建 | 状态 |\n|---|---|---|---|---|---|\n| T1 | P1 | 票子驾驶舱 |  | 否 | 待认领 |\n\n### T1 票子驾驶舱\n\n验收：串行测试全绿。\n')
+    await h.call('peer_task', { action: 'update', id: 'T1', stage: 'ready' })
+    const { perform } = await import('../lib/settings-route.js')
+    // 拉起前：看板给出 gates 与内置技能列表，可拉起
+    let board = await h.relay.board(undefined, { session: h.caller.id })
+    const openRow = board.taskBoard.open.find((row) => row.id === 'T1')
+    assert.equal(openRow.gates.launch.allowed, true)
+    assert.ok(board.taskBoard.skills.list.some((row) => row.name === 'relay-worker'))
+    const done = await perform(h.relay, { action: 'ticket-launch', fromSession: h.caller.id, task: 'T1', skill: 'relay-worker', alias: 't1' })
+    const created = done.result.sessionId
+    assert.ok(typeof created === 'string' && created !== '', '拉起了新会话')
+    assert.equal(done.result.branch, 't1')
+    assert.equal(done.result.worktree, '.agents/worktrees/t1')
+    const text = h.agents.get(created).inbox[0][1].content[0].text
+    for (const part of ['T1', '票子驾驶舱', '验收：串行测试全绿', '先加载技能：调用 skill 工具加载内置技能「relay-worker」', '已由用户代你登记', '.agents/worktrees/t1', '分支 t1']) {
+      assert.ok(text.includes(part), '首条消息缺少 ' + part)
+    }
+    // 回填：认领 owner / 分支 / 工作树 / stage=doing
+    const owner = await readFile(join(h.dir, '.agents/claims/T1/owner'), 'utf8')
+    assert.match(owner.split('\n')[0], new RegExp(created))
+    assert.match(owner, /分支 t1；工作树 \.agents\/worktrees\/t1；技能 relay-worker/)
+    board = await h.relay.board(undefined, { session: h.caller.id })
+    let row = board.taskBoard.claimedRows.find((item) => item.id === 'T1')
+    assert.equal(row.owner, created)
+    assert.equal(row.stage, 'doing')
+    assert.equal(row.worktree, '.agents/worktrees/t1')
+    assert.equal(row.gates.holder.sessionId, created)
+    assert.equal(row.gates.launch.allowed, false, '已有活跃持有者不能再拉起')
+    assert.match(row.gates.launch.reason, /持有者/)
+    // 阶段动作：只写本地 stage；review 自动 pending 审批
+    const staged = await perform(h.relay, { action: 'ticket-stage', fromSession: h.caller.id, task: 'T1', stage: 'review' })
+    assert.equal(staged.result.stage, 'review')
+    board = await h.relay.board(undefined, { session: h.caller.id })
+    row = board.taskBoard.claimedRows.find((item) => item.id === 'T1')
+    assert.equal(row.stage, 'review')
+    assert.equal(row.approval, 'pending')
+    assert.equal(row.gates.stage.ok, false)
+    // 门禁：已有活持有者时服务端拒绝再拉起，不改看板
+    await assert.rejects(perform(h.relay, { action: 'ticket-launch', fromSession: h.caller.id, task: 'T1' }), (error) => error.code === 'ticket_gate')
+  } finally { await h.cleanup() }
+})
+
 test('子代理通讯：树内经根会话转交；对外署名根会话、回复落根；别人的子代理经其根转交；特权不继承、认领记在根会话；树内限流', async () => {
   const h = await setup()
   try {

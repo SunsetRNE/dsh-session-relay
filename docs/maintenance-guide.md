@@ -11,9 +11,11 @@
 - `lib/impl.js` / `lib/settings-route.js`：Host 适配层。`impl.js` 连接会话、工作区、看板和 `sessionQuery`；`settings-route.js` 给已登录的本机面板提供只读查询和用户动作。模型工具和用户面板必须在这一层区分权限范围。
 - `lib/client.js`：浏览器面板层。通过 `/api/dsha-session-relay` 取数据，不直接读文件或 Host 服务。面板逻辑改完通常刷新即可；外壳、注入字段和 bundle patch 改动需要重启 DSH。
 - `lib/release.js`：发布状态卡的纯函数（版本推进 / 阶段条 / 发版清单命令）。git / package.json / gh 的真读取在 `impl.js`，失败只写未知；UI 不执行 push / tag / Release。
+- `lib/ticket-cockpit.js`：票子驾驶舱的纯函数（技能 frontmatter / 目录扫描 / `ticketGates` / 依赖视图 / 拉起首条消息）。不建会话、不写看板；`impl.launchTicket()` 才做校验与回填。
+- `lib/bundled-skills.js`：随包技能 provider（Deck 式）。`lib/index.js` 用 `ctx.inject(['skills'])` 注册；宿主没有 skills 服务时安静降级，不影响其它功能。技能目录在 `bundled-skills/`，随 `package.json` 的 files 打包。
 - 合并批准记录存在协调状态 `groups.<工作区>.approvals`（只由用户在面板点；sha 绑定、30 天过期）。它只是流水线记录，不是推送 / 合并授权；`impl.mergeDecision()` 不跑 git。
 
-`lib/index.js` 是尽量稳定的外壳：负责把实现复制到 `.gen/<代次>`、注册命令/工具/路由，并在 `/relay reload` 时热替换 `impl.js` 及依赖。不要把业务逻辑塞回外壳，否则热重载和状态接管会变复杂。
+`lib/index.js` 是尽量稳定的外壳：负责把实现复制到 `.gen/<代次>`、注册命令/工具/路由/内置技能，并在 `/relay reload` 时热替换 `impl.js` 及依赖。不要把业务逻辑塞回外壳，否则热重载和状态接管会变复杂。
 
 ## 2. 为什么搜索这样设计
 
@@ -59,7 +61,8 @@
   - 验证顺序：等客户端热更新 / 整页刷新（需要时 `/relay reload` 换实现）→ 仍旧则重启 DSH；不要反复改业务文件“试”。`PANEL_KIT === client.panel.js KIT_VERSION`、`SIDEBAR_KIT === 外壳 / 每个 chunk 的 KIT_VERSION`、`SIDEBAR_CHUNK` 与外壳文件名一致，已有测试覆盖。
   - **stale 屏（2026-11-08 补，2026-11-09 换文件名根治）**：提示「协作面板刚更新过」时，入口 `client.js` 已热更新、页面里的侧栏 chunk 还是旧版；**关掉右侧栏标签不会重载已加载的 chunk**，必须**整页刷新**。整页刷新后仍提示 → `/relay reload` → 再整页刷新；仍不行才重启 DSH。若仍卡住，多半是 WebView 钉住了固定文件名的旧 chunk；现在侧栏外壳与每个页签 chunk 都按 KIT 命名（如 `client.sidebar41.js`），换版本即换 URL，不会再命中旧缓存。stale 屏显示实际 / 期望 KIT 并提供「刷新整个网页」按钮。
 - **侧栏折叠入口（2026-11-08 二次修复）**：地图 / PR / 分支 / 问题折进「更多」的入口只能在窄侧栏出现；宽侧栏已经有这些页签，再列一遍就是重复。宽度由 `ResizeObserver` 量侧栏 root 后加 `dshaSv_wide` / `dshaSv_narrow`（断点 620px），不要退回 CSS 容器查询——部分 WebView 旋转后不重算，会出现宽屏露快捷入口 / 窄屏露折叠页签的回归。宽屏隐藏快捷入口用 `.dshaSv_wide .dshaSv_foldOnly{display:none}`，窄屏隐藏折叠页签用 `.dshaSv_narrow .dshaSv_foldTab{display:none}`；入口 section 仍挂 `dshaSv_foldOnly`。`test/sidebar.test.js` 同时断言渲染类名、宽度 class 与 CSS 规则；改这块先跑侧栏用例。
-- **发布物约束**：不发 npm；每个 GitHub Release 只挂一个 `.tgz`，插件管理器按唯一附件安装。
+- **发布物约束**：不发 npm；每个 GitHub Release 只挂一个 `.tgz`，插件管理器按唯一附件安装。2.4.4 起技能随包（`bundled-skills/`），打包时确认 `files` 含 `bundled-skills/*/SKILL.md`；仓库里不要再放 `.dsh/skills/relay-*` 副本（同名会与内置 provider 冲突）。
+- **票子驾驶舱（T15）**：`launchTicket` 用用户动作代认领（`claims/<号>/owner`=新会话），并把 `stage` 置 doing、`launch` 记录写进任务状态；旧失效 / 已结束认领先移到 `claims/.released`。拉起前必须过 gates（依赖 / 持有者 / 阶段 / 审批 / 技能），UI 禁用原因来自服务端，不要在前端另算一套。
 - **每步注入的上下文要短且稳定**：协作上下文每一步都进模型提示，慢模型尤其吃亏。
   - 旁观会话（本组有主会话、本会话未加入）只拿一行版本线摘要（`OBSERVER_LINE_LIMIT`）、一行插件核验（`mainBriefLine`）和一行看板计数（`boardBrief`）；没有主会话时照常给完整看板段。
   - 版本线的来源声明由 `renderLine` 统一加一次；模型照抄进正文的那一行由 `lineBody` 去掉，不要再在别处追加同一句。

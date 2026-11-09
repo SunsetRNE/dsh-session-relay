@@ -1,7 +1,8 @@
-// 右侧边栏「协作」标签：入口只登记类型与空壳，正文在 client.sidebar42.js 外壳 + 各页签 chunk 里按需加载
+// 右侧边栏「协作」标签：入口只登记类型与空壳，正文在 client.sidebar43.js 外壳 + 各页签 chunk 里按需加载
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { ticketGates } from '../lib/ticket-cockpit.js'
 
 function fakeReact(states = []) {
   let call = 0
@@ -22,9 +23,9 @@ function fakeReact(states = []) {
   return React
 }
 
-// T13：侧栏按页签拆 chunk（KIT 42）。测试里把外壳 + 全部 chunk 一次性登记进同一加载器缓存，
+// T13：侧栏按页签拆 chunk（KIT 43）。测试里把外壳 + 全部 chunk 一次性登记进同一加载器缓存，
 // 这样 `mod.Xxx` 的原有断言不用改；按需 / 预取 / 失败回退另由「按需拆 chunk」用例直接测加载器。
-const KIT = 42
+const KIT = 43
 const CHUNK_NAMES = ['shared', 'sessions', 'tasks', 'handoff', 'map', 'prs', 'branches', 'issues', 'mail', 'more', 'settings']
 async function loadSidebar(React) {
   const { mod: shell, chunk } = await load('client.sidebar' + KIT + '.js', React)
@@ -137,21 +138,21 @@ test('入口：没有 ctx.inject（旧宿主）时不登记右侧边栏、不报
   assert.ok(!names.includes('sidebar.right.pane.tab'))
 })
 
-test('入口：空壳不同步加载正文；用 require.async 拉 client.sidebar42.js', async () => {
+test('入口：空壳不同步加载正文；用 require.async 拉 client.sidebar43.js', async () => {
   const React = fakeReact()
   let lazyFactory
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 42 }) })
-  assert.equal(mod.SIDEBAR_CHUNK, 'client.sidebar42.js', '入口指向按版本命名的 chunk')
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 43 }) })
+  assert.equal(mod.SIDEBAR_CHUNK, 'client.sidebar43.js', '入口指向按版本命名的 chunk')
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
   assert.equal(tree.type, 'suspense')
   assert.equal(textOf(tree.props.fallback), 'sideLoading')
   const loaded = await lazyFactory()
-  assert.deepEqual(asked, ['./client.sidebar42.js'])
+  assert.deepEqual(asked, ['./client.sidebar43.js'])
   assert.equal(loaded.default(), 'body')
 })
 
@@ -166,9 +167,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v42'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v43'), '显示实际 / 期望版本')
   const { mod: chunk } = await loadSidebar(fakeReact())
-  assert.equal(chunk.KIT_VERSION, 42, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 43, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -205,11 +206,11 @@ function kitFor(opened = []) {
 const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, workItem = undefined, extra = [] } = {}) =>
   [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, workItem, {}, false, 0, ...extra]
 
-test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar42.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
+test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar43.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
   const React = fakeReact(states(sampleBoard()))
   const { mod, chunk } = await loadSidebar(React)
-  assert.equal(chunk, 'client.sidebar42.js')
-  assert.equal(mod.KIT_VERSION, 42)
+  assert.equal(chunk, 'client.sidebar43.js')
+  assert.equal(mod.KIT_VERSION, 43)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
   const text = textOf(tree)
   for (const part of ['dsha-session-relay', 'sideTabSessions', 'sideTabTasks', 'sideTabHandoff', 'sideTabMap', 'sideTabPr', 'sideTabBranches', 'sideTabIssues', 'sideTabMail', 'sideTabMore', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
@@ -476,7 +477,7 @@ test('正文 chunk：还没数据时显示读取中；没有会话时不渲染',
 })
 
 test('正文 chunk：样式随标签注入，不在入口里；不用 backdrop-filter 和常驻动画', async () => {
-  const chunk = await readFile(new URL('../lib/client.sidebar42.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar43.js', import.meta.url), 'utf8')
   const entry = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   assert.ok(chunk.includes('.dshaSv_card'))
   assert.ok(!entry.includes('.dshaSv_'), '入口不带侧边栏样式')
@@ -508,7 +509,7 @@ test('正文 chunk：空白会话按服务端分类显示「空白」，不算�
   const open = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(open.includes('catBlank') && open.includes('f4ada307'))
   assert.ok(!open.includes('status_working'))
-  const chunk = await readFile(new URL('../lib/client.sidebar42.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar43.js', import.meta.url), 'utf8')
   assert.ok(!chunk.includes('brand-primary'), '强调色用链接蓝，不用主题里接近黑白的 brand-primary')
 })
 
@@ -1561,7 +1562,7 @@ test('更多页：窄屏快捷入口，点条目切页 / 打开设置', async ()
 })
 
 test('侧栏折叠：更多页快捷入口只在窄屏显示，隐藏规则用双类名', async () => {
-  const source = await readFile(new URL('../lib/client.sidebar42.js', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../lib/client.sidebar43.js', import.meta.url), 'utf8')
   assert.ok(source.includes('.dshaSv_wide .dshaSv_foldOnly{display:none}'), '宽屏隐藏规则用宽度 class + 双类名')
   assert.ok(source.includes('ResizeObserver') && source.includes('dshaSv_wide'), '旋转后由 ResizeObserver 重新量宽度')
   const ReactR = fakeReact(states(sampleBoard()))
@@ -2319,7 +2320,7 @@ test('入口：空闲时预取侧栏 chunk，首次打开不用再等下载', as
     assert.equal(pending.length, 1, '登记侧栏时挂一次空闲预取')
     pending[0]()
     await new Promise((resolve) => setTimeout(resolve, 0))
-    assert.deepEqual(asked, ['./client.sidebar42.js'], '空闲时拉一次 chunk')
+    assert.deepEqual(asked, ['./client.sidebar43.js'], '空闲时拉一次 chunk')
     const Tab = mod.makeSidebarTab({ t })
     assert.equal(textOf(React.createElement(Tab, { sessionId: 's' })), 'body', '预取完成后直接渲染正文，不再闪 Suspense')
   } finally {
@@ -2573,7 +2574,119 @@ test('T14：设置页发布卡只读展示阶段条 / 事实 / 动作，复制�
   await copyButton.props.onClick()
   assert.deepEqual(copied, [data.command])
   // 源码边界：发布卡没有 push / tag / release 写动作，只有唤醒（wake）与复制
-  const chunk = await readFile(new URL('../lib/client.sidebar.settings42.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar.settings43.js', import.meta.url), 'utf8')
   assert.match(chunk, /function ReleaseBox/)
   assert.ok(!/git push|git tag|gh release create/.test(chunk.replace(/node --test[\s\S]*?release-notes[^\n]*/g, '')), '发布卡不跑 push / tag / Release 命令')
+})
+
+
+// ---------------------------------------------------------------- T15 票子驾驶舱
+
+const cockpitGates = (overrides = {}) => ticketGates({
+  claim: { state: 'claimed', holder: 'session-w1aaaaaa' },
+  holder: { sessionId: 'session-w1aaaaaa', label: '@w1', state: 'live' },
+  deps: [{ id: 'T14', title: '前置', ended: true }],
+  stage: 'doing', approval: null, skill: 'relay-worker', skills: ['relay-worker', 'relay-main'],
+  ...overrides
+})
+const cockpitSkills = { list: [{ name: 'relay-main', source: 'bundled' }, { name: 'relay-worker', source: 'bundled' }], defaultSkill: 'relay-worker' }
+
+test('票子驾驶舱：holder / 分支 / 工作树 / 最近汇报 + 一行判定；拉起与阶段以用户身份提交', async () => {
+  const posted = []
+  const opened = []
+  const kit = { ...kitFor(opened), request: async (method, body) => { posted.push([method, body]); return {} } }
+  const task = {
+    id: 'T15', title: '票子驾驶舱', owner: 'session-w1aaaaaa', worktree: '.agents/worktrees/t15',
+    gates: cockpitGates(),
+    launch: { branch: 't15', worktree: '.agents/worktrees/t15', skill: 'relay-worker' }
+  }
+  const React = fakeReact()
+  const { mod } = await loadSidebar(React)
+  const act = async (body) => { posted.push(['POST', body]); return { result: { sessionId: 'session-new' } } }
+  const tree = React.createElement(mod.TicketCockpit, {
+    kit, task, skills: cockpitSkills,
+    entries: [{ sessionId: 'session-w1aaaaaa', summary: '正在改侧栏，测试待跑' }],
+    act, busy: false, sessionId: 'session-self'
+  })
+  const text = textOf(tree)
+  for (const part of ['ticketTitle', 'ticketDepsOk', 'ticketHolder', '@w1', 'ticketHolderLive', 'ticketBranch', 't15', 'ticketWorktree', '.agents/worktrees/t15', 'ticketLastReport', '正在改侧栏', 'ticketStageDoing', 'ticketStageReview', 'ticketLaunchBlocked']) {
+    assert.ok(text.includes(part), '缺少 ' + part)
+  }
+  // 有活跃持有者：拉起按钮禁用且原因可见；打开 / 唤醒可用
+  const launch = findButton(tree, (label) => label === 'ticketLaunch')
+  assert.equal(launch.props.disabled, true, '有活跃持有者时拉起禁用')
+  assert.ok(findButton(tree, (label) => label === 'ticketOpenSession') !== undefined)
+  assert.ok(findButton(tree, (label) => label === 'ticketWake') !== undefined)
+  // 阶段按钮只发本地 stage
+  await findButton(tree, (label) => label === 'ticketStageReview').props.onClick({ stopPropagation() {} })
+  assert.deepEqual(lastPost(posted), { action: 'ticket-stage', task: 'T15', stage: 'review' })
+  // 唤醒交给同一路由（不自己发消息）
+  await findButton(tree, (label) => label === 'ticketWake').props.onClick({ stopPropagation() {} })
+  assert.equal(lastPost(posted).action, 'wake')
+  assert.equal(lastPost(posted).target, 'session-w1aaaaaa')
+
+  // 无持有者：拉起可用，提交后直接打开新会话
+  const openTask = {
+    id: 'T16', title: '空票', worktree: null,
+    gates: ticketGates({ claim: null, deps: [], stage: 'ready', approval: null, skill: 'relay-worker', skills: ['relay-worker'] })
+  }
+  const React2 = fakeReact()
+  const mod2 = (await loadSidebar(React2)).mod
+  const tree2 = React2.createElement(mod2.TicketCockpit, { kit, task: openTask, skills: cockpitSkills, entries: [], act, busy: false, sessionId: 'session-self' })
+  assert.ok(findButton(tree2, (label) => label === 'ticketLaunch').props.disabled === false, '无持有者可拉起')
+  await findButton(tree2, (label) => label === 'ticketLaunch').props.onClick({ stopPropagation() {} })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const launched = lastPost(posted)
+  assert.equal(launched.action, 'ticket-launch')
+  assert.equal(launched.task, 'T16')
+  assert.equal(launched.alias, 't16')
+  assert.equal(launched.skill, 'relay-worker')
+  assert.deepEqual(opened, ['session-new'], '拉起成功后打开新会话')
+})
+
+test('票子驾驶舱：旧快照没有 gates 时不渲染；已结束票只读、不给拉起', async () => {
+  const React = fakeReact()
+  const { mod } = await loadSidebar(React)
+  const plain = React.createElement(mod.TicketCockpit, { kit: kitFor(), task: { id: 'T1' }, act: async () => ({}) })
+  assert.equal(plain, null, '缺 gates 的旧数据安静跳过')
+  const ended = {
+    id: 'T14', title: '已合入', owner: 'session-w1aaaaaa',
+    gates: cockpitGates({ claim: { state: 'done' }, holder: undefined, terminal: 'merged', release: { tag: 'v2.4.3', released: true }, merge: { approved: true, sha: 'abcdef1234' } })
+  }
+  const tree = React.createElement(mod.TicketCockpit, { kit: kitFor(), task: ended, skills: cockpitSkills, act: async () => ({}) })
+  const text = textOf(tree)
+  assert.ok(text.includes('ticketReadOnly') && text.includes('ticketReleaseTag'))
+  assert.equal(findButton(tree, (label) => label === 'ticketLaunch'), undefined, '已结束不给拉起')
+})
+
+test('任务 / 地图票详情接入驾驶舱：阶段、判定与拉起都在同一块里', async () => {
+  const tasks = {
+    file: '.agents/TASKS.md',
+    open: [{ id: 'T1', priority: 'P1', title: '改侧栏', gates: ticketGates({ claim: null, deps: [], stage: 'ready', approval: null, skill: 'relay-worker', skills: ['relay-worker'] }) }],
+    claimed: 0, claimedRows: [], endedRows: [],
+    skills: cockpitSkills
+  }
+  const React = fakeReact(['T1'])
+  const { mod } = await loadSidebar(React)
+  const text = textOf(React.createElement(mod.TaskBoard, { kit: kitFor(), tasks, act: async () => ({}), busy: false }))
+  assert.ok(text.includes('ticketTitle') && text.includes('ticketStageReady') && text.includes('ticketLaunch'))
+
+  const board = {
+    self: { sessionId: 'session-self' },
+    entries: [{ sessionId: 'session-w1aaaaaa', summary: '改了侧栏', checkout: { branch: 't15' } }],
+    taskBoard: {
+      map: [{ id: 'T15', title: '票子驾驶舱', kind: 'active', owner: 'session-w1aaaaaa', worktree: '.agents/worktrees/t15', gates: cockpitGates(), children: [] }],
+      claimed: 1
+    },
+    sync: { links: [] }
+  }
+  const React2 = fakeReact()
+  const mod2 = (await loadSidebar(React2)).mod
+  const tree = React2.createElement(mod2.MapTab, {
+    kit: kitFor(), board, act: async () => ({}), busy: false,
+    focus: { kind: 'map-ticket', id: 'T15', seq: 1 }, onFocusConsumed: () => {}
+  })
+  const mapText = textOf(tree)
+  for (const part of ['ticketTitle', 'ticketHolder', '@w1', 'ticketBranch', 'ticketStageDoing', 'ticketLaunchBlocked']) assert.ok(mapText.includes(part), '地图详情缺少 ' + part)
 })

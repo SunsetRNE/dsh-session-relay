@@ -92,4 +92,4 @@
 
 - 模型工具：`peer_list` / `peer_report` / `peer_send` / `peer_spawn` / `peer_alias` / `peer_inspect` / `peer_tasks` / `peer_task` / `peer_mail` / `peer_repo_watch`；主会话另有 `peer_line` / `peer_assign` / `peer_handoff` / `peer_ask_user` / `peer_watch`。
 - 用户命令：`/relay help`（完整命令表）；任务看板 `/relay tasks`；发版见 `docs/release-checklist.md`。
-- 项目技能（本仓库内）：`.dsh/skills/relay-main`、`relay-worker`、`relay-release`，开工时按角色加载。
+- 内置技能（随插件包提供，2.4.4 起）：`relay-main`、`relay-worker`、`relay-release`，开工时按角色用 skill 工具加载；任务 / 地图票详情里的「票子驾驶舱」会按角色默认选中。项目仍可在 `.dsh/skills/` 放同名技能覆盖内置版本。

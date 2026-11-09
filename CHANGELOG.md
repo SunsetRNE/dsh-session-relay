@@ -1,5 +1,37 @@
 # Changelog
 
+## 未发布（T15 票子流程驾驶舱）
+
+票子从「看板上一行」变成可操作的驾驶舱：任务 / 地图票详情直接显示持有者、分支、工作树、最近汇报，服务端为每票给出依赖 / 持有者 / 阶段 / 审批 / 技能 / 合并 / 发布判定；用户可以在详情里拉起会话（首条消息注入票子完整字段并指定技能），拉起后自动回填认领、分支、工作树与 `stage=doing`。同时把 relay 三个技能改成随插件包提供（Deck 式内置技能），不再要求仓库里放 `.dsh/skills` 副本。串行测试 470 全过。
+
+### A. 内置技能（Deck 式）
+
+- 新增随包 `bundled-skills/relay-main|relay-worker|relay-release/SKILL.md`（kebab-case frontmatter：name / description / whenToUse）；`package.json` 的 `files` 加入 `bundled-skills/*/SKILL.md`。
+- `lib/index.js` 在 `ctx.inject(['skills'])` 里注册 bundled provider（`lib/bundled-skills.js` 实现）：候选带 source / provider / rank 600 / resourceBase，`get()` 按需读正文；宿主没有 skills 服务时安静降级，不影响插件其它功能。
+- 删除仓库内 `.dsh/skills/relay-*` 副本（避免与 bundled 同名冲突），文档改为「技能随插件提供」。
+
+### B. 票子详情动作区（任务 / 地图票）
+
+- 详情新增「票子驾驶舱」：持有者（可开会话）、分支、工作树、最近汇报；一行判定胶囊（依赖 / 持有者 / 阶段 / 审批 / 技能 / 合并批准 / 随版本发布）。
+- 动作：「拉起会话」（阶段允许、无活跃持有者、依赖全结束、技能存在时可用，否则禁用并显示原因）、「打开会话 / 唤醒」（已有持有者）、技能选择（内置 + 项目 `.dsh/skills`，默认 worker→`relay-worker`）、别称与模型可选。
+- 阶段按钮覆盖 待分诊 → 可认领 → 进行中 → 待审查；审批按钮在待审查 / 待审批时出现；已合入 / 已发布只显示只读事实。
+
+### C. 拉起即填充
+
+- 新增用户动作 `ticket-launch`：复用 `launchClaimer`，复核 gates 后建会话，首条消息注入标题 / 正文（含验收）/ 依赖 / 子票 / 父任务 / issue / PR / 版本线，并写明「先加载 <skill> 技能」。
+- 创建后在锁内代用户登记认领（`claims/<号>/owner` = 新会话），写 owner 备注（分支 / 工作树 / 技能）、看板工作树列、`stage=doing` 与 `launch` 记录；旧失效 / 已结束的认领先移到 `claims/.released` 留档。
+
+### D. 判定（gates）
+
+- 服务端为每票返回 `gates`：依赖是否全部结束（列出未结束项）/ 无活跃持有者或已失效 / stage 是否允许 / approval 与审批结果 / 技能是否存在 / 合并批准 sha / Release tag 状态。
+- 纯函数在 `lib/ticket-cockpit.js`（`ticketGates` / `ticketDependencyViews` / `ticketLaunchText`），测试覆盖各道门禁与首条消息字段。
+
+### KIT / 文档 / 测试
+
+- `SIDEBAR_KIT 42 → 43`：外壳 + shared + 10 个页签 chunk 全部改名 `client.sidebar*43.js` 并同步 `KIT_VERSION`；`lib/client.js` touch。面板未改，`PANEL_KIT` 仍 9。
+- `docs/coordination-ui.md` 新增 §9；`docs/ui-copy.md` 第二十一批；README / 协作手册 / 维护指南更新技能与驾驶舱说明。
+- 新增 `test/ticket-cockpit.test.js`（技能解析 / provider / 打包内容 / gates / 拉起消息）与票子驾驶舱、阶段动作、任务-地图详情接入用例；串行 470 全过。
+
 ## 2.4.3 - 2026-11-09
 
 协作流程 UI 补强（T14）：把「用户批准 → 主会话合并 → 发版」搬进面板，同时不放松授权边界——UI 只记录决定和发通知，推送 / 合并 / tag / Release 仍由用户在主会话明确同意后执行。另修复仓库探测失败被缓存 10 分钟、且报错被 gh 身份提示行遮住的问题。串行测试 458 全过。

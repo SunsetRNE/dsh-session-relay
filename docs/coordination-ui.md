@@ -1,6 +1,6 @@
 # 协作流程的 UI 补强（设计稿）
 
-状态：A / B / C 已实现（2.4.3 未发布，T14 工作树 `t14-ui-flow`，基线 81f19b1）。目标是把「主会话 / 工作会话 / 用户」的协作流程从聊天和文档搬进面板，让流程状态可见、下一步可点，同时不放松授权边界。实现位置见 §8。
+状态：A / B / C 已实现（2.4.3 已发布，T14 工作树 `t14-ui-flow`，基线 81f19b1）；票子驾驶舱（T15）在 2.4.4 未发布分支 `t15-ticket-cockpit` 上实现，见 §9。目标是把「主会话 / 工作会话 / 用户」的协作流程从聊天和文档搬进面板，让流程状态可见、下一步可点，同时不放松授权边界。实现位置见 §8。
 
 ## 1. 现在 UI 里已经有的流程
 
@@ -104,3 +104,19 @@
 | 侧栏 | `lib/client.sidebar.sessions42.js` / `client.sidebar.settings42.js` | 会话卡流水线与批准动作、主会话行计数；设置页「发布」卡。`SIDEBAR_KIT 42`（外壳 + 全部 chunk 同步改名）。 |
 
 **边界**：面板没有 push / merge / tag / Release / install 入口；「已合入 / 已发布」只从提交事实和只读 tag / Release 事实推，读不到就写未知。批准记录不等于用户对推送 / 发布的授权；主会话仍需用户在当前会话明确同意后才执行。
+
+## 9. 票子驾驶舱与内置技能（T15，2.4.4 未发布）
+
+目标：把「票子 → 拉起会话 → 回填持有者 / 分支 / 工作树 → 阶段与判定」搬进任务 / 地图票详情，技能随插件包提供，不要求用户手装或仓库里放副本。
+
+| 项 | 位置 | 说明 |
+| --- | --- | --- |
+| 内置技能 | `bundled-skills/` + `lib/bundled-skills.js` + `lib/index.js` | 随包三个技能（relay-main / relay-worker / relay-release）；`ctx.inject(['skills'])` 注册 provider，rank 600，项目 `.dsh/skills` 同名仍优先；没有 skills 服务时安静降级。`package.json` files 包含 bundled-skills。 |
+| 技能目录视图 | `impl.ticketSkills()` + 看板 `taskBoard.skills` | 读内置目录 + 项目 `.dsh/skills`（60 秒缓存）；角色默认 main→relay-main / worker→relay-worker / release→relay-release；技能不存在时由 gates 说明。 |
+| 判定 gates | `lib/ticket-cockpit.js` `ticketGates()` + `impl.board()` | 每票返回依赖（未结束项）、持有者（live / stale / dead / unknown）、stage 是否允许、approval、技能是否存在、合并批准 sha、Release tag；`launch` / `wake` 各自给 allowed + reason。 |
+| 详情动作区 | `client.sidebar.shared43.js` `TicketCockpit` | 任务页与地图票详情共用：holder / 分支 / 工作树 / 最近汇报、判定胶囊、阶段按钮（待分诊 / 可认领 / 进行中 / 待审查）、审批、拉起表单（别称 / 技能 / 模型）。禁用按钮显示原因。 |
+| 拉起即填充 | `impl.launchTicket()` + `launchClaimer()` + `claimTicketAtLaunch()` | 用户动作 `ticket-launch`：按 gates 复核后建会话，首条消息带票子完整字段 + 「先加载 <skill> 技能」；锁内登记认领（owner=新会话）、写分支 / 工作树 / stage=doing / launch 记录。 |
+| 阶段动作 | `impl.setTicketStage()` + `settings-route` `ticket-stage` | 只写本地 stage（review 自动 pending 审批）；不跑 git、不写 GitHub。 |
+
+**边界**：拉起只创建会话并回填认领；不 push、不合并、不打 tag、不发 Release、不安装。UI 的「批准」动作仍只记录并通知主会话。旧快照没有 `gates` 时客户端安静跳过驾驶舱，不崩。
+
