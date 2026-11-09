@@ -2984,7 +2984,7 @@ test('任务 PR 只读关联：用户命令关联、缓存查看、刷新、解�
     assert.match(linked.text, /待审批/)
     assert.match(linked.text, /不代开 PR/)
     assert.equal(calls.length, 1)
-    assert.deepEqual(calls[0], ['pr', 'view', '7', '--repo', 'o/r', '--json', 'url,state,isDraft,mergeable,reviewDecision,statusCheckRollup,mergedAt,headRefOid,baseRefName'])
+    assert.deepEqual(calls[0], ['pr', 'view', '7', '--repo', 'o/r', '--json', 'url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,reviewRequests,latestReviews,statusCheckRollup,mergedAt,headRefOid,baseRefName,commits'])
     const found = await h.relay.taskBoardFor({ sessionId: h.caller.id })
     const state = await h.relay.ensureTaskState(found.board.storeRoot)
     assert.equal(state.get('T1').pr.number, 7)

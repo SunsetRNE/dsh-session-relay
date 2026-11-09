@@ -114,9 +114,22 @@
 | 内置技能 | `bundled-skills/` + `lib/bundled-skills.js` + `lib/index.js` | 随包三个技能（relay-main / relay-worker / relay-release）；`ctx.inject(['skills'])` 注册 provider，rank 600，项目 `.dsh/skills` 同名仍优先；没有 skills 服务时安静降级。`package.json` files 包含 bundled-skills。 |
 | 技能目录视图 | `impl.ticketSkills()` + 看板 `taskBoard.skills` | 读内置目录 + 项目 `.dsh/skills`（60 秒缓存）；角色默认 main→relay-main / worker→relay-worker / release→relay-release；技能不存在时由 gates 说明。 |
 | 判定 gates | `lib/ticket-cockpit.js` `ticketGates()` + `impl.board()` | 每票返回依赖（未结束项）、持有者（live / stale / dead / unknown）、stage 是否允许、approval、技能是否存在、合并批准 sha、Release tag；`launch` / `wake` 各自给 allowed + reason。 |
-| 详情动作区 | `client.sidebar.shared43.js` `TicketCockpit` | 任务页与地图票详情共用：holder / 分支 / 工作树 / 最近汇报、判定胶囊、阶段按钮（待分诊 / 可认领 / 进行中 / 待审查）、审批、拉起表单（别称 / 技能 / 模型）。禁用按钮显示原因。 |
+| 详情动作区 | `client.sidebar.shared44.js` `TicketCockpit` | 任务页与地图票详情共用：holder / 分支 / 工作树 / 最近汇报、判定胶囊、阶段按钮（待分诊 / 可认领 / 进行中 / 待审查）、审批、拉起表单（别称 / 技能 / 模型）。禁用按钮显示原因。 |
 | 拉起即填充 | `impl.launchTicket()` + `launchClaimer()` + `claimTicketAtLaunch()` | 用户动作 `ticket-launch`：按 gates 复核后建会话，首条消息带票子完整字段 + 「先加载 <skill> 技能」；锁内登记认领（owner=新会话）、写分支 / 工作树 / stage=doing / launch 记录。 |
 | 阶段动作 | `impl.setTicketStage()` + `settings-route` `ticket-stage` | 只写本地 stage（review 自动 pending 审批）；不跑 git、不写 GitHub。 |
 
 **边界**：拉起只创建会话并回填认领；不 push、不合并、不打 tag、不发 Release、不安装。UI 的「批准」动作仍只记录并通知主会话。旧快照没有 `gates` 时客户端安静跳过驾驶舱，不崩。
 
+
+## 10. PR 多状态审核（T16，2.4.4 未发布）
+
+| 项 | 位置 | 说明 |
+| --- | --- | --- |
+| 状态机 | `lib/prreview.js` | `PR_REVIEW_ORDER` / `PR_REVIEW_STATE` + `prReviewState()`；11 态、优先级链、未知 / stale / 草稿边界，不猜。 |
+| 本地记录 | `lib/prreview.js` `PrReviewStore` | `pr-reviews.json` 按 repo#PR 存多轮记录（最近 10 轮）、忽略 / 拒绝标记、AI 审核会话；head 变化即 stale。 |
+| 数据 | `lib/githublists.js` + `lib/taskpr.js` | PR 列表 / 详情补 state / mergeStateStatus / reviewRequests / latestReviews / statusCheckRollup / headRefOid；任务 PR 补 commits 最新提交时间。 |
+| 用户动作 | `impl.prReviewRecord()` / `impl.prFlag()` + `settings-route` | `pr-review-record` / `pr-flag` 只由用户点：记录结论（绑定当前 head）、忽略 / 拒绝（可取消），写本地 + `pr-review-audit.jsonl`。 |
+| 列表 / 图例 | `client.sidebar.prs44.js` | 11 态 chip + 筛选计数（优先级链）+ 状态图例 + 行内原因 / 轮次 / head。 |
+| 详情 | `client.sidebar.prs44.js` `PrDetail` | 状态 / 原因 / 轮次 / head / 本地多轮记录 / AI 会话链接；动作区记录结论、忽略 / 拒绝。 |
+
+**边界**：UI 不写 GitHub、不合并、不推送；结论与忽略 / 拒绝只在本机生效。旧快照没有 `review` 字段时保留原胶囊与筛选。

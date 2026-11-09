@@ -116,6 +116,23 @@ test('PR「AI 审核」路由：用户动作把 PR 号交给 launchPrReview', as
   } finally { await h.cleanup() }
 })
 
+test('PR 审核状态路由：记录结论 / 忽略拒绝都带 user:true，交给 impl', async () => {
+  const h = await makeRelay()
+  try {
+    let got
+    h.relay.prReviewRecord = async (args) => { got = args; return { round: 2 } }
+    const done = await perform(h.relay, { action: 'pr-review-record', number: 7, verdict: 'pass', note: 'ok', source: 'ai', fromSession: 'session-x' })
+    assert.deepEqual(got, { fromSession: 'session-x', number: 7, verdict: 'pass', note: 'ok', source: 'ai', user: true })
+    assert.equal(done.result.round, 2)
+    h.relay.prFlag = async (args) => { got = args; return { flags: { ignored: true, rejected: false } } }
+    const flagged = await perform(h.relay, { action: 'pr-flag', number: 7, flag: 'ignored', on: true, fromSession: 'session-x' })
+    assert.deepEqual(got, { fromSession: 'session-x', number: 7, flag: 'ignored', on: true, user: true })
+    assert.deepEqual(flagged.result.flags, { ignored: true, rejected: false })
+    await assert.rejects(perform(h.relay, { action: 'pr-review-record', number: 7, verdict: 'pass' }), /需要会话视角/)
+    await assert.rejects(perform(h.relay, { action: 'pr-flag', number: 7, flag: 'ignored' }), /需要会话视角/)
+  } finally { await h.cleanup() }
+})
+
 test('面板搜索路由：转发结构化参数并拒绝空查询、非法范围和数值', async () => {
   const calls = []
   const relay = {

@@ -63,7 +63,7 @@ test('探测：gh pr view 只读一次，成功给状态、失败给 unknown，�
     now: () => 1000,
     gh: async (args) => { calls.push(args); return { stdout: prJson() } }
   })
-  assert.deepEqual(calls[0], ['pr', 'view', '7', '--repo', 'o/r', '--json', 'url,state,isDraft,mergeable,reviewDecision,statusCheckRollup,mergedAt,headRefOid,baseRefName'])
+  assert.deepEqual(calls[0], ['pr', 'view', '7', '--repo', 'o/r', '--json', 'url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,reviewRequests,latestReviews,statusCheckRollup,mergedAt,headRefOid,baseRefName,commits'])
   assert.equal(probe.source, 'ok')
   assert.equal(probe.probedAt, 1000)
   assert.equal(probe.status.state, 'OPEN')
@@ -124,4 +124,41 @@ test('展示：一行文案、结构化摘要、详情里失败给原因和上�
   assert.match(unknown, /状态：未知（HTTP 500）/)
   assert.match(unknown, /上次缓存：OPEN · 可合并 · 审批通过/)
   assert.match(unknown, /refresh 重试/)
+})
+
+test('探测：补 mergeStateStatus / reviewRequests / latestReviews / 最新提交时间；未知值不猜', async () => {
+  const probe = await probePull('o/r', 7, {
+    now: () => 4000,
+    gh: async () => ({
+      stdout: prJson({
+        mergeStateStatus: 'BEHIND',
+        reviewRequests: [{ login: 'bob' }, { login: 'bob' }, { slug: 'team' }],
+        latestReviews: [
+          { author: { login: 'carol' }, state: 'APPROVED', submittedAt: '2026-11-08T00:00:00Z' },
+          { author: { login: 'dave' }, state: 'SOMETHING_NEW' }
+        ],
+        commits: [
+          { committedDate: '2026-11-07T00:00:00Z' },
+          { committedDate: '2026-11-09T00:00:00Z' }
+        ]
+      })
+    })
+  })
+  assert.equal(probe.source, 'ok')
+  assert.equal(probe.status.mergeStateStatus, 'BEHIND')
+  assert.deepEqual(probe.status.reviewRequests, { count: 3, logins: ['bob'] })
+  assert.deepEqual(probe.status.latestReviews, [
+    { login: 'carol', state: 'APPROVED', submittedAt: '2026-11-08T00:00:00Z' },
+    { login: 'dave', state: 'UNKNOWN', submittedAt: '' }
+  ])
+  assert.equal(probe.status.headCommittedAt, '2026-11-09T00:00:00Z')
+  assert.match(prLabel({ number: 7, source: 'ok', status: { ...probe.status, checks: { total: 1, passing: 1, pending: 0, failing: 0, state: 'pass' } } }), /已落后/)
+
+  const weird = await probePull('o/r', 7, {
+    gh: async () => ({ stdout: prJson({ mergeStateStatus: 'WHAT', reviewRequests: 'nope', latestReviews: 'nope', commits: 'nope' }) })
+  })
+  assert.equal(weird.status.mergeStateStatus, 'UNKNOWN')
+  assert.deepEqual(weird.status.reviewRequests, { count: 0, logins: [] })
+  assert.deepEqual(weird.status.latestReviews, [])
+  assert.equal(weird.status.headCommittedAt, null)
 })

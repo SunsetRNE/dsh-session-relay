@@ -1,4 +1,4 @@
-// 右侧边栏「协作」标签：入口只登记类型与空壳，正文在 client.sidebar43.js 外壳 + 各页签 chunk 里按需加载
+// 右侧边栏「协作」标签：入口只登记类型与空壳，正文在 client.sidebar44.js 外壳 + 各页签 chunk 里按需加载
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -23,9 +23,9 @@ function fakeReact(states = []) {
   return React
 }
 
-// T13：侧栏按页签拆 chunk（KIT 43）。测试里把外壳 + 全部 chunk 一次性登记进同一加载器缓存，
+// T13：侧栏按页签拆 chunk（KIT 44）。测试里把外壳 + 全部 chunk 一次性登记进同一加载器缓存，
 // 这样 `mod.Xxx` 的原有断言不用改；按需 / 预取 / 失败回退另由「按需拆 chunk」用例直接测加载器。
-const KIT = 43
+const KIT = 44
 const CHUNK_NAMES = ['shared', 'sessions', 'tasks', 'handoff', 'map', 'prs', 'branches', 'issues', 'mail', 'more', 'settings']
 async function loadSidebar(React) {
   const { mod: shell, chunk } = await load('client.sidebar' + KIT + '.js', React)
@@ -138,21 +138,21 @@ test('入口：没有 ctx.inject（旧宿主）时不登记右侧边栏、不报
   assert.ok(!names.includes('sidebar.right.pane.tab'))
 })
 
-test('入口：空壳不同步加载正文；用 require.async 拉 client.sidebar43.js', async () => {
+test('入口：空壳不同步加载正文；用 require.async 拉 client.sidebar44.js', async () => {
   const React = fakeReact()
   let lazyFactory
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 43 }) })
-  assert.equal(mod.SIDEBAR_CHUNK, 'client.sidebar43.js', '入口指向按版本命名的 chunk')
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 44 }) })
+  assert.equal(mod.SIDEBAR_CHUNK, 'client.sidebar44.js', '入口指向按版本命名的 chunk')
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
   assert.equal(tree.type, 'suspense')
   assert.equal(textOf(tree.props.fallback), 'sideLoading')
   const loaded = await lazyFactory()
-  assert.deepEqual(asked, ['./client.sidebar43.js'])
+  assert.deepEqual(asked, ['./client.sidebar44.js'])
   assert.equal(loaded.default(), 'body')
 })
 
@@ -167,9 +167,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v43'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v44'), '显示实际 / 期望版本')
   const { mod: chunk } = await loadSidebar(fakeReact())
-  assert.equal(chunk.KIT_VERSION, 43, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 44, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -206,11 +206,11 @@ function kitFor(opened = []) {
 const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, workItem = undefined, extra = [] } = {}) =>
   [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, workItem, {}, false, 0, ...extra]
 
-test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar43.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
+test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar44.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
   const React = fakeReact(states(sampleBoard()))
   const { mod, chunk } = await loadSidebar(React)
-  assert.equal(chunk, 'client.sidebar43.js')
-  assert.equal(mod.KIT_VERSION, 43)
+  assert.equal(chunk, 'client.sidebar44.js')
+  assert.equal(mod.KIT_VERSION, 44)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
   const text = textOf(tree)
   for (const part of ['dsha-session-relay', 'sideTabSessions', 'sideTabTasks', 'sideTabHandoff', 'sideTabMap', 'sideTabPr', 'sideTabBranches', 'sideTabIssues', 'sideTabMail', 'sideTabMore', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
@@ -477,7 +477,7 @@ test('正文 chunk：还没数据时显示读取中；没有会话时不渲染',
 })
 
 test('正文 chunk：样式随标签注入，不在入口里；不用 backdrop-filter 和常驻动画', async () => {
-  const chunk = await readFile(new URL('../lib/client.sidebar43.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar44.js', import.meta.url), 'utf8')
   const entry = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   assert.ok(chunk.includes('.dshaSv_card'))
   assert.ok(!entry.includes('.dshaSv_'), '入口不带侧边栏样式')
@@ -509,7 +509,7 @@ test('正文 chunk：空白会话按服务端分类显示「空白」，不算�
   const open = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(open.includes('catBlank') && open.includes('f4ada307'))
   assert.ok(!open.includes('status_working'))
-  const chunk = await readFile(new URL('../lib/client.sidebar43.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar44.js', import.meta.url), 'utf8')
   assert.ok(!chunk.includes('brand-primary'), '强调色用链接蓝，不用主题里接近黑白的 brand-primary')
 })
 
@@ -822,6 +822,14 @@ const findButton = (node, pred) => {
   if (Array.isArray(node)) { for (const child of node) { const hit = findButton(child, pred); if (hit) return hit } return undefined }
   if (node.type === 'button' && pred(textOf(node.children), node)) return node
   return findButton(node.children, pred)
+}
+
+const findAll = (node, pred, out = []) => {
+  if (!node || typeof node !== 'object') return out
+  if (Array.isArray(node)) { node.forEach((child) => findAll(child, pred, out)); return out }
+  if (pred(node)) out.push(node)
+  findAll(node.children, pred, out)
+  return out
 }
 
 test('任务看板：可接 / 进行中 / 已结束分组，进行中显示持有者，已结束默认收起', async () => {
@@ -1190,6 +1198,43 @@ const prData = () => ({
   }
 })
 
+const prReviewItem = (over = {}) => ({
+  number: 7, title: '修 bug', author: 'alice', url: 'https://github.com/o/r/pull/7', draft: false, state: 'OPEN',
+  merged: false, mergeable: 'UNKNOWN', mergeStateStatus: 'BLOCKED', reviewDecision: 'REVIEW_REQUIRED',
+  reviewRequests: [], latestReviews: [], checks: { total: 1, passing: 1, pending: 0, failing: 0, state: 'pass' },
+  headSha: 'aaaaaaa1111', head: 'fix/x', base: 'main', updatedAt: '2026-11-07T00:00:00Z', comments: 0,
+  additions: 5, deletions: 1, changedFiles: 1,
+  local: { flags: { ignored: false, rejected: false }, aiReview: null }, ...over
+})
+const prReviewOrder = ['merged', 'rejected', 'closed', 'ignored', 'behind', 'changes-requested', 'needs-rereview', 'reviewing', 'ready', 'reviewed', 'unreviewed']
+const reviewOf = (state, over = {}) => ({
+  state, tone: { merged: 'merged', closed: 'closed', ignored: 'ignored', reviewed: 'reviewed', behind: 'warn', 'changes-requested': 'error', 'needs-rereview': 'warn', reviewing: 'brand', ready: 'ok', rejected: 'error', unreviewed: '' }[state],
+  reason: { merged: '已合并', behind: 'head 落后 base（BEHIND），需要先更新分支', 'changes-requested': '第 2 轮AI审核结论「必须修」：x', reviewed: '第 1 轮AI审核通过；缺批准' }[state],
+  round: 0, headSha: 'aaaaaaa1111', aiReviewRunning: false, ...over
+})
+const prReviewData = () => ({
+  prs: {
+    repo: 'o/r', fetchedAt: 1, reviewOrder: prReviewOrder,
+    items: [
+      prReviewItem({ number: 1, title: '合并了', review: reviewOf('merged', { headSha: 'a1' }) }),
+      prReviewItem({ number: 2, title: '要改', review: reviewOf('changes-requested', { round: 2, record: { sessionId: 'session-ai', headSha: 'a2', verdict: 'must-fix', source: 'ai', round: 2, at: 1, note: 'x' } }) }),
+      prReviewItem({ number: 3, title: '落后了', review: reviewOf('behind') }),
+      prReviewItem({ number: 7, title: '修 bug', review: reviewOf('reviewed', { round: 1, record: { sessionId: 'session-ai', headSha: 'aaaaaaa1111', verdict: 'pass', source: 'ai', round: 1, at: 1, note: '' } }), local: { flags: { ignored: false, rejected: false }, aiReview: { sessionId: 'session-ai', headSha: 'aaaaaaa1111', at: 1 } } })
+    ]
+  }
+})
+const prReviewDetail = () => ({
+  prDetail: {
+    repo: 'o/r', fetchedAt: 1,
+    detail: {
+      number: 7, body: 'PR 说明', url: 'https://github.com/o/r/pull/7', additions: 5, deletions: 1, changedFiles: 1,
+      files: [], reviews: [], comments: [],
+      review: reviewOf('reviewed', { round: 1 }), records: [{ round: 1, verdict: 'pass', source: 'ai', headSha: 'aaaaaaa1111', at: 1, note: '', sessionId: 'session-ai' }],
+      flags: { ignored: false, rejected: false }, aiReview: null
+    }
+  }
+})
+
 const issueData = () => ({
   issues: {
     repo: 'o/r', fetchedAt: 1,
@@ -1361,6 +1406,88 @@ test('PR 页：AI 审核按钮拉起审核会话并打开', async () => {
   await new Promise((resolve) => setTimeout(resolve, 0))
   assert.deepEqual(lastPost(posted), { action: 'pr-ai-review', number: 7, fromSession: 'session-self' })
   assert.deepEqual(opened, ['session-ai'], '拉起后打开新会话')
+})
+
+test('T16 PR 页：11 态 chip 与计数按优先级链；图例列全 11 态与含义', async () => {
+  const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prReviewData(), undefined, false, 'all', undefined, '', undefined, undefined, 'open', undefined, ''] }))
+  const { mod } = await loadSidebar(React)
+  const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
+  const chips = findAll(tree, (node) => node.type === 'button' && String(node.props?.className ?? '').split(' ').includes('dshaSv_chipF'))
+    .map((node) => textOf(node.children))
+  assert.deepEqual(chips.slice(0, 2), ['prStateOpen', 'prStateClosed'], '先保留打开 / 已关闭切换')
+  assert.deepEqual(chips.slice(2).map((label) => label.replace(/\d+$/, '')), [
+    'prFilterAll', 'prStateMerged', 'prStateBehind', 'prStateChanges', 'prStateReviewed'
+  ], '筛选按 11 态优先级链展示，计数为 0 的收起')
+  assert.ok(chips.includes('prStateMerged1') && chips.includes('prStateReviewed1'), '每个筛选带计数')
+  const legend = findNode(tree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_legend'))
+  assert.ok(legend !== undefined, '有状态图例')
+  const items = findAll(legend, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_legendItem'))
+  assert.equal(items.length, 11, '图例列全 11 态')
+  const expected = ['prStateMerged', 'prStateRejected', 'prStateClosed', 'prStateIgnored', 'prStateBehind', 'prStateChanges', 'prStateRereview', 'prStateReviewing', 'prStateReady', 'prStateReviewed', 'prStateUnreviewed']
+  assert.deepEqual(items.map((node) => textOf(findNode(node, (sub) => String(sub.props?.className ?? '').split(' ').includes('dshaSv_pill')).children)), expected, '图例按优先级链')
+  for (const item of items) {
+    const pill = findNode(item, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_pill'))
+    assert.ok(pill !== undefined && typeof pill.props?.['data-tone'] === 'string', '每个状态有颜色')
+    assert.ok(textOf(item).match(/prState[A-Za-z]+Hint/) !== null, '每个状态有一句话含义')
+  }
+  // 行内的状态胶囊带原因 tooltip、轮次与 head
+  const row = findNode(tree, (node) => String(node.props?.className ?? '').split(' ').includes('dshaSv_workRow') && textOf(node).includes('#2'))
+  assert.ok(row !== undefined)
+  const statePill = findNode(row, (node) => textOf(node) === 'prStateChanges')
+  assert.equal(statePill?.props?.title, '第 2 轮AI审核结论「必须修」：x', '状态胶囊 title 是一句话原因')
+  assert.ok(textOf(row).includes('prRoundShort{"n":2}'), '行内显示第几轮审核')
+  assert.ok(textOf(row).includes('第 2 轮AI审核结论「必须修」：x'), '行内可见原因')
+})
+
+test('T16 PR 页：按 11 态筛选只留命中条目', async () => {
+  const React = fakeReact(states(sampleBoard(), { tab: 'prs', extra: [prReviewData(), undefined, false, 'changes-requested', undefined, '', undefined, undefined, 'open', undefined, ''] }))
+  const { mod } = await loadSidebar(React)
+  const text = textOf(React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
+  assert.ok(text.includes('#2') && text.includes('要改'), '命中已驳回条目')
+  assert.ok(!text.includes('#7') && !text.includes('修 bug'), '未命中的条目不渲染')
+  assert.ok(!text.includes('#1') && !text.includes('#3'), '其它状态也不渲染')
+})
+
+test('T16 PR 详情：状态原因 / 轮次 / head / 本地记录 / AI 会话链接', async () => {
+  const opened = []
+  const React = fakeReact([prReviewDetail(), undefined, false])
+  const { mod } = await loadSidebar(React)
+  const tree = React.createElement(mod.PrDetail, { kit: kitFor(opened), sessionId: 's1', number: 7 })
+  const text = textOf(tree)
+  for (const part of ['prStateReviewed', '第 1 轮AI审核通过；缺批准', 'prReviewRecords', 'prReviewRound', 'prReviewPass', 'prReviewSourceAi', 'prOpenAiSession']) {
+    assert.ok(text.includes(part), '缺少 ' + part)
+  }
+  assert.ok(text.includes('aaaaaaa1111'.slice(0, 7)), '显示 head 短 sha')
+  await findButton(tree, (label) => label === 'prOpenAiSession').props.onClick()
+  assert.deepEqual(opened, ['session-ai'], '能打开本轮 AI 审核会话')
+})
+
+test('T16 PR 详情动作：记录结论 / 忽略 / 拒绝只由用户提交，AI 会话可打开', async () => {
+  const posted = []
+  const opened = []
+  const kit = {
+    ...kitFor(opened),
+    request: async (method, body) => { posted.push([method, body]); return method === 'POST' ? { result: {} } : {} }
+  }
+  // PrTab 状态：data/error/busy/filter/openNo/comment/pending/running/prState/detailNo/linkTask/detailVersion/aiRunning/legendOpen/recordVerdict/recordNote/recordSource
+  const React = fakeReact(states(sampleBoard(), {
+    tab: 'prs',
+    extra: [prReviewData(), undefined, false, 'all', undefined, '', undefined, undefined, 'open', 7, '', 0, undefined, false, 'pass', '', 'ai']
+  }))
+  const { mod } = await loadSidebar(React)
+  const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' })
+  assert.ok(findNode(tree, (node) => node.type === 'textarea' && node.props?.placeholder === 'prReviewNotePh') !== undefined, '详情里有结论说明输入框')
+  await findButton(tree, (label) => label === 'prOpenAiSession').props.onClick()
+  assert.deepEqual(opened, ['session-ai'], '详情动作区可打开 AI 审核会话')
+  await findButton(tree, (label) => label === 'prReviewRecordPass').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(lastPost(posted), { action: 'pr-review-record', number: 7, verdict: 'pass', note: '', source: 'ai', fromSession: 'session-self' })
+  await findButton(tree, (label) => label === 'prIgnore').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(lastPost(posted), { action: 'pr-flag', number: 7, flag: 'ignored', on: true, fromSession: 'session-self' })
+  await findButton(tree, (label) => label === 'prReject').props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(lastPost(posted), { action: 'pr-flag', number: 7, flag: 'rejected', on: true, fromSession: 'session-self' })
 })
 
 test('问题页：issue 列表与标签 / 指派，不混入地图', async () => {
@@ -1562,7 +1689,7 @@ test('更多页：窄屏快捷入口，点条目切页 / 打开设置', async ()
 })
 
 test('侧栏折叠：更多页快捷入口只在窄屏显示，隐藏规则用双类名', async () => {
-  const source = await readFile(new URL('../lib/client.sidebar43.js', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../lib/client.sidebar44.js', import.meta.url), 'utf8')
   assert.ok(source.includes('.dshaSv_wide .dshaSv_foldOnly{display:none}'), '宽屏隐藏规则用宽度 class + 双类名')
   assert.ok(source.includes('ResizeObserver') && source.includes('dshaSv_wide'), '旋转后由 ResizeObserver 重新量宽度')
   const ReactR = fakeReact(states(sampleBoard()))
@@ -2320,7 +2447,7 @@ test('入口：空闲时预取侧栏 chunk，首次打开不用再等下载', as
     assert.equal(pending.length, 1, '登记侧栏时挂一次空闲预取')
     pending[0]()
     await new Promise((resolve) => setTimeout(resolve, 0))
-    assert.deepEqual(asked, ['./client.sidebar43.js'], '空闲时拉一次 chunk')
+    assert.deepEqual(asked, ['./client.sidebar44.js'], '空闲时拉一次 chunk')
     const Tab = mod.makeSidebarTab({ t })
     assert.equal(textOf(React.createElement(Tab, { sessionId: 's' })), 'body', '预取完成后直接渲染正文，不再闪 Suspense')
   } finally {
@@ -2574,7 +2701,7 @@ test('T14：设置页发布卡只读展示阶段条 / 事实 / 动作，复制�
   await copyButton.props.onClick()
   assert.deepEqual(copied, [data.command])
   // 源码边界：发布卡没有 push / tag / release 写动作，只有唤醒（wake）与复制
-  const chunk = await readFile(new URL('../lib/client.sidebar.settings43.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar.settings44.js', import.meta.url), 'utf8')
   assert.match(chunk, /function ReleaseBox/)
   assert.ok(!/git push|git tag|gh release create/.test(chunk.replace(/node --test[\s\S]*?release-notes[^\n]*/g, '')), '发布卡不跑 push / tag / Release 命令')
 })

@@ -93,3 +93,15 @@
 - 模型工具：`peer_list` / `peer_report` / `peer_send` / `peer_spawn` / `peer_alias` / `peer_inspect` / `peer_tasks` / `peer_task` / `peer_mail` / `peer_repo_watch`；主会话另有 `peer_line` / `peer_assign` / `peer_handoff` / `peer_ask_user` / `peer_watch`。
 - 用户命令：`/relay help`（完整命令表）；任务看板 `/relay tasks`；发版见 `docs/release-checklist.md`。
 - 内置技能（随插件包提供，2.4.4 起）：`relay-main`、`relay-worker`、`relay-release`，开工时按角色用 skill 工具加载；任务 / 地图票详情里的「票子驾驶舱」会按角色默认选中。项目仍可在 `.dsh/skills/` 放同名技能覆盖内置版本。
+
+## 11. PR 审核状态与门（T16，2.4.4 未发布）
+
+PR 页用 11 态表达审核进度，优先级链固定为：
+**已合并 > 已拒绝 > 已关闭 > 已忽略 > 已落后 > 已驳回 > 需再审 > 审批中 > 待合并 > 已审核 > 未审核**。
+
+- 数据来源：GitHub 只读字段（state / mergeStateStatus / reviewDecision / reviewRequests / latestReviews / checks / headRefOid）+ 插件本地审核记录与忽略 / 拒绝标记；不认识的结论记 unknown，不猜。
+- 已审核 / 已驳回来自当前 head 的人工评审或本地审核结论；head 一变旧结论 stale → 需再审。
+- 待合并 = 审批通过（或无需必需审批）+ `mergeStateStatus` 可合并 + checks 全绿 + AI 结论通过（启用 AI 门时）。
+- 已落后（BEHIND）优先于审核态展示；忽略 / 拒绝只写本地（可取消），不写 GitHub、不改任务阶段。
+- 闭环：用户点「AI 审核」拉起只读会话；审核结束后用户在 PR 详情「记录结论：通过 / 必须修（带 note）」写本地记录（模型没有写入口）；新提交后自动需再审。
+- 边界：记录结论不等于同意合并；推送 / 合并 / tag / Release 仍要用户明确同意。

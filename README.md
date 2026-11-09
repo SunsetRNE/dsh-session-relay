@@ -79,8 +79,9 @@ A DeepSeek Harness plugin for coordinating several root sessions. One session is
 - 2.4.2（T13）：侧栏按页签拆 chunk——外壳 `client.sidebar41.js` 只保留 TABS / TabBar / RelaySidebar / useBoard 与加载器，共享件 `client.sidebar.shared41.js`，会话 / 任务 / 交接 / 地图 / PR / 分支 / 问题 / 邮箱 / 更多 / 设置各一个 `client.sidebar.<name>41.js`；首次打开只拉「外壳 + 共享件 + 当前页签」，未访问页签不下载；悬停页签 200ms 预取（`saveData` 抑制），右栏与嵌入面板共用同一加载器缓存；chunk 不配套 / 加载失败回退最小一行并给刷新；`SIDEBAR_KIT 41`。
 - 2.4.3（T14）：合并批准流水线（可合并 → 已批准 → 已合入 → 随 vX.Y.Z 发布；批准 / 稍后 / 打回只记录并通知，**面板不跑 git**）、主会话「下一步」卡、设置页「发布」卡（只读版本 / HEAD / origin/main / tag / Release / 附件 sha）；`SIDEBAR_KIT 42` / `PANEL_KIT 9`；同时修复仓库探测失败被缓存 10 分钟、报错被 gh 身份提示行遮住。
 - 未发布（T15）：任务 / 地图票详情的「票子驾驶舱」——持有者、分支、工作树、最近汇报，依赖 / 持有者 / 阶段 / 审批 / 技能 / 合并批准 / 发布判定，拉起会话（首条消息带票子完整字段并指定技能，创建后回填认领 / 分支 / 工作树 / `stage=doing`），阶段按钮（待分诊 / 可认领 / 进行中 / 待审查）；relay 三个技能改成随插件包提供（`bundled-skills/`，Deck 式内置技能），`SIDEBAR_KIT 43`；面板未改，`PANEL_KIT` 仍 9。
+- 未发布（T16）：PR 审核 11 态（未审核 / 审批中 / 已审核 / 需再审 / 已驳回 / 已拒绝 / 已关闭 / 已忽略 / 已落后 / 待合并 / 已合并），固定优先级链展示 chip / 筛选 / 计数 / 图例与一句话原因；PR 详情可记录多轮「通过 / 必须修」结论（head 变了自动需再审）、本地忽略 / 拒绝（可取消）并打开 AI 审核会话；只写本地与审计，不写 GitHub、不合并、不推送。`SIDEBAR_KIT 44`。
 - 2.4.0：嵌入面板 11 页签（概览 / 全文搜索独立、滚动提示、概览 attention 计数、max-width 1080 居中）；地图票 / 问题 / PR 共用详情抽屉与懒加载；`/relay drop` 原始 id 快路径（需 `/relay reload`）；侧栏列表与看板加载提速（kit 引用稳定、只订阅主会话 id、挂载不重复拉取、并发去重）。
-- 地图：任务地图票子 + 本地票子，标题栏带计数、与其它页同一套间距；问题：远端 issue 列表（搜索 / 指派给我 / 标签筛选）；PR：远端 PR 列表（打开 / 已关闭、筛选与计数、行内看 `+A −D` 改动量，标题可开 GitHub），详情看文件改动、评审与评论（长文折叠、作者可点），审批 / 评论 / 关闭 / 重开只由用户点击，可把 PR 关联到本地任务、点「AI 审核」拉起只读审核会话审最新改动；分支：全部登记工作区的本地 / 远端分支，删除逐条确认（远端要输入分支名，默认分支和当前分支不可删）；「遗留分支清理」子页可多选后一次确认批量移除工作树分支（只清 .agents/worktrees 下、干净、无 .ACTIVE-SESSION；未合并要额外勾选）。
+- 地图：任务地图票子 + 本地票子，标题栏带计数、与其它页同一套间距；问题：远端 issue 列表（搜索 / 指派给我 / 标签筛选）；PR：远端 PR 列表（打开 / 已关闭，11 态状态 chip / 筛选 / 计数 / 图例，行内看 `+A −D` 改动量与 head，标题可开 GitHub），详情看状态原因、审核轮次与本地多轮结论、文件改动、评审与评论（长文折叠、作者可点），审批 / 评论 / 关闭 / 重开 / 记录结论 / 忽略 / 拒绝只由用户点击，可把 PR 关联到本地任务、点「AI 审核」拉起只读审核会话审最新改动；分支：全部登记工作区的本地 / 远端分支，删除逐条确认（远端要输入分支名，默认分支和当前分支不可删）；「遗留分支清理」子页可多选后一次确认批量移除工作树分支（只清 .agents/worktrees 下、干净、无 .ACTIVE-SESSION；未合并要额外勾选）。
 - 邮箱：公共通知全文、标已读 / 归档；更多：窄屏快捷入口（地图 / PR / 分支 / 问题 / 设置，带计数）、同步队列、仓库探测；GitHub 账号与登录只在「设置」里。
 - 模型没有 PR 审批 / 评论 / 分支删除 / 批量清理的入口；推送、合并、发版仍由用户决定。
 
@@ -96,7 +97,7 @@ npm test
 
 加载方式：`lib/index.js` 是外壳，逻辑在 `lib/impl.js` 及其依赖里。改实现文件后 `/relay reload` 即可生效；`lib/client.js`（面板）改动由宿主热更新，刷新即见；改 `lib/index.js`、`package.json` 的 `dsh` 字段或 `cordis.patch.yml` 需要重启 DSH。
 
-面板缓存注意：只改 `lib/client.panel.js` 必须同步改一行 `lib/client.js` 并把 `PANEL_KIT` / `KIT_VERSION` 一起 +1。改侧栏正文时，外壳与每个 chunk 都按当前 KIT 命名（如 `lib/client.sidebar43.js`、`lib/client.sidebar.tasks43.js`），同步改 `lib/client.js` 的 `SIDEBAR_CHUNK` / `SIDEBAR_KIT`、外壳与全部 chunk 的 `KIT_VERSION`，并在 `client.js` touch 一行；KIT 一升就换文件名（`client.sidebar<新KIT>.js` / `client.sidebar.<name><新KIT>.js`），浏览器不会命中旧 chunk 的 immutable 缓存。只改某一个 chunk 也要整体 bump（外壳会校验每个 chunk 的 KIT_VERSION）。改过 `client.js` 本身后本机实测宿主会热更新，等一两秒或刷新即见（2026-11-07 DSH 进程未重启也生效）；只有宿主没开客户端热更新且刷新无效时才重启 DSH。
+面板缓存注意：只改 `lib/client.panel.js` 必须同步改一行 `lib/client.js` 并把 `PANEL_KIT` / `KIT_VERSION` 一起 +1。改侧栏正文时，外壳与每个 chunk 都按当前 KIT 命名（如 `lib/client.sidebar44.js`、`lib/client.sidebar.tasks44.js`），同步改 `lib/client.js` 的 `SIDEBAR_CHUNK` / `SIDEBAR_KIT`、外壳与全部 chunk 的 `KIT_VERSION`，并在 `client.js` touch 一行；KIT 一升就换文件名（`client.sidebar<新KIT>.js` / `client.sidebar.<name><新KIT>.js`），浏览器不会命中旧 chunk 的 immutable 缓存。只改某一个 chunk 也要整体 bump（外壳会校验每个 chunk 的 KIT_VERSION）。改过 `client.js` 本身后本机实测宿主会热更新，等一两秒或刷新即见（2026-11-07 DSH 进程未重启也生效）；只有宿主没开客户端热更新且刷新无效时才重启 DSH。
 
 ## 协作流程
 

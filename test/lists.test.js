@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SessionRelay } from '../lib/impl.js'
@@ -44,7 +44,11 @@ test('侧栏列表：PR / 问题按当前工作区仓库取，状态透传', asy
   try {
     const prs = await h.relay.prListView({ fromSession: 's1' })
     assert.equal(prs.repo, 'o/project')
-    assert.deepEqual(prs.items, [{ number: 7 }])
+    assert.equal(prs.items.length, 1)
+    assert.equal(prs.items[0].number, 7)
+    assert.equal(prs.items[0].review.state, 'unreviewed', '没有 GitHub 字段时保守显示未审核')
+    assert.equal(prs.reviewOrder[0], 'merged', '11 态顺序跟优先级链一致')
+    assert.equal(prs.reviewOrder.at(-1), 'unreviewed')
     const closed = await h.relay.prListView({ fromSession: 's1', state: 'closed', force: true })
     assert.equal(closed.state, 'closed')
     assert.deepEqual(calls, [['pr', 'o/project', { force: false, state: 'open' }], ['pr', 'o/project', { force: true, state: 'closed' }]])
@@ -214,5 +218,72 @@ test('用户写动作：PR 与分支删除必须 user=true，工作区路径来�
     await h.relay.branchAction({ action: 'fetch', workspaceId: 'ws1', user: true, fromSession: 's1' })
     assert.deepEqual(written[2], ['fetch', repo])
     await assert.rejects(() => h.relay.branchAction({ action: 'delete', workspaceId: 'nope', name: 'x', user: true }), /不在侧栏登记/)
+  } finally { await h.cleanup(); await rm(base, { recursive: true, force: true }) }
+})
+
+test('PR 审核 11 态：列表 / 详情接入本地记录、忽略拒绝与 AI 会话；记录结论要当前 head 并写审计', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'relay-ws-review-'))
+  const repo = await makeRepo(base, 'review')
+  const head1 = 'aaaaaaaa1111bbbbbbbb2222cccccccc3333dddddddd'
+  const item = {
+    number: 7, title: 'x', author: 'alice', url: 'https://github.com/o/review/pull/7', state: 'OPEN', draft: false,
+    merged: false, mergeStateStatus: 'BLOCKED', mergeable: 'UNKNOWN', reviewDecision: 'REVIEW_REQUIRED',
+    reviewRequests: [], latestReviews: [], checks: { total: 0, passing: 0, pending: 0, failing: 0, state: 'none' },
+    headSha: head1, head: 'fix/x', base: 'main', updatedAt: '2026-11-09T00:00:00Z', comments: 0, additions: 1, deletions: 1, changedFiles: 1
+  }
+  const lists = {
+    pullRequests: async () => ({ repo: 'o/review', state: 'open', items: [item], fetchedAt: 1 }),
+    pullRequestDetail: async () => ({ repo: 'o/review', detail: { ...item, reviews: [], comments: [], files: [] }, fetchedAt: 1 }),
+    issues: async () => ({ items: [] }),
+    branches: async () => ({ local: [], remote: [] })
+  }
+  const h = await makeRelay({ lists, workspaces: [{ id: 'ws1', title: '项目', path: repo, sessionIds: ['s1'] }] })
+  try {
+    // 未审核：没有记录 / 标记
+    let view = await h.relay.prListView({ fromSession: 's1' })
+    assert.equal(view.items[0].review.state, 'unreviewed')
+    assert.deepEqual(view.reviewOrder.slice(0, 3), ['merged', 'rejected', 'closed'])
+    // 忽略 / 拒绝：只写本地，可取消
+    await assert.rejects(() => h.relay.prFlag({ fromSession: 's1', number: 7, flag: 'ignored', on: true }), /只能由用户/)
+    await h.relay.prFlag({ fromSession: 's1', number: 7, flag: 'ignored', on: true, user: true })
+    view = await h.relay.prListView({ fromSession: 's1' })
+    assert.equal(view.items[0].review.state, 'ignored')
+    const rejected = await h.relay.prFlag({ fromSession: 's1', number: 7, flag: 'rejected', on: true, user: true })
+    assert.deepEqual(rejected.flags, { ignored: true, rejected: true })
+    await h.relay.prFlag({ fromSession: 's1', number: 7, flag: 'rejected', on: false, user: true })
+    await h.relay.prFlag({ fromSession: 's1', number: 7, flag: 'ignored', on: false, user: true })
+    // AI 审核会话 → 审批中
+    await h.relay.prReviews.setAiReview('o/review', 7, { sessionId: 'session-ai', headSha: head1, at: Date.now() })
+    view = await h.relay.prListView({ fromSession: 's1' })
+    assert.equal(view.items[0].review.state, 'reviewing')
+    assert.equal(view.items[0].local.aiReview.sessionId, 'session-ai')
+    // 记录结论：必须当前 head；AI 通过后状态变已审核（缺批准 / 不可合并）
+    await assert.rejects(() => h.relay.prReviewRecord({ fromSession: 's1', number: 7, verdict: 'pass', source: 'ai' }), /只能由用户/)
+    const done = await h.relay.prReviewRecord({ fromSession: 's1', number: 7, verdict: 'pass', source: 'ai', user: true })
+    assert.equal(done.round, 1)
+    assert.equal(done.record.headSha, head1)
+    view = await h.relay.prListView({ fromSession: 's1' })
+    assert.equal(view.items[0].review.state, 'reviewed', 'AI 通过但缺批准 / 不可合并 → 已审核')
+    assert.equal(view.items[0].review.round, 1)
+    const detail = await h.relay.prDetailView({ fromSession: 's1', number: 7 })
+    assert.equal(detail.review.state, 'reviewed')
+    assert.equal(detail.records.length, 1)
+    assert.equal(detail.records[0].source, 'ai')
+    assert.equal(detail.aiReview, null, '记录结论后清掉审批中标记')
+    // 「必须修」要写说明；当前 head 的必须修 → 已驳回
+    await assert.rejects(() => h.relay.prReviewRecord({ fromSession: 's1', number: 7, verdict: 'must-fix', source: 'ai', user: true }), /说明/)
+    const must = await h.relay.prReviewRecord({ fromSession: 's1', number: 7, verdict: 'must-fix', note: '修边界', source: 'user', user: true })
+    assert.equal(must.round, 2)
+    view = await h.relay.prListView({ fromSession: 's1' })
+    assert.equal(view.items[0].review.state, 'changes-requested')
+    // head 变了 → 需再审（重新探测到的旧 head 不同）
+    lists.pullRequestDetail = async () => ({ repo: 'o/review', detail: { ...item, headSha: 'ffffffff9999', reviews: [], comments: [], files: [] }, fetchedAt: 1 })
+    view = await h.relay.prListView({ fromSession: 's1' })
+    lists.pullRequests = async () => ({ repo: 'o/review', state: 'open', items: [{ ...item, headSha: 'ffffffff9999' }], fetchedAt: 2 })
+    view = await h.relay.prListView({ fromSession: 's1', force: true })
+    assert.equal(view.items[0].review.state, 'needs-rereview')
+    // 审计：只写本机 JSONL，不写 GitHub
+    const audit = await readFile(join(h.dir, 'pr-review-audit.jsonl'), 'utf8')
+    for (const event of ['pr-review-record', 'pr-ignored', 'pr-unignored', 'pr-rejected']) assert.ok(audit.includes(event), '缺少审计 ' + event)
   } finally { await h.cleanup(); await rm(base, { recursive: true, force: true }) }
 })
