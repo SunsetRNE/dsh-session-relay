@@ -136,3 +136,19 @@
 | 详情 | `client.sidebar.prs44.js` `PrDetail` | 状态 / 原因 / 轮次 / head / 本地多轮记录 / AI 会话链接；动作区记录结论、忽略 / 拒绝。 |
 
 **边界**：UI 不写 GitHub、不合并、不推送；结论与忽略 / 拒绝只在本机生效。旧快照没有 `review` 字段时保留原胶囊与筛选。
+
+
+## 11. 嵌入面板工作区切换（T20，2.4.5 未发布）
+
+目标：对话里的「协作」标签与左侧「会话监督」面板可以切到侧栏登记的任一工作区看只读监督数据；默认「跟随当前会话」，切走后不把当前会话视角混进别的看板。右侧边栏「无会话视角」与设置页原有的工作区选择保持不变。
+
+| 项 | 位置 | 说明 |
+| --- | --- | --- |
+| 视图范围 | `client.sidebar48.js` `boardQuery()` / `boardCacheKey()` | 跟随会话时仍是 `{ view:'board', session }`（与旧版完全一致）；跨工作区时 `{ view:'board', workspace }`，不夹带 session。看板缓存按「会话 / workspace:<id>」分开存，切来切回不串数据。 |
+| 下拉 | `client.sidebar48.js` `RelaySidebar` 顶栏 | 仅嵌入面板（`embedded === true`）且已登记工作区 >1 时出现；首项「跟随当前会话 · <本工作区>」，`registered: false` 不出现；跨工作区显示「正在查看其他工作区：只读」提示。 |
+| 本机记忆 | `usePersisted`（`dshaSv.ui.v1`） | 键 = `persistPrefix`（`embed-tab:` / `embed-panel:`）+ `viewWs.<会话 id 后缀>`；嵌入上下文 / 会话之间互不覆盖，也不读写无会话侧栏与设置页的 `dshaSr.workspace.v1`。 |
+| 安全回退 | `RelaySidebar` effect | 记住的工作区已删除 / 未登记，或已登记工作区只剩一个 → 清掉选择、回到跟随会话；旧服务端没有 `workspaces` 字段时不显示下拉、不报错，照旧按会话取数。 |
+| 只读边界 | `RelaySidebar` act 包装 + `LegacyBoardPage` `readOnly` | 跨工作区时写动作（回复、设 / 清主会话、认领 / 拉起 / 接手、退出协作、改版本线、邮箱已读 / 归档等）不发请求并说明原因；只读动作正常。概览 / 搜索额外页签通过 `workspaceId` + `readOnly` 跟随同一次选择。 |
+| 只读视图数据 | `impl.viewWorkspace()` + `prListView` / `prDetailView` / `issueListView` / `railCounts` | 显式 `workspaceId` 优先，未登记报 `no_workspace`；不传时仍按 `fromSession` 解析。路由 `GET ?view=…&workspace=<id>` 透传；不带该参数的老调用不变。 |
+
+**边界**：跨工作区是只读监督视角，不提供任何会改动会话或工作区的入口；切回「跟随当前会话」才恢复写动作。不 push、不合并、不 tag、不 Release、不安装。

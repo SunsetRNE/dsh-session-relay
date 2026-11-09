@@ -1,4 +1,4 @@
-// 右侧边栏「协作」标签：入口只登记类型与空壳，正文在 client.sidebar47.js 外壳 + 各页签 chunk 里按需加载
+// 右侧边栏「协作」标签：入口只登记类型与空壳，正文在 client.sidebar48.js 外壳 + 各页签 chunk 里按需加载
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -23,9 +23,9 @@ function fakeReact(states = []) {
   return React
 }
 
-// T13：侧栏按页签拆 chunk（KIT 46）。测试里把外壳 + 全部 chunk 一次性登记进同一加载器缓存，
+// T13：侧栏按页签拆 chunk（KIT 48）。测试里把外壳 + 全部 chunk 一次性登记进同一加载器缓存，
 // 这样 `mod.Xxx` 的原有断言不用改；按需 / 预取 / 失败回退另由「按需拆 chunk」用例直接测加载器。
-const KIT = 47
+const KIT = 48
 const CHUNK_NAMES = ['shared', 'sessions', 'tasks', 'handoff', 'map', 'prs', 'branches', 'issues', 'mail', 'more', 'settings']
 async function loadSidebar(React) {
   const { mod: shell, chunk } = await load('client.sidebar' + KIT + '.js', React)
@@ -138,21 +138,21 @@ test('入口：没有 ctx.inject（旧宿主）时不登记右侧边栏、不报
   assert.ok(!names.includes('sidebar.right.pane.tab'))
 })
 
-test('入口：空壳不同步加载正文；用 require.async 拉 client.sidebar47.js', async () => {
+test('入口：空壳不同步加载正文；用 require.async 拉 client.sidebar48.js', async () => {
   const React = fakeReact()
   let lazyFactory
   React.lazy = (factory) => { lazyFactory = factory; return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 47 }) })
-  assert.equal(mod.SIDEBAR_CHUNK, 'client.sidebar47.js', '入口指向按版本命名的 chunk')
+  const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve({ RelaySidebar: () => 'body', KIT_VERSION: 48 }) })
+  assert.equal(mod.SIDEBAR_CHUNK, 'client.sidebar48.js', '入口指向按版本命名的 chunk')
   const Tab = mod.makeSidebarTab({ t })
   assert.equal(asked.length, 0, '登记时不下载正文')
   const tree = React.createElement(Tab, { sessionId: 's' })
   assert.equal(tree.type, 'suspense')
   assert.equal(textOf(tree.props.fallback), 'sideLoading')
   const loaded = await lazyFactory()
-  assert.deepEqual(asked, ['./client.sidebar47.js'])
+  assert.deepEqual(asked, ['./client.sidebar48.js'])
   assert.equal(loaded.default(), 'body')
 })
 
@@ -167,9 +167,9 @@ test('入口：浏览器拿到不配套的旧正文时显示「请重开」，�
   const staleText = textOf(loaded.default())
   assert.ok(staleText.includes('sideStale'), '提示旧版')
   assert.ok(staleText.includes('refreshPage'), '给整页刷新按钮')
-  assert.ok(staleText.includes('v? → v47'), '显示实际 / 期望版本')
+  assert.ok(staleText.includes('v? → v48'), '显示实际 / 期望版本')
   const { mod: chunk } = await loadSidebar(fakeReact())
-  assert.equal(chunk.KIT_VERSION, 47, '正文与入口的 kit 版本一致')
+  assert.equal(chunk.KIT_VERSION, 48, '正文与入口的 kit 版本一致')
 })
 
 test('入口：宿主没有 require.async 时显示加载失败而不是崩溃', async () => {
@@ -201,16 +201,16 @@ function kitFor(opened = []) {
   }
 }
 
-// 父组件 18 个 useState：board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note、doneOpen、tab、settingsOpen、updatedIds、workItem、railCounts、wide、chunkTick（T13 按需 chunk 的触发位）
+// 父组件 19 个 useState：选中的工作区（T20 viewWs）、board 状态、tick、filter、selected、lineOpen、copied、quietOpen、tasksOpen、busy、note、doneOpen、tab、settingsOpen、updatedIds、workItem、railCounts、wide、chunkTick（T13 按需 chunk 的触发位）
 // extra 接在父组件之后，给卡片 / 交接页等子组件用
-const states = (board, { filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, workItem = undefined, extra = [] } = {}) =>
-  [{ board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, workItem, {}, false, 0, ...extra]
+const states = (board, { viewWs = null, filter = 'all', selected, quietOpen = false, tasksOpen = false, doneOpen = false, tab = 'sessions', settingsOpen = false, workItem = undefined, extra = [] } = {}) =>
+  [viewWs, { board, error: undefined, at: Date.now() }, 0, filter, selected, false, undefined, quietOpen, tasksOpen, false, undefined, doneOpen, tab, settingsOpen, undefined, workItem, {}, false, 0, ...extra]
 
-test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar47.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
+test('正文 chunk：登记为 dsh-session-relay 的 client.sidebar48.js；会话页有顶栏、9 个页签、计数、主会话、版本线与卡片', async () => {
   const React = fakeReact(states(sampleBoard()))
   const { mod, chunk } = await loadSidebar(React)
-  assert.equal(chunk, 'client.sidebar47.js')
-  assert.equal(mod.KIT_VERSION, 47)
+  assert.equal(chunk, 'client.sidebar48.js')
+  assert.equal(mod.KIT_VERSION, 48)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self', useTabInfo: () => ({ tab: { visible: true } }) })
   const text = textOf(tree)
   for (const part of ['dsha-session-relay', 'sideTabSessions', 'sideTabTasks', 'sideTabHandoff', 'sideTabMap', 'sideTabPr', 'sideTabBranches', 'sideTabIssues', 'sideTabMail', 'sideTabMore', '1sideCountAttention', '0sideCountActive', '1sideCountReady', 'mainIs', '@main', 'lineTitle', 'main=a8f06fe',
@@ -477,7 +477,7 @@ test('正文 chunk：还没数据时显示读取中；没有会话时不渲染',
 })
 
 test('正文 chunk：样式随标签注入，不在入口里；不用 backdrop-filter 和常驻动画', async () => {
-  const chunk = await readFile(new URL('../lib/client.sidebar47.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar48.js', import.meta.url), 'utf8')
   const entry = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   assert.ok(chunk.includes('.dshaSv_card'))
   assert.ok(!entry.includes('.dshaSv_'), '入口不带侧边栏样式')
@@ -509,7 +509,7 @@ test('正文 chunk：空白会话按服务端分类显示「空白」，不算�
   const open = textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' }))
   assert.ok(open.includes('catBlank') && open.includes('f4ada307'))
   assert.ok(!open.includes('status_working'))
-  const chunk = await readFile(new URL('../lib/client.sidebar47.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar48.js', import.meta.url), 'utf8')
   assert.ok(!chunk.includes('brand-primary'), '强调色用链接蓝，不用主题里接近黑白的 brand-primary')
 })
 
@@ -536,7 +536,7 @@ test('入口：设置页 / 协作标签 / 监督面板的正文在 client.panel.
   React.lazy = (factory) => { lazies.push(factory); return function LazyStub() { return 'lazy' } }
   React.Suspense = 'suspense'
   const asked = []
-  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 10 }
+  let reply = { make: () => ({ BoardPage: () => 'board', SessionRelaySettings: () => 'settings' }), KIT_VERSION: 11 }
   const { mod } = await load('client.js', React, (file) => { asked.push(file); return Promise.resolve(reply) })
   assert.equal(asked.length, 0, '载入入口时不下载正文')
   const tree = React.createElement(mod.BoardPage, { t })
@@ -602,18 +602,18 @@ test('正文 chunk：读取中给同高占位；数据旧了顶栏变色；已�
   assert.ok(JSON.stringify(loading).includes('dshaSv_skel'))
 
   const board = { ...sampleBoard(), entries: [...sampleBoard().entries, { sessionId: 'session-d1dddddd', label: '@d1', status: 'done', category: 'archived', state: 'idle' }] }
-  const old = [{ board, error: undefined, at: Date.now() - 40 * 60000 }, 0, 'all', undefined, false, undefined, false, false, false, undefined]
+  const old = [null, { board, error: undefined, at: Date.now() - 40 * 60000 }, 0, 'all', undefined, false, undefined, false, false, false, undefined]
   const React = fakeReact(old)
   const { mod } = await loadSidebar(React)
   const tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
   const json = JSON.stringify(tree)
   assert.ok(json.includes('"data-tone":"error"') && json.includes('sideMinAgo'), '超过 30 分钟：新鲜度圆点标红（时间在 title 里）')
   assert.ok(textOf(tree).includes('sideDoneN') && !textOf(tree).includes('@d1'), '已结束默认收起')
-  const React2 = fakeReact([...old.slice(0, 10), true])
+  const React2 = fakeReact([...old.slice(0, 11), true])
   const { mod: mod2 } = await loadSidebar(React2)
   assert.ok(textOf(React2.createElement(mod2.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })).includes('@d1'), '展开后列出')
 
-  const failing = [{ board: sampleBoard(), error: undefined, at: Date.now() }, 0, 'all', undefined, false, 'fail:session-main1234', false, false, false, undefined]
+  const failing = [null, { board: sampleBoard(), error: undefined, at: Date.now() }, 0, 'all', undefined, false, 'fail:session-main1234', false, false, false, undefined]
   const React3 = fakeReact(failing)
   const { mod: mod3 } = await loadSidebar(React3)
   const failed = React3.createElement(mod3.RelaySidebar, { kit: kitFor(), sessionId: 'session-self' })
@@ -629,10 +629,10 @@ test('正文 chunk：折叠与筛选记在本机，换会话 / 重开标签后�
     const { mod } = await loadSidebar(React)
     globalThis.window = { localStorage: { getItem: (key) => stored[key] ?? null, setItem: (key, value) => { stored[key] = value } } }
     stored['dshaSv.ui.v1'] = JSON.stringify({ quiet: true })
-    // 第一个 useState 是看板状态：用缓存里没有的会话 id，手动给看板
+    // T20 后第一个 useState 是选中的工作区，看板状态排第二：用缓存里没有的会话 id，手动给看板
     let call = 0
     const original = React.useState
-    React.useState = (initial) => (call++ === 0 ? [{ board: sampleBoard(), error: undefined, at: Date.now() }, () => {}] : original(initial))
+    React.useState = (initial) => (call++ === 1 ? [{ board: sampleBoard(), error: undefined, at: Date.now() }, () => {}] : original(initial))
     tree = React.createElement(mod.RelaySidebar, { kit: kitFor(), sessionId: 'session-other' })
     React.useState = original
   } finally { globalThis.window = saved }
@@ -1728,7 +1728,7 @@ test('更多页：窄屏快捷入口，点条目切页 / 打开设置', async ()
 })
 
 test('侧栏折叠：更多页快捷入口只在窄屏显示，隐藏规则用双类名', async () => {
-  const source = await readFile(new URL('../lib/client.sidebar47.js', import.meta.url), 'utf8')
+  const source = await readFile(new URL('../lib/client.sidebar48.js', import.meta.url), 'utf8')
   assert.ok(source.includes('.dshaSv_wide .dshaSv_foldOnly{display:none}'), '宽屏隐藏规则用宽度 class + 双类名')
   assert.ok(source.includes('ResizeObserver') && source.includes('dshaSv_wide'), '旋转后由 ResizeObserver 重新量宽度')
   const ReactR = fakeReact(states(sampleBoard()))
@@ -2486,7 +2486,7 @@ test('入口：空闲时预取侧栏 chunk，首次打开不用再等下载', as
     assert.equal(pending.length, 1, '登记侧栏时挂一次空闲预取')
     pending[0]()
     await new Promise((resolve) => setTimeout(resolve, 0))
-    assert.deepEqual(asked, ['./client.sidebar47.js'], '空闲时拉一次 chunk')
+    assert.deepEqual(asked, ['./client.sidebar48.js'], '空闲时拉一次 chunk')
     const Tab = mod.makeSidebarTab({ t })
     assert.equal(textOf(React.createElement(Tab, { sessionId: 's' })), 'body', '预取完成后直接渲染正文，不再闪 Suspense')
   } finally {
@@ -2760,7 +2760,7 @@ test('T14：设置页发布卡只读展示阶段条 / 事实 / 动作，复制�
   await copyButton.props.onClick()
   assert.deepEqual(copied, [data.command])
   // 源码边界：发布卡没有 push / tag / release 写动作，只有唤醒（wake）与复制
-  const chunk = await readFile(new URL('../lib/client.sidebar.settings47.js', import.meta.url), 'utf8')
+  const chunk = await readFile(new URL('../lib/client.sidebar.settings48.js', import.meta.url), 'utf8')
   assert.match(chunk, /function ReleaseBox/)
   assert.ok(!/git push|git tag|gh release create/.test(chunk.replace(/node --test[\s\S]*?release-notes[^\n]*/g, '')), '发布卡不跑 push / tag / Release 命令')
 })
@@ -2935,4 +2935,199 @@ test('T19 任务页：已结束列表本地展开/收起，「还有 N 条」是
   const overflow = findButton(truncatedTree, (label) => label.includes('sideDoneMore'))
   assert.ok(overflow !== undefined, '超出已加载的「还有 N 条」也是按钮')
   assert.ok(textOf(truncatedTree).includes('sideDoneMore'))
+})
+
+/* ---------------------------------------------------------------- T20 嵌入面板工作区切换 */
+
+const wsBoard = (extra = {}) => ({
+  ...sampleBoard(),
+  workspace: { id: 'ws-a', title: 'dsha-session-relay', path: '/root/dsha-session-relay' },
+  workspaces: [
+    { id: 'ws-a', title: 'A', path: '/a', hasMain: true },
+    { id: 'ws-b', title: 'B', path: '/b', hasMain: false },
+    { id: 'ws-gone', title: 'GONE', path: '/gone', hasMain: true, registered: false }
+  ],
+  ...extra
+})
+
+const withEffects = (React, calls, reply) => {
+  const realEffect = React.useEffect
+  React.useEffect = (fn) => { fn() }
+  return { React, realEffect, restore() { React.useEffect = realEffect } }
+}
+
+test('T20 嵌入面板：多个工作区时顶栏给下拉；跟随会话的看板请求不带 workspace（行为不变）', async () => {
+  const requests = []
+  const React = fakeReact(states(wsBoard()))
+  const realEffect = React.useEffect
+  const realInterval = globalThis.setInterval
+  const realTimeout = globalThis.setTimeout
+  React.useEffect = (fn) => { fn() }
+  globalThis.setInterval = () => 0
+  globalThis.setTimeout = () => 0
+  let text
+  try {
+    const { mod } = await loadSidebar(React)
+    const kit = { ...kitFor(), request: async (method, body, params) => { requests.push({ method, params }); return wsBoard() } }
+    const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self', embedded: true, persistPrefix: 'embed-tab:' })
+    text = textOf(tree)
+    assert.ok(JSON.stringify(tree).includes('"aria-label":"wsPick"'), '有工作区下拉')
+    assert.ok(text.includes('wsPickFollow') && text.includes('A') && text.includes('B'), '下拉含「跟随当前会话」与两个已登记工作区')
+    assert.ok(!text.includes('GONE'), '未登记的工作区不出现在选项里')
+  } finally {
+    await new Promise((resolve) => globalThis.setImmediate(resolve));
+    React.useEffect = realEffect
+    globalThis.setInterval = realInterval
+    globalThis.setTimeout = realTimeout
+    delete globalThis.document
+  }
+  const boardCall = requests.find((item) => item.params?.view === 'board')
+  assert.equal(boardCall.params.session, 'session-self', '默认跟随当前会话')
+  assert.equal(boardCall.params.workspace, undefined, '跟随模式不带 workspace（与现在完全一致）')
+})
+
+test('T20 嵌入面板：切到别的工作区后看板按 workspace 取数、不夹带 session；显示只读提示', async () => {
+  const requests = []
+  const React = fakeReact(states(wsBoard({ workspace: { id: 'ws-b', title: 'B', path: '/b' }, coordinator: null, entries: [] }), { viewWs: { id: 'ws-b', ownId: 'ws-a', ownTitle: 'A' } }))
+  const realEffect = React.useEffect
+  const realInterval = globalThis.setInterval
+  const realTimeout = globalThis.setTimeout
+  React.useEffect = (fn) => { fn() }
+  globalThis.setInterval = () => 0
+  globalThis.setTimeout = () => 0
+  let text = ''
+  let json = ''
+  try {
+    const { mod } = await loadSidebar(React)
+    const kit = { ...kitFor(), request: async (method, body, params) => { requests.push({ method, params }); return wsBoard({ workspace: { id: 'ws-b', title: 'B', path: '/b' }, coordinator: null, entries: [] }) } }
+    const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self', embedded: true, persistPrefix: 'embed-tab:' })
+    text = textOf(tree)
+    json = JSON.stringify(tree)
+    assert.ok(text.includes('wsViewOnly'), '跨工作区只读提示')
+    assert.ok(json.includes('"value":"ws-b"'), '下拉停在被选中的工作区')
+  } finally {
+    await new Promise((resolve) => globalThis.setImmediate(resolve));
+    React.useEffect = realEffect
+    globalThis.setInterval = realInterval
+    globalThis.setTimeout = realTimeout
+    delete globalThis.document
+  }
+  const boardCall = requests.find((item) => item.params?.view === 'board')
+  assert.equal(boardCall.params.workspace, 'ws-b')
+  assert.equal(boardCall.params.session, undefined, '跨工作区不夹带当前会话，避免把别的会话视角混进来')
+})
+
+test('T20 嵌入面板：选择按「嵌入上下文 + 会话」隔离记本机，右侧边栏不显示也不写', async () => {
+  const stored = {}
+  const suffixes = {}
+  const keyOf = (prefix, sessionId) => prefix + 'viewWs.' + sessionId.replace(/[^a-zA-Z0-9]/g, '').slice(-8)
+  const React = fakeReact(states(wsBoard()))
+  const realEffect = React.useEffect
+  const realInterval = globalThis.setInterval
+  const realTimeout = globalThis.setTimeout
+  React.useEffect = (fn) => { fn() }
+  globalThis.setInterval = () => 0
+  globalThis.setTimeout = () => 0
+  const savedWindow = globalThis.window
+  try {
+    const { mod } = await loadSidebar(React)
+    // load 会临时占用 / 删掉 globalThis.window：本机存储桩要在正文加载完之后再挂
+    globalThis.window = { localStorage: { getItem: (key) => (key === 'dshaSv.ui.v1' ? stored[key] ?? null : null), setItem: (key, value) => { stored[key] = value }, removeItem: () => {} } }
+    const kit = { ...kitFor(), request: async () => wsBoard() }
+    const tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self', embedded: true, persistPrefix: 'embed-tab:' })
+    const select = findNode(tree, (node) => node.type === 'select' && node.props?.['aria-label'] === 'wsPick')
+    assert.ok(select !== undefined, '有工作区下拉')
+    select.props.onChange({ target: { value: 'ws-b' } })
+    suffixes.tab = keyOf('embed-tab:', 'session-self')
+    const blob = JSON.parse(stored['dshaSv.ui.v1'])
+    assert.deepEqual(blob[suffixes.tab].id, 'ws-b')
+    assert.equal(blob[suffixes.tab].ownId, 'ws-a', '记住当前会话工作区，用于「切回跟随」判断')
+    // 对话协作标签与左侧监督面板前缀不同 → 各自一份；换会话又是另一份
+    assert.notEqual(keyOf('embed-tab:', 'session-self'), keyOf('embed-panel:', 'session-self'))
+    assert.notEqual(keyOf('embed-tab:', 'session-self'), keyOf('embed-tab:', 'session-other1'))
+    // 右侧边栏（embedded=false，无会话视角的旧侧栏）不挂下拉
+    const right = textOf(React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self' }))
+    assert.ok(!right.includes('wsPickFollow'), '右侧边栏保持原样')
+  } finally {
+    await new Promise((resolve) => globalThis.setImmediate(resolve));
+    React.useEffect = realEffect
+    globalThis.setInterval = realInterval
+    globalThis.setTimeout = realTimeout
+    delete globalThis.document
+    globalThis.window = savedWindow
+    delete globalThis.window
+  }
+})
+
+test('T20 嵌入面板：跨工作区时写动作不发请求并说明原因（只读）', async () => {
+  const posted = []
+  const React = fakeReact(states(wsBoard({ asks: [{ id: 'a1', question: '选哪个', options: ['lint', 'adb'], byLabel: '@w1' }] }), { viewWs: { id: 'ws-b' } }))
+  const realEffect = React.useEffect
+  const realInterval = globalThis.setInterval
+  const realTimeout = globalThis.setTimeout
+  React.useEffect = (fn) => { fn() }
+  globalThis.setInterval = () => 0
+  globalThis.setTimeout = () => 0
+  let tree
+  try {
+    const { mod } = await loadSidebar(React)
+    const kit = { ...kitFor(), request: async (method, body) => { if (method === 'POST') posted.push(body); return wsBoard() } }
+    tree = React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self', embedded: true, persistPrefix: 'embed-tab:' })
+    assert.ok(textOf(tree).includes('wsViewOnly'), '有只读提示')
+    await findButton(tree, (label) => label === 'lint').props.onClick()
+  } finally {
+    await new Promise((resolve) => globalThis.setImmediate(resolve));
+    React.useEffect = realEffect
+    globalThis.setInterval = realInterval
+    globalThis.setTimeout = realTimeout
+    delete globalThis.document
+  }
+  assert.deepEqual(posted, [], '跨工作区不发出写请求')
+  const t = (key) => key
+  assert.ok(t('wsReadOnly').length > 0)
+})
+
+test('T20 嵌入面板：概览 / 搜索额外页签收到同一个工作区与只读标记（切回跟随时仍按会话）', async () => {
+  const seen = []
+  const extraTabs = [{ key: 'overview', render: (ctx) => { seen.push(ctx); return null } }]
+  const React = fakeReact(states(wsBoard({ workspace: { id: 'ws-b', title: 'B', path: '/b' }, entries: [] }), { viewWs: { id: 'ws-b', ownId: 'ws-a' }, tab: 'overview' }))
+  const realEffect = React.useEffect
+  const realInterval = globalThis.setInterval
+  const realTimeout = globalThis.setTimeout
+  React.useEffect = (fn) => { fn() }
+  globalThis.setInterval = () => 0
+  globalThis.setTimeout = () => 0
+  try {
+    const { mod } = await loadSidebar(React)
+    const kit = { ...kitFor(), request: async () => wsBoard({ workspace: { id: 'ws-b', title: 'B', path: '/b' }, entries: [] }) }
+    React.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self', embedded: true, persistPrefix: 'embed-tab:', extraTabs })
+  } finally {
+    await new Promise((resolve) => globalThis.setImmediate(resolve));
+    React.useEffect = realEffect
+    globalThis.setInterval = realInterval
+    globalThis.setTimeout = realTimeout
+  }
+  assert.equal(seen.length, 1, '激活的额外页签被渲染一次')
+  assert.deepEqual(seen[0], { workspaceId: 'ws-b', sessionId: undefined, readOnly: true })
+
+  // 跟随模式：额外页签还是按当前会话取数，只读关掉（与 2.4.4 一致）
+  const seen2 = []
+  const React2 = fakeReact(states(wsBoard(), { tab: 'overview' }))
+  const realEffect2 = React2.useEffect
+  const realInterval2 = globalThis.setInterval
+  const realTimeout2 = globalThis.setTimeout
+  React2.useEffect = (fn) => { fn() }
+  globalThis.setInterval = () => 0
+  globalThis.setTimeout = () => 0
+  try {
+    const { mod } = await loadSidebar(React2)
+    const kit = { ...kitFor(), request: async () => wsBoard() }
+    React2.createElement(mod.RelaySidebar, { kit, sessionId: 'session-self', embedded: true, persistPrefix: 'embed-tab:', extraTabs: [{ key: 'overview', render: (ctx) => { seen2.push(ctx); return null } }] })
+  } finally {
+    await new Promise((resolve) => globalThis.setImmediate(resolve));
+    React2.useEffect = realEffect2
+    globalThis.setInterval = realInterval2
+    globalThis.setTimeout = realTimeout2
+  }
+  assert.deepEqual(seen2[0], { workspaceId: undefined, sessionId: 'session-self', readOnly: false })
 })

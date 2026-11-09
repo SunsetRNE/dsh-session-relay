@@ -1487,3 +1487,97 @@ test('面板看板：可合并卡片给流水线与批准 / 稍后 / 打回；�
   assert.ok(overview.includes('mergeSummary'))
   assert.match(overview, /mergePending|mergeSummary/, '摘要里有可合并 / 已批准 / 已合入计数')
 })
+
+/* ---------------------------------------------------------------- T20 跨工作区只读视图 */
+
+const findNodeIn = (node, pred) => {
+  if (node === null || node === undefined || typeof node !== 'object') return undefined
+  if (Array.isArray(node)) { for (const child of node) { const hit = findNodeIn(child, pred); if (hit !== undefined) return hit } return undefined }
+  if (pred(node)) return node
+  return findNodeIn(node.children, pred)
+}
+
+test('T20 只读视图带 workspace：PR / 详情 / issue / 页签计数都按显式工作区取数', async () => {
+  const calls = []
+  const relay = {
+    ready: async () => {},
+    prListView: async (options) => { calls.push(['pr', options]); return {} },
+    prDetailView: async (options) => { calls.push(['detail', options]); return {} },
+    issueListView: async (options) => { calls.push(['issue', options]); return {} },
+    railCounts: async (options) => { calls.push(['counts', options]); return {} }
+  }
+  const handler = createHandler({ requestRejection: () => undefined }, relay)
+  const get = async (query) => {
+    const req = fakeReq('GET')
+    req.url = '/api/dsha-session-relay?' + query
+    const res = fakeRes()
+    await handler(req, res)
+    assert.equal(res.status, 200)
+    return res.body
+  }
+  await get('view=pr-list&session=s1&workspace=ws-b')
+  await get('view=pr-detail&session=s1&workspace=ws-b&number=7')
+  await get('view=issue-list&workspace=ws-b')
+  await get('view=rail-counts&session=s1&workspace=ws-b')
+  // 不带 workspace 的老调用：参数里不出现 workspaceId，行为不变
+  await get('view=pr-list&session=s1')
+  assert.deepEqual(calls[0][1], { fromSession: 's1', workspaceId: 'ws-b', force: false, state: 'open' })
+  assert.equal(calls[1][1].workspaceId, 'ws-b')
+  assert.equal(calls[1][1].number, 7)
+  assert.deepEqual(calls[2][1], { fromSession: undefined, workspaceId: 'ws-b', force: false })
+  assert.deepEqual(calls[3][1], { fromSession: 's1', workspaceId: 'ws-b' })
+  assert.equal(calls[4][1].workspaceId, undefined, '旧调用不加 workspaceId')
+})
+
+test('T20 viewWorkspace：显式工作区优先；未登记给明确错误；不传时保持按会话解析', async () => {
+  const h = await makeRelay()
+  try {
+    h.relay.ctx.workspaceRegistry = { list: () => [{ id: 'ws-b', title: 'B', path: h.dir, sessionIds: ['session-x'] }] }
+    assert.equal(h.relay.viewWorkspace({ workspaceId: 'ws-b' }).id, 'ws-b')
+    assert.throws(() => h.relay.viewWorkspace({ workspaceId: 'nope' }), /没登记/)
+    assert.equal(h.relay.viewWorkspace({ fromSession: 'session-x' }).id, 'ws-b', '不传 workspaceId 时还是当前会话工作区')
+  } finally { await h.cleanup() }
+})
+
+test('T20 面板：外层指定工作区时看板按 workspace 取数；跨工作区写动作不发请求', async () => {
+  const { React } = fakeReact()
+  const urls = []
+  const posts = []
+  const board = {
+    scope: 'workspace', hiddenByScope: 0, coordinator: null, line: null, self: null,
+    workspace: { id: 'ws-b', title: 'B', path: '/b' }, workspaces: [{ id: 'ws-a', title: 'A', path: '/a' }, { id: 'ws-b', title: 'B', path: '/b' }],
+    entries: [], others: [], othersTotal: 0, restart: { phase: 'off', text: '', busy: [] }, version: {}, defaultCwd: '/b',
+    asks: [{ id: 'a1', question: '选哪个', options: ['lint', 'adb'], byLabel: '@w1' }]
+  }
+  globalThis.fetch = async (url, init) => {
+    urls.push(String(url))
+    if (init?.method === 'POST') posts.push(typeof init.body === 'string' ? init.body : '')
+    return { ok: true, status: 200, json: async () => ({ ok: true, entries: [] }) }
+  }
+  const original = React.useEffect
+  const realInterval = globalThis.setInterval
+  React.useEffect = (fn) => { fn() }
+  globalThis.setInterval = () => 0
+  let tree
+  try {
+    const mod = await loadClient(React)
+    const store = { subscribe: () => () => {}, getSnapshot: () => ({ marks: {}, aliases: {}, attention: 0, coordinator: null, restart: 'off' }), refresh: async () => {} }
+    const realState = React.useState
+    let calls = 0
+    React.useState = (initial) => (++calls === 2 ? [board, () => {}] : realState(initial))
+    try {
+      tree = React.createElement(mod.LegacyBoardPage, { t: (key) => key, openSession() {}, marksStore: store, workspaceId: 'ws-b', readOnly: true, embedded: true, initialPage: 'overview' })
+    } finally { React.useState = realState }
+  } finally {
+    React.useEffect = original
+    globalThis.setInterval = realInterval
+    delete globalThis.fetch
+  }
+  const boardUrl = new URL(urls.find((url) => url.includes('view=board')), 'http://local')
+  assert.equal(boardUrl.searchParams.get('workspace'), 'ws-b', '看板按外层选中的工作区取数')
+  assert.equal(boardUrl.searchParams.get('session'), null, '跨工作区不夹带当前会话')
+  const lint = findNodeIn(tree, (node) => node.type === 'button' && textOf(node.children) === 'lint')
+  assert.ok(lint !== undefined, '概览里有提问选项按钮')
+  await lint.props.onClick()
+  assert.deepEqual(posts, [], '只读模式不发写请求')
+})
